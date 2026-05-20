@@ -1,0 +1,75 @@
+{
+  "llm": {
+    "active": "openai",
+    "providers": {
+      "cuhk": {
+        "label": "CUHK AI",
+        "defaultModel": "gpt-4o",
+        "defaultBaseUrl": "https://ai.cuhk.edu.cn/open/v1",
+        "builtinKeySupported": false,
+        "builtinKeyEnvNames": []
+      },
+      "qwen": {
+        "label": "通义千问",
+        "defaultModel": "qwen-max",
+        "defaultBaseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "builtinKeySupported": false,
+        "builtinKeyEnvNames": ["QWEN_API_KEY"]
+      },
+      "openai": {
+        "label": "OpenAI",
+        "defaultModel": "gpt-4o",
+        "defaultBaseUrl": "https://api.openai.com/v1",
+        "builtinKeySupported": false,
+        "builtinKeyEnvNames": ["OPENAI_API_KEY"]
+      },
+      "deepseek": {
+        "label": "DeepSeek",
+        "defaultModel": "deepseek-chat",
+        "defaultBaseUrl": "https://api.deepseek.com/v1",
+        "builtinKeySupported": false,
+        "builtinKeyEnvNames": ["DEEPSEEK_API_KEY"]
+      },
+      "anthropic": {
+        "label": "Anthropic Claude",
+        "defaultModel": "claude-3-5-sonnet-20241022",
+        "defaultBaseUrl": "https://api.anthropic.com/v1",
+        "builtinKeySupported": false,
+        "builtinKeyEnvNames": ["ANTHROPIC_API_KEY"]
+      },
+      "custom": {
+        "label": "自定义",
+        "defaultModel": "",
+        "defaultBaseUrl": "",
+        "builtinKeySupported": false,
+        "builtinKeyEnvNames": []
+      }
+    }
+  },
+  "image": {
+    "active": "openai-image",
+    "providers": {
+      "nanobanana": {
+        "label": "Nanobanana",
+        "defaultModel": "nanobanana-v1",
+        "defaultEndpoint": "",
+        "builtinKeySupported": false,
+        "builtinKeyEnvNames": ["NANOBANANA_API_KEY"]
+      },
+      "openai-image": {
+        "label": "OpenAI Image",
+        "defaultModel": "dall-e-3",
+        "defaultEndpoint": "https://api.openai.com/v1/images/generations",
+        "builtinKeySupported": false,
+        "builtinKeyEnvNames": ["OPENAI_API_KEY"]
+      },
+      "custom": {
+        "label": "自定义图像",
+        "defaultModel": "",
+        "defaultEndpoint": "",
+        "builtinKeySupported": false,
+        "builtinKeyEnvNames": []
+      }
+    }
+  }
+}

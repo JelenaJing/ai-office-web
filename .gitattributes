@@ -1,0 +1,18 @@
+# Mark Office/PDF binary files so git never reports mode changes (chmod) as diffs.
+# These are generated outputs; content diffs are not useful in code review.
+*.pptx  binary
+*.docx  binary
+*.xlsx  binary
+*.xls   binary
+*.pdf   binary
+
+# Normalise line endings for text files checked in on different platforms.
+* text=auto
+*.ts  text eol=lf
+*.tsx text eol=lf
+*.js  text eol=lf
+*.jsx text eol=lf
+*.json text eol=lf
+*.md  text eol=lf
+*.css text eol=lf
+*.html text eol=lf

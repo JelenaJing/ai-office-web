@@ -3,12 +3,19 @@ node_modules/
 
 # build outputs
 dist/
-build/
 release/
 out/
 .vite/
 .turbo/
 .cache/
+dist-web/
+dist-electron/
+server/dist/
+coverage/
+.tmp-smoke/
+
+# build config exception — ai-config.json is needed for vite build
+!build/ai-config.json
 
 # env
 .env
@@ -17,12 +24,22 @@ out/
 
 # logs
 *.log
+server/logs/
 
 # runtime data
 data/
 uploads/
 artifacts/
 logs/
+server/data/
+server/uploads/
+server/artifacts/
+
+# temp / scratch files
+temp/
+*.pid
+*.tmp
+*.tsbuildinfo
 
 # workflow service runtime db
 aioffice-workflow-service/data/*
@@ -35,3 +52,7 @@ aioffice-workflow-service/data/*
 *.sqlite
 *.sqlite3
 *.db
+
+# test workspace run data (generated outputs, not source)
+.test-workspace*/
+.debug-template-slots/
