@@ -127,18 +127,69 @@ export function installWebElectronAPIShim(): void {
     writeOoxmlPackage: () => Promise.resolve({ success: true }),
 
     /* ── Workspaces ── */
-    listWorkspaces: () => Promise.resolve([]),
-    createWorkspace: () => Promise.resolve({ success: true, path: '', name: '' }),
-    renameWorkspace: () => Promise.resolve({ success: true, path: '', name: '' }),
-    registerWorkspace: () => Promise.resolve({ success: true, path: '', name: '' }),
-    getWorkspaceTree: () => Promise.resolve([]),
+    listWorkspaces: async () => {
+      try {
+        const res = await fetch('/api/workspaces')
+        const data = await res.json() as { workspaces: unknown[] }
+        return data.workspaces ?? []
+      } catch {
+        return []
+      }
+    },
+    createWorkspace: async (name: string, _parentDir?: string) => {
+      const res = await fetch('/api/workspaces', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      })
+      const data = await res.json() as { success: boolean; path: string; name: string; error?: string }
+      if (!res.ok || !data.success) throw new Error(data.error ?? '创建工作区失败')
+      return { success: true as const, path: data.path, name: data.name }
+    },
+    renameWorkspace: async (wsPath: string, nextName: string) => {
+      const res = await fetch('/api/workspaces/rename', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: wsPath, name: nextName }),
+      })
+      const data = await res.json() as { success: boolean; path: string; name: string; error?: string }
+      if (!res.ok || !data.success) throw new Error(data.error ?? '重命名失败')
+      return { success: true as const, path: data.path, name: data.name }
+    },
+    registerWorkspace: async (wsPath: string) => {
+      const res = await fetch('/api/workspaces/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: wsPath }),
+      })
+      const data = await res.json() as { success: boolean; path: string; name: string; error?: string }
+      if (!res.ok || !data.success) throw new Error(data.error ?? '注册工作区失败')
+      return { success: true as const, path: data.path, name: data.name }
+    },
+    getWorkspaceTree: async (wsPath: string) => {
+      try {
+        const res = await fetch(`/api/workspaces/tree?path=${encodeURIComponent(wsPath)}`)
+        return await res.json() as unknown[]
+      } catch {
+        return []
+      }
+    },
     readWorkspaceDocumentSchema: () =>
       Promise.resolve({ success: true, source: 'empty', jsonPath: '', legacySourcePath: null, document: {}, compatHtml: '', displayName: '' }),
     saveWorkspaceDocumentSchema: () =>
       Promise.resolve({ success: true, jsonPath: '', document: {}, compatHtml: '', displayName: '', resourceCount: 0 }),
     saveGeneratedPaperJsonArtifact: () =>
       Promise.resolve({ success: true, jsonPath: '', relativePath: '', document: {} }),
-    deleteWorkspace: okResult(),
+    deleteWorkspace: async (wsPath: string) => {
+      try {
+        await fetch('/api/workspaces', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: wsPath }),
+        })
+      } catch { /* best-effort */ }
+      return { success: true as const }
+    },
     detectProjectStructure: () => Promise.resolve({ isProject: false }),
     createWorkspaceFolder: () => Promise.resolve({ success: true, path: '' }),
     createWorkspaceFile: () => Promise.resolve({ success: true, path: '' }),

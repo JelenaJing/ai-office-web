@@ -3,6 +3,7 @@ import cors from 'cors'
 import authRouter from './routes/auth'
 import skillsRouter from './routes/skills'
 import artifactsRouter from './routes/artifacts'
+import workspacesRouter from './routes/workspaces'
 
 const app = express()
 const PORT = Number(process.env.PORT ?? 3001)
@@ -22,6 +23,7 @@ app.use(express.json())
 app.use('/api/auth', authRouter)
 app.use('/api/skills', skillsRouter)
 app.use('/api/artifacts', artifactsRouter)
+app.use('/api/workspaces', workspacesRouter)
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() })
