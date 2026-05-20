@@ -1,0 +1,37 @@
+# dependencies
+node_modules/
+
+# build outputs
+dist/
+build/
+release/
+out/
+.vite/
+.turbo/
+.cache/
+
+# env
+.env
+.env.local
+.env.*.local
+
+# logs
+*.log
+
+# runtime data
+data/
+uploads/
+artifacts/
+logs/
+
+# workflow service runtime db
+aioffice-workflow-service/data/*
+!aioffice-workflow-service/data/.gitkeep
+
+# database files
+*.mv.db
+*.trace.db
+*.lock.db
+*.sqlite
+*.sqlite3
+*.db
