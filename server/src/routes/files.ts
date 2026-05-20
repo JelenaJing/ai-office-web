@@ -95,6 +95,27 @@ router.get('/', async (req, res) => {
   return res.json({ files: index.files })
 })
 
+// ── Filename normalization ────────────────────────────────────────────────────
+// multer/busboy often decodes UTF-8 filename bytes as latin1.
+// Try latin1→utf8 repair, but only accept the repaired value when it looks better.
+
+function normalizeUploadedFilename(name: string): string {
+  if (!name) return 'unnamed'
+
+  const repaired = Buffer.from(name, 'latin1').toString('utf8')
+  const hasMojibake = /[ÃÂ\ufffd]|[\u00c0-\u00ff]/.test(name)
+  const repairedHasReplacement = repaired.includes('\ufffd')
+
+  const candidate = hasMojibake && !repairedHasReplacement ? repaired : name
+
+  const base = candidate
+    .replace(/[\\/]/g, '_')
+    .replace(/[\x00-\x1f\x7f]/g, '')
+    .trim()
+
+  return base || 'unnamed'
+}
+
 // ── POST /api/files/upload ────────────────────────────────────────────────────
 
 router.post('/upload', upload.single('file'), async (req, res) => {
@@ -102,7 +123,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     return res.status(400).json({ success: false, error: '未收到文件（字段名应为 "file"）' })
   }
 
-  const orig = req.file.originalname
+  const orig = normalizeUploadedFilename(req.file.originalname)
   const ext = path.extname(orig).slice(1).toLowerCase()
   if (!ALLOWED_EXTS[ext]) {
     return res.status(400).json({
