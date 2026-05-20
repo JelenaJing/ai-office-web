@@ -11,8 +11,8 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import styled from 'styled-components'
-import { FolderOpen, Sparkles, BookOpen, Download, Trash2 } from 'lucide-react'
-import MyFilesView, { authHeaders } from '../components/resource/MyFilesView'
+import { FolderOpen, Sparkles, BookOpen, Download } from 'lucide-react'
+import MyFilesView, { authHeaders, downloadWithAuth } from '../components/resource/MyFilesView'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -143,14 +143,7 @@ function ArtifactsTab() {
   useEffect(() => { void fetchArtifacts() }, [fetchArtifacts])
 
   const handleDownload = (artifact: Artifact) => {
-    const a = document.createElement('a')
-    a.href = `/api/artifacts/${artifact.id}/download`
-    a.download = artifact.title
-    a.target = '_blank'
-    a.rel = 'noopener noreferrer'
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
+    void downloadWithAuth(`/api/artifacts/${artifact.id}/download`, artifact.title)
   }
 
   if (loading) {

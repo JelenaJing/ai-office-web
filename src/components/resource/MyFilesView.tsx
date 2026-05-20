@@ -34,6 +34,21 @@ export function authHeaders(): Record<string, string> {
   return t ? { Authorization: `Bearer ${t}` } : {}
 }
 
+/** Fetch a protected URL with Bearer token, then trigger a browser download. */
+export async function downloadWithAuth(url: string, filename: string): Promise<void> {
+  const res = await fetch(url, { headers: authHeaders() })
+  if (!res.ok) throw new Error(`下载失败 (${res.status})`)
+  const blob = await res.blob()
+  const objectUrl = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = objectUrl
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(objectUrl)
+}
+
 function fmtSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
@@ -122,14 +137,7 @@ export default function MyFilesView({ fullHeight }: MyFilesViewProps) {
   }
 
   const handleDownload = (f: FileEntry) => {
-    const a = document.createElement('a')
-    a.href = `/api/files/${f.id}/download`
-    a.download = f.name
-    a.target = '_blank'
-    a.rel = 'noopener noreferrer'
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
+    void downloadWithAuth(`/api/files/${f.id}/download`, f.name)
   }
 
   return (
