@@ -8,7 +8,7 @@
  * All requests carry Authorization: Bearer <token>.
  */
 
-import { ACCOUNT_CENTER_URL } from '../accountCenterConfig'
+import { getAccountCenterBaseUrl } from '../accountCenterConfig'
 import type { WorkActivityLog } from '../modules/chat/types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -45,7 +45,7 @@ async function accountFetch<T>(
   token: string,
   options?: RequestInit,
 ): Promise<{ response: Response; data: T }> {
-  const url = `${ACCOUNT_CENTER_URL}${endpoint}`
+  const url = `${getAccountCenterBaseUrl()}${endpoint}`
   const response = await fetch(url, {
     ...options,
     headers: {

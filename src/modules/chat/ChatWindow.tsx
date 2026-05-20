@@ -7,7 +7,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useInternalSession } from '../../contexts/InternalAccountContext'
 import { useHasPermission } from '../../utils/permissions'
-import { ACCOUNT_CENTER_URL } from '../../accountCenterConfig'
+import { getAccountCenterBaseUrl } from '../../accountCenterConfig'
 import {
   getConversations,
   createConversation,
@@ -1204,7 +1204,7 @@ export const ChatWindow: React.FC<{ onClose: () => void; inline?: boolean }> = (
   const downloadAttachment = useCallback(async (att: ChatAttachment) => {
     const url = att.downloadUrl.startsWith('http')
       ? att.downloadUrl
-      : `${ACCOUNT_CENTER_URL}${att.downloadUrl}`
+      : `${getAccountCenterBaseUrl()}${att.downloadUrl}`
     try {
       const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -1225,7 +1225,7 @@ export const ChatWindow: React.FC<{ onClose: () => void; inline?: boolean }> = (
     if (m.attachment) return m.attachment
     // Fallback: build from attachmentId if the attachment block is missing
     if (m.attachmentId) {
-      const base = `${ACCOUNT_CENTER_URL}/api/chat/attachments/${m.attachmentId}`
+      const base = `${getAccountCenterBaseUrl()}/api/chat/attachments/${m.attachmentId}`
       return { id: m.attachmentId, fileName: '附件', mimeType: 'application/octet-stream', sizeBytes: 0, downloadUrl: base }
     }
     return null

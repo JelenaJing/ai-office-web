@@ -1,8 +1,8 @@
-import { ACCOUNT_CENTER_URL } from '../../accountCenterConfig'
+import { getAccountCenterBaseUrl } from '../../accountCenterConfig'
 import type { ChatConversation, ChatContact, ChatMessage, ChatAttachment } from './types'
 
 function chatUrl(endpoint: string): string {
-  return `${ACCOUNT_CENTER_URL}${endpoint}`
+  return `${getAccountCenterBaseUrl()}${endpoint}`
 }
 
 function methodOf(options?: RequestInit): string {
@@ -59,11 +59,11 @@ async function apiFetch<T>(endpoint: string, token: string, options?: RequestIni
   return res.json() as Promise<T>
 }
 
-/** Ensure a URL is absolute. Prepends ACCOUNT_CENTER_URL if the URL starts with '/'. */
+/** Ensure a URL is absolute. Prepends AccountCenter base URL if the URL starts with '/'. */
 function ensureAbsoluteUrl(url: string | null | undefined): string {
   if (!url || url.trim() === '') return ''
   if (url.startsWith('http://') || url.startsWith('https://')) return url
-  if (url.startsWith('/')) return `${ACCOUNT_CENTER_URL}${url}`
+  if (url.startsWith('/')) return `${getAccountCenterBaseUrl()}${url}`
   return url
 }
 
@@ -153,10 +153,10 @@ export function normalizeChatMessage(raw: unknown): ChatMessage {
     // Generate fallback URLs from attachment ID if server didn't include them
     const previewUrl = rawPreview != null && String(rawPreview).trim() !== ''
       ? ensureAbsoluteUrl(String(rawPreview))
-      : attId ? `${ACCOUNT_CENTER_URL}/api/chat/attachments/${attId}/preview` : undefined
+      : attId ? `${getAccountCenterBaseUrl()}/api/chat/attachments/${attId}/preview` : undefined
     const downloadUrl = rawDownload != null && String(rawDownload).trim() !== ''
       ? ensureAbsoluteUrl(String(rawDownload))
-      : attId ? `${ACCOUNT_CENTER_URL}/api/chat/attachments/${attId}/download` : ''
+      : attId ? `${getAccountCenterBaseUrl()}/api/chat/attachments/${attId}/download` : ''
     attachment = {
       id: attId,
       fileName: String(a.fileName ?? a.file_name ?? ''),
@@ -171,10 +171,10 @@ export function normalizeChatMessage(raw: unknown): ChatMessage {
     const rawDownload = r.downloadUrl ?? r.download_url
     const previewUrl = rawPreview != null && String(rawPreview).trim() !== ''
       ? ensureAbsoluteUrl(String(rawPreview))
-      : attId ? `${ACCOUNT_CENTER_URL}/api/chat/attachments/${attId}/preview` : undefined
+      : attId ? `${getAccountCenterBaseUrl()}/api/chat/attachments/${attId}/preview` : undefined
     const downloadUrl = rawDownload != null && String(rawDownload).trim() !== ''
       ? ensureAbsoluteUrl(String(rawDownload))
-      : attId ? `${ACCOUNT_CENTER_URL}/api/chat/attachments/${attId}/download` : ''
+      : attId ? `${getAccountCenterBaseUrl()}/api/chat/attachments/${attId}/download` : ''
     attachment = {
       id: attId,
       fileName: String(r.file_name ?? r.fileName ?? ''),
@@ -227,7 +227,7 @@ export function uploadChatAttachment(
     if (optionalText?.trim()) form.append('optionalText', optionalText.trim())
 
     const xhr = new XMLHttpRequest()
-    xhr.open('POST', `${ACCOUNT_CENTER_URL}/api/chat/conversations/${conversationId}/attachments`)
+    xhr.open('POST', `${getAccountCenterBaseUrl()}/api/chat/conversations/${conversationId}/attachments`)
     xhr.setRequestHeader('Authorization', `Bearer ${token}`)
 
     if (onProgress) {
@@ -263,7 +263,7 @@ export function uploadChatAttachment(
 export async function getChatContacts(token: string): Promise<ChatContact[]> {
   let res: Response
   try {
-    res = await fetch(`${ACCOUNT_CENTER_URL}/api/chat/contacts`, {
+    res = await fetch(`${getAccountCenterBaseUrl()}/api/chat/contacts`, {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,

@@ -6,7 +6,7 @@
  * - 网络错误包含地址信息（方便排查），但不包含凭据
  */
 
-import { ACCOUNT_CENTER_URL } from '../accountCenterConfig'
+import { getAccountCenterBaseUrl } from '../accountCenterConfig'
 import type { InternalAccountUser, ServiceBinding } from '../types/internalAccount'
 import type {
   PersonProfile,
@@ -26,10 +26,12 @@ import type {
 /* ---------- 内部工具 ---------- */
 
 function serverLabel(): string {
+  const url = getAccountCenterBaseUrl()
+  if (!url && typeof window !== 'undefined') return window.location.host
   try {
-    return new URL(ACCOUNT_CENTER_URL).host
+    return new URL(url).host
   } catch {
-    return ACCOUNT_CENTER_URL
+    return url || 'API server'
   }
 }
 
@@ -58,7 +60,10 @@ async function request<T>(
   options: RequestInit = {},
   timeoutMs = 10000,
 ): Promise<T> {
-  const url = `${ACCOUNT_CENTER_URL}${path}`
+  // Evaluate at call-time so the web shim (installed before any React render)
+  // is visible and returns '' for same-origin routing.
+  const baseUrl = getAccountCenterBaseUrl()
+  const url = `${baseUrl}${path}`
   const response = await fetchWithTimeout(
     url,
     {
