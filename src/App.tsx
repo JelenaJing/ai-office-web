@@ -1102,6 +1102,12 @@ function WriterWorkspaceApp({ onLogout }: { onLogout: () => void }) {
   }
 
   if (!activeWorkspacePath) {
+    // In web mode, auto-init is running (useEffect in WorkspaceContext).
+    // Show a spinner instead of WorkspaceGate to avoid the selection screen.
+    const isWebShim = (window.electronAPI as { __isWebShim?: boolean } | undefined)?.__isWebShim
+    if (isWebShim) {
+      return <AppShell><Launcher><LauncherTitle>正在初始化工作区...</LauncherTitle></Launcher></AppShell>
+    }
     return <WorkspaceGate />
   }
 

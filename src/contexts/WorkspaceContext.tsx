@@ -162,6 +162,30 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     void refreshWorkspaces()
   }, [refreshWorkspaces])
 
+  // Auto-open default workspace in web mode so the user skips WorkspaceGate
+  useEffect(() => {
+    if (!initialized) return
+    if (activeWorkspacePath) return
+    if (!(window.electronAPI as Record<string, unknown>)?.__isWebShim) return
+
+    const token =
+      localStorage.getItem('aios_itoken') ??
+      localStorage.getItem('ai_office_internal_token') ??
+      ''
+    fetch('/api/workspaces/default', {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+      .then((r) => r.json() as Promise<{ success: boolean; workspace?: { path: string } }>)
+      .then((data) => {
+        if (data.success && data.workspace?.path) {
+          void openWorkspace(data.workspace.path)
+        }
+      })
+      .catch(() => {
+        // Non-critical — WorkspaceGate will appear as fallback
+      })
+  }, [initialized, activeWorkspacePath, openWorkspace])
+
   const contextValue = useMemo<WorkspaceState>(() => ({
     workspaceRoot,
     projectRoot,
