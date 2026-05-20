@@ -721,9 +721,142 @@ function SkillManagementPanel() {
 
 type StoreStatus = 'idle' | 'loading' | 'ready' | 'error'
 
+// ── WebDocxCreatePanel ────────────────────────────────────────────────────────
+
+interface DocxArtifactExport {
+  format: string
+  filename: string
+  url: string
+}
+
+interface DocxArtifact {
+  id: string
+  title: string
+  createdAt: string
+  exports: DocxArtifactExport[]
+}
+
+function WebDocxCreatePanel() {
+  const [prompt, setPrompt] = React.useState('')
+  const [title, setTitle] = React.useState('')
+  const [loading, setLoading] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+  const [artifact, setArtifact] = React.useState<DocxArtifact | null>(null)
+
+  async function handleGenerate() {
+    if (!prompt.trim()) {
+      setError('请输入提示词')
+      return
+    }
+    setLoading(true)
+    setError(null)
+    setArtifact(null)
+    try {
+      const res = await fetch('/api/skills/web.docx.create/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, params: { title: title || undefined } }),
+      })
+      const data = await res.json() as { success: boolean; artifact?: DocxArtifact; error?: string }
+      if (!res.ok || !data.success) {
+        setError(data.error ?? `请求失败 (${res.status})`)
+        return
+      }
+      setArtifact(data.artifact ?? null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '生成失败，请检查服务器是否在线')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const docxUrl = artifact?.exports.find(e => e.format === 'docx')?.url
+
+  return (
+    <div style={{ maxWidth: 640, padding: '32px 24px' }}>
+      <h2 style={{ fontSize: 18, fontWeight: 700, color: '#1f3142', margin: '0 0 6px' }}>🗒 正式文稿生成</h2>
+      <p style={{ fontSize: 13, color: '#627385', margin: '0 0 24px' }}>
+        输入提示词，生成可下载的 Word 文档（.docx）。
+      </p>
+
+      <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374554', marginBottom: 6 }}>
+        文稿标题（可选）
+      </label>
+      <input
+        type="text"
+        value={title}
+        onChange={e => setTitle(e.target.value)}
+        placeholder="例：AI Office Web 版功能说明"
+        style={{
+          width: '100%', boxSizing: 'border-box', padding: '9px 12px',
+          border: '1px solid #c8d8e8', borderRadius: 8, fontSize: 14,
+          marginBottom: 16, outline: 'none',
+        }}
+      />
+
+      <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374554', marginBottom: 6 }}>
+        提示词 *
+      </label>
+      <textarea
+        value={prompt}
+        onChange={e => setPrompt(e.target.value)}
+        rows={5}
+        placeholder="例：帮我生成一份介绍 AI Office Web 版功能的正式文稿，包含背景、目标和方案三个章节。"
+        style={{
+          width: '100%', boxSizing: 'border-box', padding: '9px 12px',
+          border: '1px solid #c8d8e8', borderRadius: 8, fontSize: 14,
+          resize: 'vertical', marginBottom: 20, outline: 'none',
+        }}
+      />
+
+      <button
+        onClick={() => void handleGenerate()}
+        disabled={loading}
+        style={{
+          padding: '10px 28px', background: loading ? '#a0b8d0' : '#1a5fb4',
+          color: '#fff', border: 'none', borderRadius: 8, fontSize: 14,
+          fontWeight: 600, cursor: loading ? 'not-allowed' : 'pointer',
+        }}
+      >
+        {loading ? '生成中…' : '生成文稿'}
+      </button>
+
+      {error && (
+        <div style={{ marginTop: 16, padding: '10px 14px', background: '#fff3f3', border: '1px solid #f5c6c6', borderRadius: 8, color: '#c0392b', fontSize: 13 }}>
+          ⚠ {error}
+        </div>
+      )}
+
+      {artifact && docxUrl && (
+        <div style={{ marginTop: 20, padding: '16px 18px', background: '#f0f7ff', border: '1px solid #c0d8f0', borderRadius: 10 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: '#1f3142', marginBottom: 6 }}>
+            ✅ {artifact.title}
+          </div>
+          <div style={{ fontSize: 12, color: '#7a8fa3', marginBottom: 12 }}>
+            生成时间：{new Date(artifact.createdAt).toLocaleString('zh-CN')}
+          </div>
+          <a
+            href={docxUrl}
+            download
+            style={{
+              display: 'inline-block', padding: '8px 20px',
+              background: '#1a5fb4', color: '#fff', borderRadius: 7,
+              fontSize: 13, fontWeight: 600, textDecoration: 'none',
+            }}
+          >
+            ⬇ 下载 DOCX
+          </a>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Main export ────────────────────────────────────────────────────────────────
+
 export default function SkillManagementView() {
   const registeredSkills = listSkills()
-  const [tab, setTab] = React.useState<'manage' | 'store'>('manage')
+  const [tab, setTab] = React.useState<'manage' | 'docx' | 'store'>('manage')
   const [storeStatus, setStoreStatus] = React.useState<StoreStatus>('idle')
   const [storeError, setStoreError] = React.useState<string | null>(null)
   const [embedUrl, setEmbedUrl] = React.useState<string | null>(null)
@@ -754,6 +887,9 @@ export default function SkillManagementView() {
       <TabBar>
         <TabBtn $active={tab === 'manage'} onClick={() => setTab('manage')}>
           🧩 我的 Skill 包
+        </TabBtn>
+        <TabBtn $active={tab === 'docx'} onClick={() => setTab('docx')}>
+          🗒 生成文稿
         </TabBtn>
         <TabBtn
           $active={tab === 'store'}
@@ -803,6 +939,13 @@ export default function SkillManagementView() {
                 </SkillList>
               </>
             )}
+          </ManageScrollArea>
+        </PageSlot>
+
+        {/* Docx generate tab */}
+        <PageSlot $active={tab === 'docx'}>
+          <ManageScrollArea>
+            <WebDocxCreatePanel />
           </ManageScrollArea>
         </PageSlot>
 

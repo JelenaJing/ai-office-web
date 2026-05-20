@@ -34,6 +34,8 @@ logs/
 server/data/
 server/uploads/
 server/artifacts/
+# source-code directories named artifacts are not runtime data
+!server/src/artifacts/
 
 # temp / scratch files
 temp/
