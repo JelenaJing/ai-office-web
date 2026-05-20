@@ -12,10 +12,13 @@ import {
   Search,
   Upload,
   X,
+  Sparkles,
+  Download,
 } from 'lucide-react'
 import { useWorkspace, type FileTreeNode } from '../contexts/WorkspaceContext'
 import { useDocument } from '../contexts/DocumentContext'
 import { useDocumentEngineHostCommands } from '../engines/documentEngine/hostCommands'
+import { downloadWithAuth } from './resource/MyFilesView'
 
 // ─── Document-file filter ─────────────────────────────────────────────────
 
@@ -297,6 +300,201 @@ function TreeNode({ node, depth, expandedFolders, toggleFolder, onFileOpen }: Tr
   )
 }
 
+// ─── Web mode detection ───────────────────────────────────────────────────
+
+function isWebShim(): boolean {
+  return (window.electronAPI as { __isWebShim?: boolean } | undefined)?.__isWebShim === true
+}
+
+function getAuthToken(): string {
+  return (
+    localStorage.getItem('aios_itoken') ??
+    localStorage.getItem('ai_office_internal_token') ??
+    ''
+  )
+}
+
+// ─── Web: Generate Word doc modal ─────────────────────────────────────────
+
+interface ArtifactExport { format: string; filename: string; url: string }
+interface DocxArtifact { id: string; title: string; exports: ArtifactExport[] }
+
+interface WebDocxCreateModalProps {
+  activeWorkspacePath: string
+  onClose: () => void
+}
+
+function WebDocxCreateModal({ activeWorkspacePath, onClose }: WebDocxCreateModalProps) {
+  const [title, setTitle] = useState('AI Office 文稿')
+  const [prompt, setPrompt] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [result, setResult] = useState<DocxArtifact | null>(null)
+
+  const handleGenerate = async () => {
+    if (!prompt.trim()) { setError('请输入生成提示词'); return }
+    setBusy(true)
+    setError(null)
+    try {
+      const token = getAuthToken()
+      const res = await fetch('/api/skills/web.docx.create/run', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          prompt: prompt.trim(),
+          workspacePath: activeWorkspacePath,
+          params: { title: title.trim() || 'AI Office 文稿' },
+        }),
+      })
+      const data = await res.json() as { success?: boolean; artifact?: DocxArtifact; error?: string }
+      if (!res.ok || !data.success) {
+        setError(data.error ?? `生成失败 (${res.status})`)
+        return
+      }
+      setResult(data.artifact ?? null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '生成失败，请重试')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1100,
+        background: 'rgba(15, 30, 55, 0.45)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+    >
+      <div style={{
+        background: '#fff', borderRadius: 14,
+        boxShadow: '0 12px 48px rgba(20,40,80,0.18)',
+        width: 520, maxWidth: 'calc(100vw - 40px)',
+        display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      }}>
+        {/* Header */}
+        <div style={{
+          padding: '18px 24px 14px',
+          borderBottom: '1px solid #e8eef5',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: '#1a2f47', display: 'flex', alignItems: 'center', gap: 7 }}>
+              <Sparkles size={16} color="#1a5fb4" />
+              生成 Word 文稿
+            </div>
+            <div style={{ fontSize: 12, color: '#8094a8', marginTop: 3 }}>
+              AI 将根据你的提示生成 DOCX 文档，保存到生成记录
+            </div>
+          </div>
+          <button onClick={onClose} style={{
+            width: 30, height: 30, border: 'none', background: '#f0f4f8',
+            borderRadius: 8, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <X size={14} color="#627385" />
+          </button>
+        </div>
+
+        {/* Body */}
+        {result ? (
+          <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: 32, marginBottom: 8 }}>✅</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#1a2f47' }}>{result.title}</div>
+              <div style={{ fontSize: 12, color: '#8094a8', marginTop: 4 }}>
+                已保存到资源中心 › 生成记录
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+              <button
+                onClick={() => void downloadWithAuth(`/api/artifacts/${result.id}/download`, result.title + '.docx')}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 7,
+                  padding: '10px 20px', background: '#1a5fb4', color: '#fff',
+                  border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: 'pointer',
+                }}
+              >
+                <Download size={14} /> 下载 DOCX
+              </button>
+              <button onClick={onClose} style={{
+                padding: '10px 20px', background: '#f0f4f8', color: '#304255',
+                border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer',
+              }}>关闭</button>
+            </div>
+          </div>
+        ) : (
+          <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {error && (
+              <div style={{
+                padding: '9px 12px', borderRadius: 8,
+                background: '#fff0f0', color: '#c0392b', fontSize: 13,
+              }}>{error}</div>
+            )}
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 700, color: '#4a5f73', display: 'block', marginBottom: 5 }}>
+                文稿标题
+              </label>
+              <input
+                value={title}
+                onChange={e => setTitle(e.target.value)}
+                placeholder="例如：Q2 汇报文稿"
+                style={{
+                  width: '100%', boxSizing: 'border-box',
+                  padding: '8px 12px', border: '1px solid #c8d8e8',
+                  borderRadius: 8, fontSize: 14, color: '#1a2f47', outline: 'none',
+                }}
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 700, color: '#4a5f73', display: 'block', marginBottom: 5 }}>
+                提示词 <span style={{ fontWeight: 400, color: '#aab8c8' }}>（描述你想要的内容）</span>
+              </label>
+              <textarea
+                value={prompt}
+                onChange={e => setPrompt(e.target.value)}
+                placeholder="例如：写一份关于 Q2 销售业绩的汇报，包括数据摘要、亮点分析和下季度建议..."
+                rows={4}
+                style={{
+                  width: '100%', boxSizing: 'border-box',
+                  padding: '8px 12px', border: '1px solid #c8d8e8',
+                  borderRadius: 8, fontSize: 13, color: '#1a2f47',
+                  resize: 'vertical', outline: 'none', lineHeight: 1.6,
+                }}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button onClick={onClose} style={{
+                padding: '9px 18px', background: '#f0f4f8', color: '#304255',
+                border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer',
+              }}>取消</button>
+              <button
+                disabled={busy || !prompt.trim()}
+                onClick={() => void handleGenerate()}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  padding: '9px 18px', background: '#1a5fb4', color: '#fff',
+                  border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600,
+                  cursor: busy || !prompt.trim() ? 'not-allowed' : 'pointer',
+                  opacity: busy || !prompt.trim() ? 0.65 : 1,
+                }}
+              >
+                <Sparkles size={13} />
+                {busy ? '生成中…' : '生成文稿'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ─── Main component ───────────────────────────────────────────────────────
 
 export default function DocumentFilePanel() {
@@ -304,11 +502,14 @@ export default function DocumentFilePanel() {
   const { openDocumentPath } = useDocumentEngineHostCommands()
   const { setStatusMessage } = useDocument()
 
+  const webMode = isWebShim()
+
   const [showSearch, setShowSearch] = useState(false)
   const [search, setSearch] = useState('')
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
   const [creating, setCreating] = useState(false)
   const [newDocName, setNewDocName] = useState('')
+  const [showWebModal, setShowWebModal] = useState(false)
   const searchInputRef = useRef<HTMLInputElement>(null)
 
   const filteredTree = useMemo(() => {
@@ -336,6 +537,7 @@ export default function DocumentFilePanel() {
     }
   }, [openDocumentPath, setStatusMessage])
 
+  // Electron-only: create blank .aidoc.json
   const handleCreateDoc = useCallback(async () => {
     if (!activeWorkspacePath || !newDocName.trim()) return
     const safeName = newDocName.trim()
@@ -353,6 +555,7 @@ export default function DocumentFilePanel() {
     setNewDocName('')
   }, [activeWorkspacePath, newDocName, openDocumentPath, refreshTree, setStatusMessage])
 
+  // Electron-only: import files into workspace
   const handleImport = useCallback(async () => {
     if (!activeWorkspacePath) return
     try {
@@ -375,9 +578,13 @@ export default function DocumentFilePanel() {
   }, [showSearch])
 
   const startCreating = useCallback(() => {
-    setCreating(true)
-    setNewDocName('')
-  }, [])
+    if (webMode) {
+      setShowWebModal(true)
+    } else {
+      setCreating(true)
+      setNewDocName('')
+    }
+  }, [webMode])
 
   const cancelCreating = useCallback(() => {
     setCreating(false)
@@ -392,99 +599,126 @@ export default function DocumentFilePanel() {
         </PanelHeader>
         <EmptyWrap>
           <TreeIcon $color="#c8d6e6"><File size={28} /></TreeIcon>
-          <EmptyTitle>未打开工作区</EmptyTitle>
-          <EmptyDesc>请先在资源中心选择工作区，以管理文稿文件。</EmptyDesc>
+          <EmptyTitle>{webMode ? '正在初始化工作区…' : '未打开工作区'}</EmptyTitle>
+          <EmptyDesc>
+            {webMode
+              ? '请稍等片刻，工作区初始化后即可使用。'
+              : '请先在资源中心选择工作区，以管理文稿文件。'}
+          </EmptyDesc>
         </EmptyWrap>
       </PanelWrap>
     )
   }
 
   return (
-    <PanelWrap>
-      <PanelHeader>
-        <PanelTitle title={activeWorkspacePath}>{activeWorkspaceName ?? '文稿'}</PanelTitle>
-        <IconBtn title="新建文稿" onClick={startCreating}>
-          <Plus size={13} />
-        </IconBtn>
-        <IconBtn title="导入文件" onClick={() => void handleImport()}>
-          <Upload size={12} />
-        </IconBtn>
-        <IconBtn title="搜索" onClick={toggleSearch}>
-          <Search size={12} />
-        </IconBtn>
-        <IconBtn title="刷新" onClick={() => void refreshTree()}>
-          <RefreshCw size={12} />
-        </IconBtn>
-      </PanelHeader>
-
-      {creating && (
-        <NewNameRow>
-          <NewNameInput
-            autoFocus
-            value={newDocName}
-            onChange={e => setNewDocName(e.target.value)}
-            placeholder="新文稿名称..."
-            onKeyDown={e => {
-              if (e.key === 'Enter') void handleCreateDoc()
-              if (e.key === 'Escape') cancelCreating()
-            }}
-          />
-          <NewNameConfirm
-            disabled={!newDocName.trim()}
-            onClick={() => void handleCreateDoc()}
-          >
-            创建
-          </NewNameConfirm>
-          <IconBtn onClick={cancelCreating} title="取消">
-            <X size={11} />
-          </IconBtn>
-        </NewNameRow>
+    <>
+      {/* Web mode: docx generate modal */}
+      {webMode && showWebModal && (
+        <WebDocxCreateModal
+          activeWorkspacePath={activeWorkspacePath}
+          onClose={() => setShowWebModal(false)}
+        />
       )}
 
-      {showSearch && (
-        <SearchBox>
-          <Search size={12} color="#8094a8" />
-          <SearchInput
-            ref={searchInputRef}
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="搜索文稿..."
-            onKeyDown={e => {
-              if (e.key === 'Escape') { setShowSearch(false); setSearch('') }
-            }}
-          />
-          {search && (
-            <IconBtn onClick={() => setSearch('')} title="清除">
-              <X size={10} />
+      <PanelWrap>
+        <PanelHeader>
+          {/* Web mode: show plain "文稿" title; Electron: show workspace name */}
+          <PanelTitle title={webMode ? undefined : activeWorkspacePath}>
+            {webMode ? '文稿' : (activeWorkspaceName ?? '文稿')}
+          </PanelTitle>
+          <IconBtn
+            title={webMode ? '生成 Word 文稿' : '新建文稿'}
+            onClick={startCreating}
+          >
+            <Plus size={13} />
+          </IconBtn>
+          {!webMode && (
+            <IconBtn title="导入文件" onClick={() => void handleImport()}>
+              <Upload size={12} />
             </IconBtn>
           )}
-        </SearchBox>
-      )}
+          <IconBtn title="搜索" onClick={toggleSearch}>
+            <Search size={12} />
+          </IconBtn>
+          {!webMode && (
+            <IconBtn title="刷新" onClick={() => void refreshTree()}>
+              <RefreshCw size={12} />
+            </IconBtn>
+          )}
+        </PanelHeader>
 
-      <TreeScroll>
-        {filteredTree.length === 0 ? (
-          <EmptyWrap>
-            <TreeIcon $color="#c8d6e6"><FileText size={28} /></TreeIcon>
-            <EmptyTitle>{search ? '未找到匹配文稿' : '暂无文稿'}</EmptyTitle>
-            <EmptyDesc>
-              {search
-                ? '请尝试其他关键词。'
-                : '点击上方 + 新建文稿，或点击 ↑ 导入已有文件。'}
-            </EmptyDesc>
-          </EmptyWrap>
-        ) : (
-          filteredTree.map(node => (
-            <TreeNode
-              key={node.path}
-              node={node}
-              depth={0}
-              expandedFolders={expandedFolders}
-              toggleFolder={toggleFolder}
-              onFileOpen={handleFileOpen}
+        {/* Electron-only: inline name input row */}
+        {!webMode && creating && (
+          <NewNameRow>
+            <NewNameInput
+              autoFocus
+              value={newDocName}
+              onChange={e => setNewDocName(e.target.value)}
+              placeholder="新文稿名称..."
+              onKeyDown={e => {
+                if (e.key === 'Enter') void handleCreateDoc()
+                if (e.key === 'Escape') cancelCreating()
+              }}
             />
-          ))
+            <NewNameConfirm
+              disabled={!newDocName.trim()}
+              onClick={() => void handleCreateDoc()}
+            >
+              创建
+            </NewNameConfirm>
+            <IconBtn onClick={cancelCreating} title="取消">
+              <X size={11} />
+            </IconBtn>
+          </NewNameRow>
         )}
-      </TreeScroll>
-    </PanelWrap>
+
+        {showSearch && (
+          <SearchBox>
+            <Search size={12} color="#8094a8" />
+            <SearchInput
+              ref={searchInputRef}
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="搜索文稿..."
+              onKeyDown={e => {
+                if (e.key === 'Escape') { setShowSearch(false); setSearch('') }
+              }}
+            />
+            {search && (
+              <IconBtn onClick={() => setSearch('')} title="清除">
+                <X size={10} />
+              </IconBtn>
+            )}
+          </SearchBox>
+        )}
+
+        <TreeScroll>
+          {filteredTree.length === 0 ? (
+            <EmptyWrap>
+              <TreeIcon $color="#c8d6e6"><FileText size={28} /></TreeIcon>
+              <EmptyTitle>{search ? '未找到匹配文稿' : '暂无文稿'}</EmptyTitle>
+              <EmptyDesc>
+                {search
+                  ? '请尝试其他关键词。'
+                  : webMode
+                    ? '点击上方 + 生成 Word 文稿，生成结果会保存到资源中心的生成记录。'
+                    : '点击上方 + 新建文稿，或点击 ↑ 导入已有文件。'}
+              </EmptyDesc>
+            </EmptyWrap>
+          ) : (
+            filteredTree.map(node => (
+              <TreeNode
+                key={node.path}
+                node={node}
+                depth={0}
+                expandedFolders={expandedFolders}
+                toggleFolder={toggleFolder}
+                onFileOpen={handleFileOpen}
+              />
+            ))
+          )}
+        </TreeScroll>
+      </PanelWrap>
+    </>
   )
 }
