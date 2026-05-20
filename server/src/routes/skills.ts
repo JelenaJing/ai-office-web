@@ -74,15 +74,19 @@ router.post('/:skillId/run', async (req, res) => {
   const { skillId } = req.params
 
   if (skillId === 'web.docx.create') {
-    const { prompt, params } = req.body as {
+    const { prompt, workspacePath, params } = req.body as {
       prompt?: string
-      params?: { title?: string; userId?: string; workspaceId?: string }
+      workspacePath?: string
+      params?: { title?: string; workspacePath?: string }
+    }
+    const resolvedWorkspacePath = workspacePath ?? params?.workspacePath ?? ''
+    if (!resolvedWorkspacePath) {
+      return res.status(400).json({ success: false, error: '请先选择工作区（缺少 workspacePath）' })
     }
     const result = await runCreateDocxSkill({
       prompt,
       title: params?.title,
-      userId: params?.userId,
-      workspaceId: params?.workspaceId,
+      workspacePath: resolvedWorkspacePath,
     })
     if (result.success) {
       return res.json(result)

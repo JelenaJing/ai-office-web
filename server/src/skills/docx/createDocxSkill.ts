@@ -2,7 +2,10 @@
  * createDocxSkill.ts — web.docx.create skill implementation
  *
  * Generates a real .docx file using the `docx` npm package.
- * No LLM dependency in v1 — content is structured from the input prompt/title.
+ * Artifact is stored inside the workspace:
+ *   server/data/workspaces/{userId}/{workspaceId}/artifacts/{artifactId}/
+ *
+ * workspacePath is required; pass "web-workspace:{userId}:{wsId}".
  */
 
 import fs from 'fs'
@@ -19,14 +22,14 @@ import {
 import {
   createArtifactDir,
   saveArtifactMetadata,
+  parseWorkspacePath,
   type Artifact,
 } from '../../artifacts/ArtifactStore'
 
 export interface CreateDocxInput {
   prompt?: string
   title?: string
-  userId?: string
-  workspaceId?: string
+  workspacePath: string
 }
 
 export type CreateDocxResult =
@@ -36,13 +39,24 @@ export type CreateDocxResult =
 export async function runCreateDocxSkill(
   input: CreateDocxInput,
 ): Promise<CreateDocxResult> {
+  if (!input.workspacePath) {
+    return { success: false, error: '请先选择工作区（workspacePath 不能为空）' }
+  }
+
+  const parsed = parseWorkspacePath(input.workspacePath)
+  if (!parsed) {
+    return { success: false, error: `workspacePath 格式无效：${input.workspacePath}` }
+  }
+
+  const { userId, wsId: workspaceId } = parsed
+
   try {
     const artifactId = randomUUID()
     const title = input.title?.trim() || 'AI Office 文稿'
     const prompt = input.prompt?.trim() || '（未填写提示词）'
     const now = new Date()
 
-    const dir = createArtifactDir(artifactId)
+    const dir = createArtifactDir(userId, workspaceId, artifactId)
 
     const doc = new Document({
       sections: [
@@ -117,6 +131,9 @@ export async function runCreateDocxSkill(
 
     const artifact: Artifact = {
       id: artifactId,
+      userId,
+      workspaceId,
+      workspacePath: input.workspacePath,
       type: 'document',
       title,
       editable: false,

@@ -1,6 +1,7 @@
 import React from 'react'
 import styled from 'styled-components'
 import { listSkills } from '../skills'
+import { useWorkspace } from '../contexts/WorkspaceContext'
 
 // ── Layout shells ─────────────────────────────────────────────────────────────
 
@@ -737,6 +738,7 @@ interface DocxArtifact {
 }
 
 function WebDocxCreatePanel() {
+  const { activeWorkspacePath } = useWorkspace()
   const [prompt, setPrompt] = React.useState('')
   const [title, setTitle] = React.useState('')
   const [loading, setLoading] = React.useState(false)
@@ -744,6 +746,10 @@ function WebDocxCreatePanel() {
   const [artifact, setArtifact] = React.useState<DocxArtifact | null>(null)
 
   async function handleGenerate() {
+    if (!activeWorkspacePath) {
+      setError('请先选择或创建一个工作区')
+      return
+    }
     if (!prompt.trim()) {
       setError('请输入提示词')
       return
@@ -752,10 +758,18 @@ function WebDocxCreatePanel() {
     setError(null)
     setArtifact(null)
     try {
+      const token = localStorage.getItem('aios_itoken') ?? localStorage.getItem('ai_office_internal_token') ?? ''
       const res = await fetch('/api/skills/web.docx.create/run', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, params: { title: title || undefined } }),
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          prompt,
+          workspacePath: activeWorkspacePath,
+          params: { title: title || undefined },
+        }),
       })
       const data = await res.json() as { success: boolean; artifact?: DocxArtifact; error?: string }
       if (!res.ok || !data.success) {
