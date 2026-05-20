@@ -12,6 +12,41 @@ import DailyFeedWorkbench from '../modules/feed/components/DailyFeedWorkbench'
 import ModelDevPanel from './ModelDevPanel'
 import { useWorkspaceMode } from '../contexts/WorkspaceModeContext'
 
+const ComingSoonShell = styled.div`
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(180deg, #f8fbfe 0%, #eef4f9 100%);
+  color: #7b92b0;
+  gap: 12px;
+  padding: 40px;
+  text-align: center;
+`
+
+const ComingSoonTitle = styled.div`
+  font-size: 18px;
+  font-weight: 600;
+  color: #4a6fa5;
+`
+
+const ComingSoonDesc = styled.div`
+  font-size: 14px;
+  color: #a0afc0;
+  max-width: 320px;
+  line-height: 1.6;
+`
+
+function WebComingSoon({ feature }: { feature: string }) {
+  return (
+    <ComingSoonShell>
+      <ComingSoonTitle>🚀 Web 版即将开放</ComingSoonTitle>
+      <ComingSoonDesc>{feature}功能正在迁移到 Web 版，敬请期待。</ComingSoonDesc>
+    </ComingSoonShell>
+  )
+}
+
 const GenerationShell = styled.div`
   width: 100%;
   height: 100%;
@@ -102,31 +137,49 @@ export default function WorkspaceViewportHost({ ghostTextEnabled }: WorkspaceVie
 
       <ViewportSlot $active={activePanel === 'paper'}>
         {mounted('paper') && (
-          <EditorViewportShell>
-            <DocumentEngineHost ghostTextEnabled={ghostTextEnabled} manuscriptProfile="paper" active={activePanel === 'paper'} />
-          </EditorViewportShell>
+          isWebMode ? (
+            <WebComingSoon feature="文稿生成（文章/日报）" />
+          ) : (
+            <EditorViewportShell>
+              <DocumentEngineHost ghostTextEnabled={ghostTextEnabled} manuscriptProfile="paper" active={activePanel === 'paper'} />
+            </EditorViewportShell>
+          )
         )}
       </ViewportSlot>
 
       <ViewportSlot $active={activePanel === 'workbench'}>
         {mounted('workbench') && (
-          <GenerationShell>
-            <ViewportBody>
-              <GenerationWorkbenchPanel />
-            </ViewportBody>
-          </GenerationShell>
+          isWebMode ? (
+            <WebComingSoon feature="PPT / 图文生成" />
+          ) : (
+            <GenerationShell>
+              <ViewportBody>
+                <GenerationWorkbenchPanel />
+              </ViewportBody>
+            </GenerationShell>
+          )
         )}
       </ViewportSlot>
 
       <ViewportSlot $active={activePanel === 'email'}>
-        {mounted('email') && <CommunicationWorkbench />}
+        {mounted('email') && (
+          isWebMode ? (
+            <WebComingSoon feature="邮件 / 公文写作" />
+          ) : (
+            <CommunicationWorkbench />
+          )
+        )}
       </ViewportSlot>
 
       <ViewportSlot $active={activePanel === 'homework'}>
         {mounted('homework') && (
-          <GenerationShell>
-            <HomeworkWorkbench />
-          </GenerationShell>
+          isWebMode ? (
+            <WebComingSoon feature="作业辅助" />
+          ) : (
+            <GenerationShell>
+              <HomeworkWorkbench />
+            </GenerationShell>
+          )
         )}
       </ViewportSlot>
 
@@ -139,7 +192,13 @@ export default function WorkspaceViewportHost({ ghostTextEnabled }: WorkspaceVie
       </ViewportSlot>
 
       <ViewportSlot $active={activePanel === 'data'}>
-        {mounted('data') && <ExcelAnalysisWorkbench />}
+        {mounted('data') && (
+          isWebMode ? (
+            <WebComingSoon feature="数据分析（Excel）" />
+          ) : (
+            <ExcelAnalysisWorkbench />
+          )
+        )}
       </ViewportSlot>
 
       <ViewportSlot $active={activePanel === 'model'}>
