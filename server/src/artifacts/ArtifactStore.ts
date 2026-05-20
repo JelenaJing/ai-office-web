@@ -9,7 +9,7 @@
 import fs from 'fs'
 import path from 'path'
 
-export const ARTIFACTS_ROOT = path.resolve(__dirname, '../../../data/artifacts')
+export const ARTIFACTS_ROOT = path.resolve(__dirname, '../../data/artifacts')
 
 export interface ArtifactExport {
   format: string

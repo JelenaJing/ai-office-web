@@ -129,7 +129,9 @@ export function installWebElectronAPIShim(): void {
     /* ── Workspaces ── */
     listWorkspaces: async () => {
       try {
-        const res = await fetch('/api/workspaces')
+        const token = localStorage.getItem(_SHIM_TOKEN_KEY)
+        const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {}
+        const res = await fetch('/api/workspaces', { headers })
         const data = await res.json() as { workspaces: unknown[] }
         return data.workspaces ?? []
       } catch {
@@ -137,9 +139,12 @@ export function installWebElectronAPIShim(): void {
       }
     },
     createWorkspace: async (name: string, _parentDir?: string) => {
+      const token = localStorage.getItem(_SHIM_TOKEN_KEY)
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      if (token) headers['Authorization'] = `Bearer ${token}`
       const res = await fetch('/api/workspaces', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ name }),
       })
       const data = await res.json() as { success: boolean; path: string; name: string; error?: string }
@@ -147,28 +152,28 @@ export function installWebElectronAPIShim(): void {
       return { success: true as const, path: data.path, name: data.name }
     },
     renameWorkspace: async (wsPath: string, nextName: string) => {
-      const res = await fetch('/api/workspaces/rename', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: wsPath, name: nextName }),
-      })
+      const token = localStorage.getItem(_SHIM_TOKEN_KEY)
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      if (token) headers['Authorization'] = `Bearer ${token}`
+      const res = await fetch('/api/workspaces/rename', { method: 'POST', headers, body: JSON.stringify({ path: wsPath, name: nextName }) })
       const data = await res.json() as { success: boolean; path: string; name: string; error?: string }
       if (!res.ok || !data.success) throw new Error(data.error ?? '重命名失败')
       return { success: true as const, path: data.path, name: data.name }
     },
     registerWorkspace: async (wsPath: string) => {
-      const res = await fetch('/api/workspaces/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: wsPath }),
-      })
+      const token = localStorage.getItem(_SHIM_TOKEN_KEY)
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      if (token) headers['Authorization'] = `Bearer ${token}`
+      const res = await fetch('/api/workspaces/register', { method: 'POST', headers, body: JSON.stringify({ path: wsPath }) })
       const data = await res.json() as { success: boolean; path: string; name: string; error?: string }
       if (!res.ok || !data.success) throw new Error(data.error ?? '注册工作区失败')
       return { success: true as const, path: data.path, name: data.name }
     },
     getWorkspaceTree: async (wsPath: string) => {
       try {
-        const res = await fetch(`/api/workspaces/tree?path=${encodeURIComponent(wsPath)}`)
+        const token = localStorage.getItem(_SHIM_TOKEN_KEY)
+        const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {}
+        const res = await fetch(`/api/workspaces/tree?path=${encodeURIComponent(wsPath)}`, { headers })
         return await res.json() as unknown[]
       } catch {
         return []
@@ -182,11 +187,10 @@ export function installWebElectronAPIShim(): void {
       Promise.resolve({ success: true, jsonPath: '', relativePath: '', document: {} }),
     deleteWorkspace: async (wsPath: string) => {
       try {
-        await fetch('/api/workspaces', {
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: wsPath }),
-        })
+        const token = localStorage.getItem(_SHIM_TOKEN_KEY)
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+        if (token) headers['Authorization'] = `Bearer ${token}`
+        await fetch('/api/workspaces', { method: 'DELETE', headers, body: JSON.stringify({ path: wsPath }) })
       } catch { /* best-effort */ }
       return { success: true as const }
     },
