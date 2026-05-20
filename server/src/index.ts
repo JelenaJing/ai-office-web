@@ -66,7 +66,7 @@ app.use('/api', async (req, res) => {
   }
 })
 
-app.listen(PORT, () => {
-  console.log(`\n🚀 AIOS server running on http://localhost:${PORT}`)
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`\n🚀 AIOS server running on http://0.0.0.0:${PORT}`)
   console.log(`   AccountCenter proxy → ${AC_URL}\n`)
 })

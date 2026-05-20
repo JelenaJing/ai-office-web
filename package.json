@@ -6,9 +6,9 @@
   "description": "AI-Office 3.0 - 内置文档引擎重构工作副本",
   "author": "AI-Office Team",
   "scripts": {
-    "dev": "vite --config vite.web.config.ts",
+    "dev": "vite --config vite.web.config.ts --host 0.0.0.0",
     "dev:electron": "vite",
-    "dev:web": "vite --config vite.web.config.ts",
+    "dev:web": "vite --config vite.web.config.ts --host 0.0.0.0",
     "dev:server": "cd server && npm run dev",
     "dev:web:full": "concurrently -n web,server -c cyan,yellow \"npm run dev:web\" \"npm run dev:server\"",
     "build": "vite build --config vite.web.config.ts",
