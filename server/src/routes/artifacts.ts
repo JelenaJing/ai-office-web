@@ -13,7 +13,7 @@ import { Router } from 'express'
 import type { Request } from 'express'
 import path from 'path'
 import fs from 'fs'
-import { getArtifact, getArtifactFilePath } from '../artifacts/ArtifactStore'
+import { getArtifact, getArtifactFilePath, listArtifactsByUser } from '../artifacts/ArtifactStore'
 
 const router = Router()
 
@@ -47,6 +47,15 @@ const CONTENT_TYPES: Record<string, string> = {
   pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   pdf: 'application/pdf',
 }
+
+// ── GET /api/artifacts ────────────────────────────────────────────────────────
+// Returns the current user's artifacts, sorted newest-first.
+
+router.get('/', async (req, res) => {
+  const userId = await resolveUserId(req)
+  const artifacts = listArtifactsByUser(userId)
+  return res.json({ artifacts })
+})
 
 // ── GET /api/artifacts/:artifactId ────────────────────────────────────────────
 

@@ -1,15 +1,38 @@
-import { useState } from 'react'
+/**
+ * ResourceWorkspace — 资源中心
+ *
+ * Tabs:
+ *   1. 我的文件 — uploaded files (GET/POST/DELETE /api/files)
+ *   2. 生成记录 — AI-generated artifacts  (GET /api/artifacts)
+ *   3. 知识库资料 — placeholder for future KB integration
+ *
+ * Internal workspace paths are never shown to the user.
+ */
+
+import { useCallback, useEffect, useState } from 'react'
 import styled from 'styled-components'
-import { FolderOpen, BookOpen, User } from 'lucide-react'
-import WorkspaceFilesPanel from '../components/resource/WorkspaceFilesPanel'
-import KnowledgePanel from '../components/resource/KnowledgePanel'
-import PersonalFilesPanel from '../components/resource/PersonalFilesPanel'
+import { FolderOpen, Sparkles, BookOpen, Download, Trash2 } from 'lucide-react'
+import MyFilesView, { authHeaders } from '../components/resource/MyFilesView'
 
-type ResourceTab = 'files' | 'kb' | 'personal'
+// ── Types ─────────────────────────────────────────────────────────────────────
 
-interface ResourceWorkspaceProps {
-  onGoToWorkspace?: () => void
+type ResourceTab = 'files' | 'artifacts' | 'kb'
+
+interface ArtifactExport {
+  format: string
+  filename: string
+  url: string
 }
+
+interface Artifact {
+  id: string
+  type: string
+  title: string
+  createdAt: string
+  exports: ArtifactExport[]
+}
+
+// ── Styled components ─────────────────────────────────────────────────────────
 
 const Page = styled.div`
   flex: 1;
@@ -60,10 +83,7 @@ const Tab = styled.button<{ $active: boolean }>`
   font-weight: ${p => p.$active ? '700' : '500'};
   cursor: pointer;
   transition: color 0.15s, border-color 0.15s;
-
-  &:hover {
-    color: #1f6fd6;
-  }
+  &:hover { color: #1f6fd6; }
 `
 
 const PanelArea = styled.div`
@@ -75,49 +95,187 @@ const PanelArea = styled.div`
   border-radius: 12px;
   overflow: hidden;
   display: flex;
+  flex-direction: column;
 `
 
-const PanelWrap = styled.div<{ $visible: boolean }>`
-  display: ${p => p.$visible ? 'flex' : 'none'};
+const PlaceholderWrap = styled.div`
   flex: 1;
-  min-height: 0;
-  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  gap: 12px;
+  text-align: center;
+  color: #7a91a8;
 `
 
-export default function ResourceWorkspace({ onGoToWorkspace }: ResourceWorkspaceProps) {
+// ── ArtifactsTab ──────────────────────────────────────────────────────────────
+
+function fmtDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString('zh-CN', {
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit',
+    })
+  } catch { return iso }
+}
+
+function ArtifactsTab() {
+  const [artifacts, setArtifacts] = useState<Artifact[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const fetchArtifacts = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/artifacts', { headers: authHeaders() })
+      const data = await res.json() as { artifacts: Artifact[] }
+      setArtifacts(data.artifacts ?? [])
+    } catch {
+      setError('加载生成记录失败')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { void fetchArtifacts() }, [fetchArtifacts])
+
+  const handleDownload = (artifact: Artifact) => {
+    const a = document.createElement('a')
+    a.href = `/api/artifacts/${artifact.id}/download`
+    a.download = artifact.title
+    a.target = '_blank'
+    a.rel = 'noopener noreferrer'
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+  }
+
+  if (loading) {
+    return (
+      <PlaceholderWrap>
+        <div style={{ fontSize: 14, color: '#8094a8' }}>加载中…</div>
+      </PlaceholderWrap>
+    )
+  }
+
+  if (error) {
+    return (
+      <PlaceholderWrap>
+        <div style={{ fontSize: 14, color: '#c0392b' }}>{error}</div>
+      </PlaceholderWrap>
+    )
+  }
+
+  if (artifacts.length === 0) {
+    return (
+      <PlaceholderWrap>
+        <div style={{ fontSize: 36, marginBottom: 8 }}>✨</div>
+        <div style={{ fontSize: 15, fontWeight: 600, color: '#304255' }}>暂无生成记录</div>
+        <div style={{ fontSize: 13, color: '#8094a8', maxWidth: 280 }}>
+          生成的文稿、表格分析结果会显示在这里，可以直接下载使用。
+        </div>
+      </PlaceholderWrap>
+    )
+  }
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead>
+          <tr style={{ background: '#f7fafd', position: 'sticky', top: 0 }}>
+            {(['标题', '类型', '生成时间', '操作'] as const).map((h) => (
+              <th key={h} style={{
+                textAlign: 'left', padding: '8px 20px',
+                fontSize: 11, fontWeight: 700, color: '#8094a8',
+                textTransform: 'uppercase', letterSpacing: '0.06em',
+                borderBottom: '1px solid #e8eef5',
+              }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {artifacts.map((a) => (
+            <tr key={a.id} style={{ borderBottom: '1px solid #f0f4f8' }}>
+              <td style={{ padding: '10px 20px' }}>
+                <div style={{ fontSize: 13, color: '#1a2f47', fontWeight: 500 }}>
+                  {a.title}
+                </div>
+              </td>
+              <td style={{ padding: '10px 20px', fontSize: 12, color: '#627385', whiteSpace: 'nowrap' }}>
+                {a.type === 'document' ? '文稿' : a.type}
+              </td>
+              <td style={{ padding: '10px 20px', fontSize: 12, color: '#627385', whiteSpace: 'nowrap' }}>
+                {fmtDate(a.createdAt)}
+              </td>
+              <td style={{ padding: '10px 20px' }}>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    onClick={() => handleDownload(a)}
+                    title="下载"
+                    style={{
+                      width: 30, height: 30, border: '1px solid #c8d8e8',
+                      borderRadius: 6, background: '#fff', cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}
+                  >
+                    <Download size={13} color="#4a7fb5" />
+                  </button>
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
+
+interface ResourceWorkspaceProps {
+  onGoToWorkspace?: () => void
+}
+
+export default function ResourceWorkspace(_props: ResourceWorkspaceProps) {
   const [tab, setTab] = useState<ResourceTab>('files')
 
   return (
     <Page>
       <PageHeader>
         <PageTitle>资源中心</PageTitle>
-        <PageSubtitle>管理工作区文件、知识库和个人文件</PageSubtitle>
+        <PageSubtitle>管理你的上传文件、AI 生成结果和知识库资料</PageSubtitle>
       </PageHeader>
 
       <TabBar>
         <Tab $active={tab === 'files'} onClick={() => setTab('files')}>
-          <FolderOpen size={14} /> 工作区文件
+          <FolderOpen size={14} /> 我的文件
+        </Tab>
+        <Tab $active={tab === 'artifacts'} onClick={() => setTab('artifacts')}>
+          <Sparkles size={14} /> 生成记录
         </Tab>
         <Tab $active={tab === 'kb'} onClick={() => setTab('kb')}>
-          <BookOpen size={14} /> 知识库
-        </Tab>
-        <Tab $active={tab === 'personal'} onClick={() => setTab('personal')}>
-          <User size={14} /> 个人文件
+          <BookOpen size={14} /> 知识库资料
         </Tab>
       </TabBar>
 
       <PanelArea>
-        <PanelWrap $visible={tab === 'files'}>
-          <WorkspaceFilesPanel onFileOpen={onGoToWorkspace} />
-        </PanelWrap>
-        <PanelWrap $visible={tab === 'kb'}>
-          <KnowledgePanel />
-        </PanelWrap>
-        <PanelWrap $visible={tab === 'personal'}>
-          <PersonalFilesPanel />
-        </PanelWrap>
+        {tab === 'files' && <MyFilesView fullHeight />}
+
+        {tab === 'artifacts' && <ArtifactsTab />}
+
+        {tab === 'kb' && (
+          <PlaceholderWrap>
+            <div style={{ fontSize: 36, marginBottom: 8 }}>📚</div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: '#304255' }}>知识库资料</div>
+            <div style={{ fontSize: 13, color: '#8094a8', maxWidth: 300 }}>
+              知识库资料功能即将接入，上传后可用于文稿、PPT 和数据分析任务中作为参考资料。
+            </div>
+          </PlaceholderWrap>
+        )}
       </PanelArea>
     </Page>
   )
 }
-

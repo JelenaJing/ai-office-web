@@ -142,3 +142,25 @@ export function getArtifactFilePath(artifactId: string, filename: string): strin
   if (!entry) return ''
   return path.join(artifactDir(entry.userId, entry.workspaceId, artifactId), filename)
 }
+
+/** Return all artifacts belonging to a user, sorted newest-first. */
+export function listArtifactsByUser(userId: string): Artifact[] {
+  const index = readArtifactIndex()
+  const entries = index.artifacts.filter((e) => e.userId === userId)
+  const artifacts: Artifact[] = []
+  for (const entry of entries) {
+    const metaPath = path.join(
+      artifactDir(entry.userId, entry.workspaceId, entry.artifactId),
+      'artifact.json',
+    )
+    if (!fs.existsSync(metaPath)) continue
+    try {
+      artifacts.push(JSON.parse(fs.readFileSync(metaPath, 'utf-8')) as Artifact)
+    } catch {
+      // skip corrupt entries
+    }
+  }
+  return artifacts.sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  )
+}
