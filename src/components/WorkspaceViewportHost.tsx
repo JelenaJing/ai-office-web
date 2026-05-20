@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import styled from 'styled-components'
 import DocumentEngineHost from '../modules/writing/components/DocumentEngineHost'
+import WebWritingPanel from '../modules/writing/components/WebWritingPanel'
 import GenerationWorkbenchPanel from '../modules/generation/components/GenerationWorkbenchPanel'
 import CommunicationWorkbench from '../communication/CommunicationWorkbench'
 import HomeworkWorkbench from '../modules/homework/components/HomeworkWorkbench'
@@ -67,6 +68,10 @@ export default function WorkspaceViewportHost({ ghostTextEnabled }: WorkspaceVie
   const { mode, generationMode, setGenerationMode } = useWorkspaceMode()
   const activePanel = resolvePanelKey(mode, generationMode)
 
+  // Detect web shim mode once (stable across renders)
+  const isWebMode = typeof window !== 'undefined' &&
+    (window.electronAPI as { __isWebShim?: boolean } | undefined)?.__isWebShim === true
+
   // Listen for "open-communication-workbench" events dispatched by any component
   // that wants to programmatically navigate to the email/communication mode.
   useEffect(() => {
@@ -85,9 +90,13 @@ export default function WorkspaceViewportHost({ ghostTextEnabled }: WorkspaceVie
     <>
       <ViewportSlot $active={activePanel === 'freewrite'}>
         {mounted('freewrite') && (
-          <EditorViewportShell>
-            <DocumentEngineHost ghostTextEnabled={ghostTextEnabled} manuscriptProfile="freewrite" active={activePanel === 'freewrite'} />
-          </EditorViewportShell>
+          isWebMode ? (
+            <WebWritingPanel />
+          ) : (
+            <EditorViewportShell>
+              <DocumentEngineHost ghostTextEnabled={ghostTextEnabled} manuscriptProfile="freewrite" active={activePanel === 'freewrite'} />
+            </EditorViewportShell>
+          )
         )}
       </ViewportSlot>
 
