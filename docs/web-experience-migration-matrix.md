@@ -58,3 +58,49 @@ Web 版的正确迁移方向是：
 不应迁移的是 Electron 本地实现方式：本地文件树、本地路径打开/保存、`window.electronAPI` / IPC、本地 Office 自动化、本地 workspace tree、本地图片路径和完整复制 `EditorPanel`。
 
 Web 的判断标准不是“有没有一个页面能替代”，而是“用户是否仍然感受到同一套成熟办公工作台体验，并且后端能力已切换到 server/service/skill/artifact”。
+
+## 6. Web 工作台体验红线
+
+Web 版不能继续把 `WebXXXPanel` 简陋替代页作为最终方案。凡是只承担临时 MVP、连通性验证或低配过渡作用的面板，必须在迁移文档中明确标记为 `temporary`，并写清楚最终要对齐的 Electron 工作台或 Web 工作台。
+
+每个模块迁移都必须遵守同一条体验迁移链路：
+
+> **Electron 已验证体验 -> 拆出 Web 可保留的工作台交互 -> 去掉 Electron-only 本地能力 -> 替换为 `platformApi` / server API / skills / artifacts -> 保持用户感知一致。**
+
+红线规则：
+
+| 规则 | 要求 |
+| --- | --- |
+| 不允许简陋替代页最终化 | `WebXXXPanel` 如果只是表单、上传、生成、下载，不能被视为模块最终体验 |
+| temporary 必须标记 | 临时 MVP 面板必须写明 `temporary` 状态、最终对齐目标和清理/替换方向 |
+| 必须有体验对齐说明 | 禁止新建没有体验对齐说明的临时面板 |
+| 禁止低配功能页冒充工作台 | 只做“上传 + 生成 + 下载”的页面只能作为临时过渡，必须在文档中明确说明 |
+| 禁止复制 Electron 本地实现 | 只能迁移工作台体验、交互节奏和 prompt/skill 语义，不能恢复本地文件树、IPC、本地路径保存或完整复制 `EditorPanel` |
+| 用户感知优先 | server/service/skill 替换后，用户仍应感知到同一类办公工作台，而不是离散工具页 |
+
+所有模块设计必须围绕五个部分展开：
+
+| 部分 | 设计要求 |
+| --- | --- |
+| 工作台 | 用户直接使用的主界面，必须对齐已验证的办公工作流 |
+| AI 助手 | 自然语言驱动工作台动作，而不是孤立的 prompt 输入框 |
+| skills | 把可插拔能力显式映射到生成、编辑、导出、分析等动作 |
+| server 后台 | 统一处理文件、模型、知识库、任务、权限、导出 |
+| 资源中心 | 承接上传文件、生成记录、artifact 下载和后续重新打开 |
+
+## 7. Temporary Web Panel 清理表
+
+以下表格只标记迁移方向，不要求本轮删除任何面板，也不改变当前路由和业务代码。
+
+| 当前面板 | 当前状态 | 最终目标 | 处理方式 | 优先级 |
+| --- | --- | --- | --- | --- |
+| `WebDocumentWorkbench` | legacy / 兼容 re-export | `WordLikeDocumentEditor` | 不作为主入口，保留兼容或后续删除 | P1 |
+| `WebWritingPanel` | early MVP / temporary | `WordLikeDocumentEditor` | 不作为文稿主入口；若仍存在引用，应迁移到 Word-like 文稿工作台 | P1 |
+| `WebExcelAnalysisPanel` | 简化版数据分析 / temporary | `ExcelAnalysisWorkbench` Web 化 | 后续用原工作台体验替代，文件来源改资源中心，分析跑 server | P2 |
+| `WebEmailPanel` | 简化邮件 / temporary | `CommunicationWorkbench` Web 化 | 后续替换为两栏工作台，保留 server IMAP/SMTP/OAuth/附件能力 | P4 |
+| `WebPptGenerationPanel` | 简化 PPT / temporary | `GenerationWorkbenchPanel` / `PptWorkbenchPanel` Web 化 | 后续替换为完整 PPT 工作台，DeckDocument 内容/模板分离 | P3 |
+| `WebImageGenerationPanel` | 简化图片 / temporary | `ImageWorkspace` Web 化 | 后续替换或整合到图片工作台，生成结果继续进入资源中心 | P5 |
+| `WebCalendarPanel` | 简化日程 / temporary | Web Calendar Workbench | 可保留，但要增强为日程工作台体验并接入 server 持久化/权限 | P5 |
+| `WebDailyReportPanel` | 简化日报 / temporary | Report Workbench / Daily Report Skill | 可保留，但要接多源日志、邮件、文稿、日程和资源中心记录 | P5 |
+
+清理原则：temporary 面板可以保留用于过渡和验证 API，但不能成为产品体验终态；每次新增或保留 temporary 面板，都必须同步说明最终工作台目标、替换路径和优先级。

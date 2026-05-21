@@ -236,3 +236,205 @@ cd server
 npx tsc --noEmit
 cd ..
 ```
+
+## 11. 文稿模板体系三分法
+
+Web 文稿里有三种“模板”，必须分开设计、分开命名、分开传参，不能混用。
+
+### 11.1 版式模板 Layout Template
+
+作用：
+
+| 范围 | 说明 |
+| --- | --- |
+| A4 页面规格 | 控制纸张尺寸、页面比例和默认页面容器 |
+| 页边距 | 控制正文区域与页眉页脚的空间 |
+| 字体 | 控制默认字体族、字号和导出字体策略 |
+| 标题样式 | 控制 h1/h2/h3 等标题层级的视觉样式 |
+| 正文样式 | 控制段落、行距、缩进、列表、表格等基础排版 |
+| 页眉页脚 | 控制 header/footer 文案、页码占位和对齐 |
+| 导出规则 | 控制 DOCX/Markdown/PDF exporter 如何读取 pageSpec/headerFooter |
+
+对应当前 Web 内置模板：
+
+| Layout Template | 作用 |
+| --- | --- |
+| `document.template.general` | 普通 A4 文稿 |
+| `document.template.formal_letter` | 正式函件版式 |
+| `document.template.work_report` | 工作汇报版式 |
+
+注意：版式模板不能自动写入正文。选择版式模板只能改变页面规格、页眉页脚和样式约束，不能覆盖用户已经输入或 AI 已生成的内容。
+
+### 11.2 文稿类型 Prompt Preset
+
+作用：
+
+| 范围 | 说明 |
+| --- | --- |
+| 写作结构 | 作为 AI 生成时的结构提示，例如“背景、进展、问题、计划” |
+| 语气风格 | 作为语气提示，例如正式、汇报、通知、纪要 |
+| 文种约束 | 例如工作汇报、工作日报、会议纪要、通知公告、请示报告、总结 |
+| prompt hint | 只进入 prompt / structure hint，不直接进入编辑器正文 |
+
+注意：
+
+1. 文稿类型不能直接写入正文。
+2. 用户指令优先于文稿类型。
+3. 例如用户选择“工作汇报”，但输入“写会议通知”，应生成会议通知，而不是强行生成工作汇报。
+
+### 11.3 Word 模板文档 Template Document
+
+作用：
+
+| 阶段 | 说明 |
+| --- | --- |
+| 用户上传 docx | 用户提供一份已有 Word 文档作为参考 |
+| 提取结构 | 提取章节顺序、标题层级、段落组织 |
+| 提取语气 | 分析正式程度、表达习惯、行文风格 |
+| 提取格式 | 提取可迁移的格式/版式线索，但不承诺完全保真 |
+| 后续壳层回写 | V2 可把生成内容写回模板壳层 |
+
+阶段规划：
+
+| 阶段 | Template Document 定位 |
+| --- | --- |
+| V1 | 作为资料/风格参考，上传后获得 `fileId`，参与生成上下文 |
+| V1.5 | 作为 `templateDocument` 进入 legacy workflow，先分析模板，再生成新正文 |
+| V2 | 做 DOCX 壳层回写，处理更强的版式和占位替换 |
+
+注意：第一阶段不要承诺 100% Word 保真编辑。Template Document 是写作和风格参考，不等于浏览器内完整 Word 编辑器。
+
+## 12. 文稿动作到 Skill/API 映射表
+
+| 用户动作 | 前端入口 | 前端服务 | Server Skill/API | 输入 | 输出 | 备注 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 生成初稿 | `AICommandBox` 生成初稿 | `runDocumentGenerate` | `web.document.generate` | `instruction`、`documentText`、`template`、`knowledgeBaseIds`、`fileIds` | `patch` / `documentSession` / `artifact` | 默认 legacy workflow |
+| 知识库生成 | `AICommandBox` 生成初稿 | `runDocumentGenerate` | `web.knowledge.writing.legacy` | `instruction`、`knowledgeBaseIds`、`fileIds` | `patch` / `documentSession` / `artifact` | 必须接 `documentContextBuilder` |
+| 模板文稿生成 | `AICommandBox` 生成初稿 | `runDocumentGenerate` | `web.template.document.generate.legacy` | `instruction`、`templateDocument` | `patch` / `documentSession` / `artifact` | 先分析模板，再生成新正文 |
+| 改写选区 | `AICommandBox` / 右键菜单 | `runDocumentEdit` | `web.document.edit` | `mode=rewrite_selection`、`selectedText`、`selectedHtml` | `patch.replace_selection` | 必须保持语义和事实边界 |
+| 润色选区 | 右键菜单 | `runDocumentEdit` | `web.document.edit` | `mode=rewrite_selection` + polish instruction | `patch.replace_selection` | 不扩写事实 |
+| 扩写选区 | 右键菜单 | `runDocumentEdit` | `web.document.edit` | `mode=rewrite_selection` + expand instruction | `patch.replace_selection` | 可扩展表达，但不能编造事实 |
+| 光标处续写 | `AICommandBox` / 右键菜单 | `runDocumentEdit` | `web.document.edit` | `mode=insert_at_cursor`、`documentText` | `patch.insert_at_cursor` | 不覆盖全文 |
+| 优化全文 | `AICommandBox` / 右键菜单 | `runDocumentEdit` | `web.document.edit` | `mode=polish_document`、`documentHtml` | `patch.replace_document` | 保留事实 |
+| 重写全文 | `AICommandBox` | `runDocumentEdit` | `web.document.edit` | `mode=replace_document` | `patch.replace_document` | 用户明确要求才走 |
+| 导出 Word | 顶部 Word 按钮 | `runWebDocumentExport` | `web.docx.export` | latest `editor.getHtml()`、`pageSpec`、`headerFooter` | docx artifact | 必须用最新编辑内容 |
+| 导出 Markdown | 顶部 MD 按钮 | `runWebDocumentExport` | `web.markdown.export` | latest `editor.getHtml()` | md artifact | 必须用最新编辑内容 |
+| 导出 PDF | 顶部 PDF 按钮 | `runWebDocumentExport` | `web.pdf.export` | `documentSession` / `html` | pdf artifact 或未配置错误 | 未配置不能假成功 |
+| 上传资料 | 顶部资料按钮 | `platformApi.files.upload` | `/api/files` | docx / pdf | `fileId` | V1 只作为资料 |
+| 选择知识库 | 知识库按钮 | `KnowledgeTreePicker` | `/api/departments` / `/api/knowledge` | `knowledgeBaseIds` | selected ids | 后端必须真实检索 |
+
+映射规则：前端入口只能负责收集编辑器状态和用户意图；生成、编辑、导出和知识库检索必须落到 server skill/API。右键菜单新增动作时，应复用 `documentEditSkills` 的现有服务层，不另写一套 AI prompt。
+
+## 13. 文稿草稿和 Session 持久化规划
+
+当前问题：`WebDocumentSession` 主要保存在前端内存里，刷新页面、切换上下文或浏览器异常退出时，未导出的编辑内容可能丢失。资源中心能保存 artifact，但 artifact 不等于可继续编辑的草稿 session。
+
+### 13.1 V1
+
+| 能力 | 规划 |
+| --- | --- |
+| 导出时生成 artifact | Word/Markdown/PDF 导出结果进入资源中心 |
+| 生成记录进入资源中心 | AI 生成和导出的 artifact 可下载、追踪 createdBySkillId |
+| 不依赖本地文件树 | V1 不恢复 Electron 本地文件树或本地路径保存 |
+
+### 13.2 V1.5
+
+| 能力 | 规划 |
+| --- | --- |
+| document session server API | 新增 server API 保存 `WebDocumentSession` |
+| 自动保存草稿 | 编辑器变更后节流保存 HTML、Markdown、pageSpec、headerFooter、sourceRefs |
+| 重新打开最近文稿 | 资源中心或文稿入口可列出最近 document sessions |
+| 不依赖本地文件树 | 草稿恢复从 server session 读取，不从本地路径读取 |
+
+建议 API：
+
+| API | 作用 |
+| --- | --- |
+| `POST /api/document-sessions` | 创建文稿 session |
+| `GET /api/document-sessions` | 列出当前用户/工作区文稿 sessions |
+| `GET /api/document-sessions/:id` | 打开指定文稿 session |
+| `PATCH /api/document-sessions/:id` | 保存草稿更新 |
+| `POST /api/document-sessions/:id/export` | 基于 server session 发起导出 |
+
+### 13.3 V2
+
+| 能力 | 规划 |
+| --- | --- |
+| 版本历史 | 支持按时间点查看和恢复 |
+| 草稿恢复 | 支持异常退出后的恢复提示 |
+| 多人协作 | 后置，需要权限、同步、冲突解决和 presence |
+
+本轮只写规划，不实现 API。
+
+## 14. 文稿 P1 代码实施清单
+
+以下是下一轮文稿 P1 代码实施清单，本轮不实现。
+
+### P1-A：A4 样式对齐 Electron
+
+| 任务 | 要求 |
+| --- | --- |
+| 修复 `A4RichTextEditor` CSS | 对齐 Electron `EditorPage` 的基础视觉和排版 |
+| 对齐 A4 宽高 | 参考 Electron 794px x 1123px 的 A4 视觉比例 |
+| 对齐边距和阴影 | 迁移页边距、页面阴影、背景灰和页面间距 |
+| 对齐正文元素 | 覆盖 h1/h2/h3、p、table、blockquote、ul/ol |
+| 修复 CSS 语法问题 | 修复当前 `A4Page` `min-height` 多余括号问题 |
+
+### P1-B：TipTap 基础扩展
+
+待评估和分阶段启用的扩展：
+
+| 扩展 | 目标 |
+| --- | --- |
+| `Underline` | 下划线 |
+| `TextAlign` | 标题和段落对齐 |
+| `Highlight` | 高亮 |
+| `Table` / `TableRow` / `TableCell` / `TableHeader` | 表格 |
+| `TaskList` / `TaskItem` | 任务列表 |
+| `Typography` | 智能排版 |
+| `TextStyle` | 文本样式承载 |
+| `FontFamily` | 字体 |
+| `FontSize` | 字号 |
+
+第一轮可以只启用：`Underline`、`TextAlign`、`Table`、`OrderedList` / `BulletList`、`Highlight`。
+
+### P1-C：右键菜单
+
+| 任务 | 要求 |
+| --- | --- |
+| 新增 `DocumentContextMenu` | 面向 Web 文稿编辑区，不复制 Electron `EditorPanel` |
+| 接入 `A4RichTextEditor onContextMenu` | 能识别选区、光标和普通区域 |
+| 复用 `documentEditSkills` | 不另写 AI prompt，不绕过 `web.document.edit` |
+| 基础编辑动作 | 支持复制、粘贴、全选 |
+| AI 选区动作 | 支持 AI 改写选区、AI 润色选区、AI 扩写选区 |
+| AI 光标/全文动作 | 支持在此处续写、优化全文 |
+| 格式动作 | 支持标题、正文、加粗、列表、清除格式 |
+
+### P1-D：选区语义保护
+
+| 任务 | 要求 |
+| --- | --- |
+| 迁移语义保护思路 | 参考 Electron `EditorPanel` 的 `INLINE_REWRITE_SEMANTIC_GUARD` |
+| 加到 server `web.document.edit` | 选区改写的 system/user prompt 必须包含保护要求 |
+| 保护边界 | 不得改变事实、结论、立场和信息边界 |
+| 输出约束 | 只返回改写后的内容，不输出解释性前言 |
+
+### P1-E：知识库上下文真实化
+
+| 任务 | 要求 |
+| --- | --- |
+| 强化 `documentContextBuilder` | 不允许只记录 `knowledgeBaseIds` |
+| 真实检索 | 必须检索知识库片段，或明确日志说明无法检索 |
+| 资料文本 | extraContext 中包含上传资料文本或明确不可解析提示 |
+| 当前文稿摘要 | extraContext 中包含当前文稿摘要/截断正文，避免 prompt 过长 |
+| 可观测性 | server 日志应能说明使用了哪些 KB / file 片段 |
+
+### P1-F：导出一致性验收
+
+| 任务 | 要求 |
+| --- | --- |
+| Word 导出 | 导出前必须读取最新 `editor.getHtml()` |
+| Markdown 导出 | 导出前必须读取最新 `editor.getHtml()` |
+| 手动修改验收 | 手动修改后导出的文件必须包含最新内容 |
+| PDF 未配置 | 清晰提示未配置，不能返回成功形态 |
+| artifact 记录 | 成功导出必须进入资源中心，并能下载 |
