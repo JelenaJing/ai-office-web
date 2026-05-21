@@ -50,11 +50,13 @@ app.use(
 
 // ── Global middleware ──────────────────────────────────────────────────────────
 app.use('/api', globalRateLimit)
+
+// Skill runs first — must not pass through the 30s /api timeout below
+app.use('/api/skills', timeoutMiddleware(SKILL_TIMEOUT_MS), skillsRouter)
+
 app.use('/api', timeoutMiddleware(REQUEST_TIMEOUT_MS))
 
 app.use('/api/auth', authRateLimit, authRouter)
-// Skill runs can be slow (AI generation) — give them a longer timeout
-app.use('/api/skills', timeoutMiddleware(SKILL_TIMEOUT_MS - REQUEST_TIMEOUT_MS), skillsRouter)
 app.use('/api/artifacts', artifactsRouter)
 app.use('/api/workspaces', workspacesRouter)
 app.use('/api/files', filesRouter)
