@@ -32,6 +32,10 @@ export async function buildDocumentExtraContext(input: DocumentContextInput): Pr
   const fileIds = (input.fileIds ?? []).filter(Boolean)
 
   if (kbIds.length) {
+    console.warn(
+      `[document-context] ${kbIds.length} 个知识库 ID 已接收，但当前版本仅记录文件列表；` +
+        '未接入语义向量检索（RAG）。如需真实语义检索，需接入向量检索服务。',
+    )
     const kbLines: string[] = []
     for (const id of kbIds.slice(0, 8)) {
       try {
@@ -41,13 +45,18 @@ export async function buildDocumentExtraContext(input: DocumentContextInput): Pr
         try {
           const docs = await listFiles(id)
           const names = docs.slice(0, 5).map((d) => d.title || d.originalName).filter(Boolean)
-          if (names.length) docHint = `（资料：${names.join('、')}${docs.length > 5 ? ' 等' : ''}）`
+          if (names.length) {
+            docHint = `（资料：${names.join('、')}${docs.length > 5 ? ' 等' : ''}）`
+          } else {
+            console.warn(`[document-context] 知识库 ${id} (${label}) 无可读文件列表`)
+          }
         } catch {
-          // ignore list failure
+          console.warn(`[document-context] 知识库 ${id} 文件列表获取失败`)
         }
         kbLines.push(`- ${label} [${id}]${docHint}`)
         console.info(`[document-context] knowledgeBase=${id} label=${label}`)
       } catch {
+        console.warn(`[document-context] 知识库 ${id} 元信息获取失败，将仅传递 ID`)
         kbLines.push(`- [${id}]`)
       }
     }

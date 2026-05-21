@@ -191,6 +191,14 @@ export function buildRewriteSelectionSystemPrompt(outputLanguage: OutputLanguage
   return [
     '你是一位专业文稿编辑助手。只改写用户选中的片段，保持原意，根据用户指令调整语气与表达。',
     '只输出改写后的选区正文（Markdown 片段即可），不要输出整篇文章，不要输出解释。',
+    [
+      '选区语义边界规则（强制）：',
+      '1. 不得改变选区中的事实陈述、数据、结论、立场和信息边界。',
+      '2. 改写仅限于：表达方式、语气、流畅度、措辞。',
+      '3. 扩写时不得编造未在选区中出现的具体数据、人名、金额、日期或机构名称。',
+      '4. 润色时不得新增或删除实质性信息。',
+      '5. 如用户要求润色但未指定方向，默认以"更正式、更流畅"为目标，不改变任何事实。',
+    ].join('\n'),
     buildOutputLanguageRequirement(outputLanguage),
     WRITING_QUALITY_RULES,
   ].join('\n\n')

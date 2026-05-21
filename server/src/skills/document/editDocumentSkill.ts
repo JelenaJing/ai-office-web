@@ -11,6 +11,7 @@ import {
   buildInsertAtCursorUserPrompt,
   buildRewriteSelectionSystemPrompt,
   buildRewriteSelectionUserPrompt,
+  findWritingQualityViolations,
   resolveOutputLanguage,
 } from '../../modules/document-generation/writingPromptRecipes'
 
@@ -117,6 +118,11 @@ async function runSelectionOrInsert(
 
   const html =
     mode === 'insert_at_cursor' ? markdownFragmentToHtml(markdown) : markdownFragmentToHtml(markdown)
+
+  const violations = findWritingQualityViolations(markdown)
+  if (violations.length) {
+    console.warn(`[document-edit] quality violations in ${mode} output:`, violations.join('; '))
+  }
 
   return { type: mapModeToPatchType(mode), html, markdown }
 }
