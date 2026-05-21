@@ -1,11 +1,9 @@
 /**
  * createDocxSkill.ts — web.docx.create skill implementation
  *
- * Generates a real .docx file using the `docx` npm package.
+ * Generates a real .docx file using AI Gateway (or fallback template).
  * Artifact is stored inside the workspace:
  *   server/data/workspaces/{userId}/{workspaceId}/artifacts/{artifactId}/
- *
- * workspacePath is required; pass "web-workspace:{userId}:{wsId}".
  */
 
 import fs from 'fs'
@@ -16,7 +14,6 @@ import {
   Packer,
   Paragraph,
   TextRun,
-  HeadingLevel,
   AlignmentType,
 } from 'docx'
 import {
@@ -25,6 +22,14 @@ import {
   parseWorkspacePath,
   type Artifact,
 } from '../../artifacts/ArtifactStore'
+import {
+  generateDocumentContentDetailed,
+  appendAiInvocationLog,
+  hashPrompt,
+  type GeneratedDocxContent,
+} from '../../modules/ai-gateway'
+
+const HEADING_COLOR = '2E74B5'
 
 export interface CreateDocxInput {
   prompt?: string
@@ -35,6 +40,91 @@ export interface CreateDocxInput {
 export type CreateDocxResult =
   | { success: true; artifact: Artifact }
   | { success: false; error: string }
+
+function buildDocxParagraphs(
+  content: GeneratedDocxContent,
+  generatedAt: Date,
+): Paragraph[] {
+  const children: Paragraph[] = [
+    new Paragraph({
+      children: [
+        new TextRun({ text: content.title, bold: true, size: 32 }),
+      ],
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 200 },
+    }),
+  ]
+
+  if (content.subtitle?.trim()) {
+    children.push(
+      new Paragraph({
+        children: [
+          new TextRun({
+            text: content.subtitle.trim(),
+            color: '666666',
+            size: 22,
+          }),
+        ],
+        alignment: AlignmentType.CENTER,
+        spacing: { after: 200 },
+      }),
+    )
+  }
+
+  children.push(
+    new Paragraph({
+      children: [
+        new TextRun({
+          text: `生成时间：${generatedAt.toLocaleString('zh-CN')}`,
+          color: '888888',
+          size: 20,
+        }),
+      ],
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 400 },
+    }),
+  )
+
+  for (const section of content.sections) {
+    children.push(
+      new Paragraph({
+        children: [
+          new TextRun({
+            text: section.heading,
+            bold: true,
+            color: HEADING_COLOR,
+            size: 26,
+          }),
+        ],
+        spacing: { before: 280, after: 160 },
+      }),
+    )
+    for (const para of section.paragraphs) {
+      children.push(
+        new Paragraph({
+          children: [new TextRun({ text: para, size: 24 })],
+          spacing: { after: 200 },
+        }),
+      )
+    }
+  }
+
+  children.push(
+    new Paragraph({
+      children: [
+        new TextRun({
+          text: '— 由 AI Office Web 自动生成 —',
+          italics: true,
+          color: '999999',
+        }),
+      ],
+      alignment: AlignmentType.CENTER,
+      spacing: { before: 600 },
+    }),
+  )
+
+  return children
+}
 
 export async function runCreateDocxSkill(
   input: CreateDocxInput,
@@ -53,74 +143,42 @@ export async function runCreateDocxSkill(
   try {
     const artifactId = randomUUID()
     const title = input.title?.trim() || 'AI Office 文稿'
-    const prompt = input.prompt?.trim() || '（未填写提示词）'
+    const prompt = input.prompt?.trim() || ''
     const now = new Date()
+
+    if (!prompt) {
+      return { success: false, error: '请输入生成提示词' }
+    }
+
+    const { content, meta } = await generateDocumentContentDetailed({
+      title,
+      prompt,
+    })
+
+    if (meta.fallback) {
+      console.warn(
+        `[web.docx.create] fallback=true userId=${userId} workspaceId=${workspaceId} model=${meta.model}`,
+      )
+    }
+
+    const outputJson = JSON.stringify(content)
+    appendAiInvocationLog({
+      userId,
+      workspaceId,
+      skillId: 'web.docx.create',
+      model: meta.model,
+      promptHash: hashPrompt(prompt),
+      promptLength: prompt.length,
+      outputLength: outputJson.length,
+      fallback: meta.fallback,
+    })
 
     const dir = createArtifactDir(userId, workspaceId, artifactId)
 
     const doc = new Document({
       sections: [
         {
-          children: [
-            new Paragraph({
-              text: title,
-              heading: HeadingLevel.HEADING_1,
-              alignment: AlignmentType.CENTER,
-            }),
-            new Paragraph({
-              children: [
-                new TextRun({
-                  text: `生成时间：${now.toLocaleString('zh-CN')}`,
-                  color: '888888',
-                  size: 20,
-                }),
-              ],
-              alignment: AlignmentType.CENTER,
-              spacing: { after: 400 },
-            }),
-            new Paragraph({
-              children: [
-                new TextRun({ text: '提示词：', bold: true }),
-                new TextRun({ text: prompt }),
-              ],
-              spacing: { after: 400 },
-            }),
-            new Paragraph({
-              text: '一、背景',
-              heading: HeadingLevel.HEADING_2,
-            }),
-            new Paragraph({
-              text: '本文档由 AI Office Web 版 web.docx.create Skill 自动生成。后续版本将根据提示词接入大模型，自动补全正文内容。',
-              spacing: { after: 240 },
-            }),
-            new Paragraph({
-              text: '二、目标',
-              heading: HeadingLevel.HEADING_2,
-            }),
-            new Paragraph({
-              text: '（此处将根据提示词内容自动生成目标说明。）',
-              spacing: { after: 240 },
-            }),
-            new Paragraph({
-              text: '三、方案',
-              heading: HeadingLevel.HEADING_2,
-            }),
-            new Paragraph({
-              text: '（此处将根据提示词内容自动生成方案说明。）',
-              spacing: { after: 240 },
-            }),
-            new Paragraph({
-              children: [
-                new TextRun({
-                  text: '— 由 AI Office Web 自动生成 —',
-                  italics: true,
-                  color: '999999',
-                }),
-              ],
-              alignment: AlignmentType.CENTER,
-              spacing: { before: 600 },
-            }),
-          ],
+          children: buildDocxParagraphs(content, now),
         },
       ],
     })
@@ -135,7 +193,7 @@ export async function runCreateDocxSkill(
       workspaceId,
       workspacePath: input.workspacePath,
       type: 'document',
-      title,
+      title: content.title,
       editable: false,
       createdBySkillId: 'web.docx.create',
       createdAt: now.toISOString(),

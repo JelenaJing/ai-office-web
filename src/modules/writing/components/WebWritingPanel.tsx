@@ -215,9 +215,14 @@ export default function WebWritingPanel() {
         setError(result.error ?? '生成失败，请重试')
         return
       }
-      setArtifact(result.artifact ?? null)
+      if (!result.artifact) {
+        setError('生成完成但未返回文稿记录，请稍后到资源中心查看')
+        return
+      }
+      setArtifact(result.artifact)
     } catch (err) {
-      setError(err instanceof Error ? err.message : '网络错误，请重试')
+      const msg = err instanceof Error ? err.message : '网络错误，请重试'
+      setError(msg)
     } finally {
       setGenerating(false)
     }
@@ -308,7 +313,7 @@ export default function WebWritingPanel() {
                   $disabled={generating || !prompt.trim()}
                 >
                   <Sparkles size={14} />
-                  {generating ? '生成中…' : '生成 Word 文稿'}
+                  {generating ? 'AI 正在生成文稿，约需 10–60 秒…' : '生成 Word 文稿'}
                 </PrimaryBtn>
               </BtnRow>
 
