@@ -16,6 +16,7 @@ import { runAnalyzeXlsxSkill } from '../skills/excel/analyzeXlsxSkill'
 import { runCreateImageSkill } from '../skills/image/createImageSkill'
 import { runCreatePptxSkill } from '../skills/ppt/createPptxSkill'
 import { runDailyReportSkill } from '../skills/report/dailyReportSkill'
+import { runEditDocumentSkill, type EditDocumentInput } from '../skills/document/editDocumentSkill'
 import { skillRunRateLimit } from '../middleware/rateLimit'
 
 const router = Router()
@@ -25,6 +26,24 @@ const BUILTIN_SKILLS = [
     id: 'web.docx.create',
     name: '正式文稿生成',
     description: '根据提示词生成 Word 文稿，返回 documentSession 与 artifact。',
+    category: 'document',
+    outputArtifactType: 'document',
+    version: '1.0.0',
+    enabled: true,
+  },
+  {
+    id: 'web.document.generate',
+    name: 'Web 文稿生成',
+    description: '生成初稿 HTML/Markdown 与 documentSession，供 A4 编辑器写入。',
+    category: 'document',
+    outputArtifactType: 'document',
+    version: '1.0.0',
+    enabled: true,
+  },
+  {
+    id: 'web.document.edit',
+    name: 'Web 文稿 AI 编辑',
+    description: '根据自然语言指令改写选区、插入或润色全文。',
     category: 'document',
     outputArtifactType: 'document',
     version: '1.0.0',
@@ -145,15 +164,14 @@ router.get('/:skillId', (req, res) => {
 router.post('/:skillId/run', skillRunRateLimit, async (req, res) => {
   const { skillId } = req.params
 
-  if (skillId === 'web.docx.create') {
-    const { prompt, workspacePath, params } = req.body as {
-      prompt?: string
-      workspacePath?: string
-      params?: CreateDocxInput['params']
-    }
+  const runWebDocxCreateHandler = async (
+    body: { prompt?: string; workspacePath?: string; params?: CreateDocxInput['params'] },
+    withGeneratePatch: boolean,
+  ) => {
+    const { prompt, workspacePath, params } = body
     const resolvedWorkspacePath = workspacePath ?? ''
     if (!resolvedWorkspacePath) {
-      return res.status(400).json({ success: false, error: '请先选择工作区（缺少 workspacePath）' })
+      return { status: 400, body: { success: false, error: '请先选择工作区（缺少 workspacePath）' } }
     }
     const result = await runCreateDocxSkill({
       prompt,
@@ -161,13 +179,67 @@ router.post('/:skillId/run', skillRunRateLimit, async (req, res) => {
       workspacePath: resolvedWorkspacePath,
       params: params as CreateDocxInput['params'],
     })
-    if (result.success) {
-      return res.json({
+    if (!result.success) {
+      return { status: 500, body: { success: false, error: result.error } }
+    }
+    const html =
+      (typeof result.data?.html === 'string' && result.data.html) ||
+      (result.data?.documentSession as { content?: { html?: string } } | undefined)?.content?.html ||
+      ''
+    const markdown =
+      (typeof result.data?.markdown === 'string' && result.data.markdown) ||
+      (result.data?.documentSession as { content?: { markdown?: string } } | undefined)?.content?.markdown ||
+      ''
+    const data = withGeneratePatch
+      ? {
+          ...result.data,
+          patch: html
+            ? { type: 'replace_document' as const, html, markdown }
+            : undefined,
+        }
+      : result.data
+    return {
+      status: 200,
+      body: {
         success: true,
         artifact: result.artifact,
         artifactId: result.artifact.id,
-        data: result.data,
-      })
+        data,
+      },
+    }
+  }
+
+  if (skillId === 'web.docx.create') {
+    const out = await runWebDocxCreateHandler(req.body, false)
+    return res.status(out.status).json(out.body)
+  }
+
+  if (skillId === 'web.document.generate') {
+    const out = await runWebDocxCreateHandler(req.body, true)
+    return res.status(out.status).json(out.body)
+  }
+
+  if (skillId === 'web.document.edit') {
+    const body = req.body as Record<string, unknown>
+    const params = (body.params ?? body) as EditDocumentInput
+    const workspacePath = String(body.workspacePath ?? '')
+    if (!workspacePath) {
+      return res.status(400).json({ success: false, error: '请先选择工作区（缺少 workspacePath）' })
+    }
+    const result = await runEditDocumentSkill({
+      instruction: String(params.instruction ?? ''),
+      mode: (params.mode as EditDocumentInput['mode']) || 'polish_document',
+      title: params.title,
+      selectedText: params.selectedText,
+      selectedHtml: params.selectedHtml,
+      documentText: params.documentText,
+      documentHtml: params.documentHtml,
+      templateSkillId: params.templateSkillId,
+      knowledgeBaseIds: params.knowledgeBaseIds,
+      fileIds: params.fileIds,
+    })
+    if (result.success) {
+      return res.json({ success: true, data: result.data })
     }
     return res.status(500).json({ success: false, error: result.error })
   }

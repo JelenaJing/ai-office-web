@@ -12,7 +12,7 @@ export const WEB_DOCUMENT_BUILTIN_SKILLS: WebDocumentSkillManifest[] = [
     version: '1.0.0',
     enabled: true,
     builtin: true,
-    mapsToSkillId: 'web.docx.create',
+    mapsToSkillId: 'web.document.generate',
     capability: 'generate-formal-document',
   },
   {

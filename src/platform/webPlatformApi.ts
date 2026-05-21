@@ -468,6 +468,8 @@ export const webPlatformApi: PlatformApi = {
         'skills',
         'docx.create',
         'web.docx.create',
+        'web.document.generate',
+        'web.document.edit',
         'web.docx.export',
         'web.markdown.export',
         'web.pdf.export',
