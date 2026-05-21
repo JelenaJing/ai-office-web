@@ -7,7 +7,9 @@
  */
 
 import { Router } from 'express'
+import { resolveUserId } from '../lib/authUser'
 import { runCreateDocxSkill } from '../skills/docx/createDocxSkill'
+import { runAnalyzeXlsxSkill } from '../skills/excel/analyzeXlsxSkill'
 import { skillRunRateLimit } from '../middleware/rateLimit'
 
 const router = Router()
@@ -19,6 +21,15 @@ const BUILTIN_SKILLS = [
     description: '根据提示词生成 Word 文稿，第一版输出 docx 文件。',
     category: 'document',
     outputArtifactType: 'document',
+    version: '1.0.0',
+    enabled: true,
+  },
+  {
+    id: 'web.xlsx.analyze',
+    name: '表格数据分析',
+    description: '对已上传的 xlsx/csv 生成 Markdown 分析报告。',
+    category: 'analysis',
+    outputArtifactType: 'excel_analysis',
     version: '1.0.0',
     enabled: true,
   },
@@ -93,6 +104,49 @@ router.post('/:skillId/run', skillRunRateLimit, async (req, res) => {
       return res.json(result)
     }
     return res.status(500).json({ success: false, error: result.error })
+  }
+
+  if (skillId === 'web.xlsx.analyze') {
+    const userId = await resolveUserId(req)
+    const body = req.body as {
+      fileId?: string
+      prompt?: string
+      options?: Record<string, unknown>
+      workspacePath?: string
+      params?: {
+        fileId?: string
+        prompt?: string
+        options?: Record<string, unknown>
+        workspacePath?: string
+      }
+    }
+    const fileId = body.fileId ?? body.params?.fileId ?? ''
+    const prompt = body.prompt ?? body.params?.prompt
+    const options = body.options ?? body.params?.options
+    const workspacePath =
+      body.workspacePath ?? body.params?.workspacePath ?? ''
+    if (!workspacePath) {
+      return res.status(400).json({
+        success: false,
+        error: '请先选择工作区（缺少 workspacePath）',
+      })
+    }
+    const result = await runAnalyzeXlsxSkill({
+      userId,
+      fileId: String(fileId),
+      workspacePath,
+      prompt,
+      options,
+    })
+    if (result.success) {
+      return res.json({
+        success: true,
+        artifactId: result.artifactId,
+        artifact: result.artifact,
+      })
+    }
+    const status = result.status ?? 500
+    return res.status(status).json({ success: false, error: result.error })
   }
 
   const skill = BUILTIN_SKILLS.find((s) => s.id === skillId)

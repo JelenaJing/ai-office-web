@@ -251,6 +251,50 @@ export const webPlatformApi: PlatformApi = {
     },
   },
 
+  // ── excel ───────────────────────────────────────────────────────────────────
+
+  excel: {
+    async analyze(input: {
+      fileId: string
+      prompt?: string
+      options?: Record<string, unknown>
+      workspacePath?: string
+    }): Promise<{
+      artifactId: string
+      title?: string
+      type?: string
+      artifact?: Artifact
+    }> {
+      let workspacePath = input.workspacePath
+      if (!workspacePath) {
+        const ws = await webPlatformApi.workspaces.getDefault()
+        workspacePath = ws.path
+      }
+      const result = await apiPost<SkillResult & { artifactId?: string }>(
+        `/api/skills/${encodeURIComponent('web.xlsx.analyze')}/run`,
+        {
+          workspacePath,
+          fileId: input.fileId,
+          prompt: input.prompt,
+          options: input.options,
+        },
+      )
+      if (!result.success) {
+        throw new Error(result.error ?? '表格分析失败')
+      }
+      const artifactId = result.artifactId ?? result.artifact?.id
+      if (!artifactId) {
+        throw new Error('分析完成但未返回生成记录')
+      }
+      return {
+        artifactId,
+        title: result.artifact?.title,
+        type: result.artifact?.type,
+        artifact: result.artifact,
+      }
+    },
+  },
+
   // ── skills ──────────────────────────────────────────────────────────────────
 
   skills: {
@@ -338,6 +382,8 @@ export const webPlatformApi: PlatformApi = {
         'artifact.download',
         'knowledge',
         'departments',
+        'web.xlsx.analyze',
+        'excel.analyze',
       ])
       return webFeatures.has(featureKey)
     },

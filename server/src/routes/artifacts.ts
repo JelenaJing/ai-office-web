@@ -46,6 +46,8 @@ const CONTENT_TYPES: Record<string, string> = {
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   pdf: 'application/pdf',
+  md: 'text/markdown; charset=utf-8',
+  csv: 'text/csv; charset=utf-8',
 }
 
 // ── GET /api/artifacts ────────────────────────────────────────────────────────
@@ -88,21 +90,23 @@ router.get('/:artifactId/download', async (req, res) => {
     return res.status(403).json({ message: 'Access denied: artifact belongs to another user' })
   }
 
-  const docxExport = artifact.exports.find((e) => e.format === 'docx')
+  const exportEntry =
+    artifact.exports.find((e) => e.format === 'docx')
+    ?? artifact.exports.find((e) => e.format === 'md')
     ?? artifact.exports[0]
 
-  if (!docxExport) {
+  if (!exportEntry) {
     return res.status(404).json({ message: 'No downloadable export found', artifactId })
   }
 
-  const filePath = getArtifactFilePath(artifactId, docxExport.filename)
+  const filePath = getArtifactFilePath(artifactId, exportEntry.filename)
   if (!filePath || !fs.existsSync(filePath)) {
     return res.status(404).json({ message: 'Artifact file missing on disk', artifactId })
   }
 
-  const ext = path.extname(docxExport.filename).slice(1).toLowerCase()
+  const ext = path.extname(exportEntry.filename).slice(1).toLowerCase()
   const contentType = CONTENT_TYPES[ext] ?? 'application/octet-stream'
-  const encodedName = encodeURIComponent(artifact.title + '.' + ext)
+  const encodedName = encodeURIComponent(exportEntry.filename)
 
   res.setHeader('Content-Type', contentType)
   res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodedName}`)

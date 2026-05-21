@@ -47,8 +47,8 @@ const WEB_FEATURE_DEFS: Record<WebFeatureKey, FeatureDef> = {
   },
   'excel.analysis': {
     label: '数据分析',
-    enabled: false,
-    message: 'Web 版即将开放',
+    enabled: true,
+    message: '',
   },
   'ppt.generate': {
     label: 'PPT 生成',

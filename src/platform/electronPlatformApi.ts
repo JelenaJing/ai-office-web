@@ -169,6 +169,50 @@ export const electronPlatformApi: PlatformApi = {
     },
   },
 
+  // ── excel ───────────────────────────────────────────────────────────────────
+  // Desktop analysis uses ExcelAnalysisWorkbench + excelAnalysisRun (local paths).
+
+  excel: {
+    async analyze(input: {
+      fileId: string
+      prompt?: string
+      options?: Record<string, unknown>
+      workspacePath?: string
+    }): Promise<{
+      artifactId: string
+      title?: string
+      type?: string
+    }> {
+      const api = getElectronApi()
+      const sourcePath =
+        (input.options?.sourcePath as string | undefined) ??
+        (input.options?.localPath as string | undefined)
+      if (!sourcePath || typeof api.excelAnalysisRun !== 'function') {
+        notSupported(
+          'platformApi.excel.analyze — 桌面版请使用「数据分析」工作台（本地文件路径）',
+        )
+      }
+      const wsPath =
+        input.workspacePath ??
+        (input.options?.workspacePath as string | undefined) ??
+        ''
+      const raw = (await api.excelAnalysisRun({
+        workspacePath: wsPath,
+        sourcePath,
+        userRequirement: input.prompt ?? '',
+        dataModelId: String(input.options?.dataModelId ?? ''),
+      })) as Record<string, unknown>
+      if (!raw?.ok) {
+        throw new Error(String(raw?.error ?? raw?.message ?? 'Excel 分析失败'))
+      }
+      return {
+        artifactId: String(raw.artifactId ?? raw.taskId ?? ''),
+        title: String(raw.title ?? '表格分析'),
+        type: 'excel_analysis',
+      }
+    },
+  },
+
   // ── skills ──────────────────────────────────────────────────────────────────
 
   skills: {

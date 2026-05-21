@@ -131,6 +131,21 @@ export interface PlatformApi {
     run(skillId: string, input: SkillInput): Promise<SkillResult>
   }
 
+  excel: {
+    /** Analyze an uploaded spreadsheet by fileId; produces excel_analysis artifact. */
+    analyze(input: {
+      fileId: string
+      prompt?: string
+      options?: Record<string, unknown>
+      workspacePath?: string
+    }): Promise<{
+      artifactId: string
+      title?: string
+      type?: string
+      artifact?: Artifact
+    }>
+  }
+
   departments: {
     /** Lists remote knowledge-base partitions exposed as departments. */
     list(): Promise<Department[]>

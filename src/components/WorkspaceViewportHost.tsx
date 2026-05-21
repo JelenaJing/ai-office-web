@@ -8,6 +8,7 @@ import HomeworkWorkbench from '../modules/homework/components/HomeworkWorkbench'
 import AiClassWorkbench from '../modules/homework/components/AiClassWorkbench'
 import AiForumWorkbench from '../modules/homework/components/AiForumWorkbench'
 import ExcelAnalysisWorkbench from '../modules/excel-analysis/components/ExcelAnalysisWorkbench'
+import WebExcelAnalysisPanel from '../modules/excel-analysis/components/WebExcelAnalysisPanel'
 import DailyFeedWorkbench from '../modules/feed/components/DailyFeedWorkbench'
 import ModelDevPanel from './ModelDevPanel'
 import WebFeatureComingSoon from './WebFeatureComingSoon'
@@ -128,7 +129,11 @@ function renderPanelContent(
     case 'ai-forum':
       return <AiForumWorkbench />
     case 'data':
-      return <ExcelAnalysisWorkbench />
+      return isWebShim() ? (
+        <WebExcelAnalysisPanel />
+      ) : (
+        <ExcelAnalysisWorkbench />
+      )
     case 'model':
       return <ModelDevPanel />
     case 'daily-feed':

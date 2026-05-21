@@ -11,8 +11,9 @@
 | 页面/模块 | 当前 Web 状态 | 用户可点击项 | 处理结果 | 是否完整 |
 |---|---|---|---|---|
 | **LoginPage** | 已接 `platformApi.auth` + AC 代理 | 登录、注册 | 可用；401 显示服务端 message | ✅ |
-| **WorkWorkspace** | 场景入口列表 | 文稿编辑、邮件、日程、数据分析、PPT、我的文件、上传 | 文稿/文件可用；其余 `comingSoon` 点击有 `blockMsg` 提示 | ✅ |
-| **WorkspaceViewportHost** | 按 mode 切换视口 | 各 generation 模式对应面板 | Web 未迁移面板仅 `WebFeatureComingSoon`；文稿为 `WebWritingPanel` | ✅ |
+| **WorkWorkspace** | 场景入口列表 | 文稿编辑、邮件、日程、数据分析、PPT、我的文件、上传 | 文稿/文件/数据分析可用；其余 `comingSoon` | ✅ |
+| **WorkspaceViewportHost** | 按 mode 切换视口 | 各 generation 模式对应面板 | Web 文稿 `WebWritingPanel`；数据分析 `WebExcelAnalysisPanel`；其余 ComingSoon | ✅ |
+| **WebExcelAnalysisPanel** | `web.xlsx.analyze` | 选文件、分析、下载 | fileId + platformApi.excel.analyze → artifact | ✅ |
 | **WebWritingPanel** | `web.docx.create` | 生成、下载、再生成 | 空 prompt 禁用；生成中禁用；成功/错误/无 exports 明确 | ✅ |
 | **ResourceWorkspace** | 三 Tab | 我的文件 / 生成记录 / 知识库 | 文件 Tab 可用；生成记录完整状态机；知识库只读 | ✅ |
 | **MyFilesView** | `platformApi.files` | 上传、下载、删除 | 沿用既有 platformApi 实现 | ✅ |
@@ -31,7 +32,7 @@
 | 能力 | Web 表现 |
 |---|---|
 | 知识库上传 | 按钮禁用，「上传功能暂未开放」 |
-| Excel / PPT / Email | WorkWorkspace `comingSoon` + Viewport `WebFeatureComingSoon` |
+| PPT / Email | WorkWorkspace `comingSoon` + Viewport `WebFeatureComingSoon` |
 | Calendar | App 内 ComingSoon |
 | 日报 / 图片 / Skill Store / Formal Template / EditorPanel | feature gate `enabled: false` 或 Viewport ComingSoon |
 | 本地文件树 / `.aidoc.json` | 不展示、不调用 IPC |
