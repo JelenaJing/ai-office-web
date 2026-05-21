@@ -101,7 +101,6 @@ import {
 import { isWebShim } from '../../../platform/detect'
 import { webMigrationLabel } from '../../../platform/webMigration'
 import { openWebBlankDocumentTab } from '../webDocumentSession'
-import { webMigrationLabel } from '../../../platform/webMigration'
 import type { KnowledgeTaskConstraints, PreviewKnowledgeTaskContextResult } from '../../../types/knowledge'
 import { buildKnowledgeTaskConstraints, resolveKnowledgeTaskPreview } from '../../../shared/knowledge/knowledgeTaskHelper'
 import { normalizeContinueDeltaAtStart, normalizeContinueLeadingText } from '../../../utils/continueStreamText'
