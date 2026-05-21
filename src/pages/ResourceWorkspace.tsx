@@ -13,9 +13,8 @@ import { useCallback, useEffect, useState } from 'react'
 import styled from 'styled-components'
 import { FolderOpen, Sparkles, BookOpen, Download } from 'lucide-react'
 import MyFilesView from '../components/resource/MyFilesView'
+import RemoteKnowledgePanel from '../components/resource/RemoteKnowledgePanel'
 import { platformApi } from '../platform'
-import { getWebFeatureStatus } from '../platform/featureGate'
-import { isWebShim } from '../platform/detect'
 import type { Artifact } from '../platform'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -248,17 +247,7 @@ export default function ResourceWorkspace(_props: ResourceWorkspaceProps) {
 
         {tab === 'artifacts' && <ArtifactsTab />}
 
-        {tab === 'kb' && (
-          <PlaceholderWrap>
-            <div style={{ fontSize: 36, marginBottom: 8 }}>📚</div>
-            <div style={{ fontSize: 15, fontWeight: 600, color: '#304255' }}>知识库资料</div>
-            <div style={{ fontSize: 13, color: '#8094a8', maxWidth: 300 }}>
-              {isWebShim()
-                ? `${getWebFeatureStatus('knowledge').message}。上传后可用于文稿、PPT 和数据分析任务中作为参考资料。`
-                : '知识库资料功能即将接入，上传后可用于文稿、PPT 和数据分析任务中作为参考资料。'}
-            </div>
-          </PlaceholderWrap>
-        )}
+        {tab === 'kb' && <RemoteKnowledgePanel />}
       </PanelArea>
     </Page>
   )

@@ -42,8 +42,8 @@ const WEB_FEATURE_DEFS: Record<WebFeatureKey, FeatureDef> = {
   },
   knowledge: {
     label: '知识库',
-    enabled: false,
-    message: 'Web 版即将开放',
+    enabled: true,
+    message: '',
   },
   'excel.analysis': {
     label: '数据分析',

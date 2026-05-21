@@ -4,6 +4,7 @@ import { BookOpen, Cloud, RefreshCw, Upload } from 'lucide-react'
 import { useKnowledge } from '../../contexts/KnowledgeContext'
 import { useDepartment } from '../../contexts/DepartmentContext'
 import { DepartmentSelector } from '../DepartmentSelector'
+import { isWebShim } from '../../platform/detect'
 
 // ---------------------------------------------------------------------------
 // Styled components
@@ -157,6 +158,8 @@ export default function RemoteKnowledgePanel() {
   const { importing, importDocuments } = useKnowledge()
   const { departments, selectedDepartmentId, loading, refresh } = useDepartment()
   const [retrying, setRetrying] = useState(false)
+  const [importError, setImportError] = useState<string | null>(null)
+  const webUploadPending = isWebShim()
 
   const handleRetry = async () => {
     setRetrying(true)
@@ -218,14 +221,27 @@ export default function RemoteKnowledgePanel() {
           <Footer>
             <UploadButton
               type="button"
-              disabled={importing || !selectedDepartmentId || !isAvailable}
-              onClick={() => void importDocuments()}
+              disabled={importing || !selectedDepartmentId || !isAvailable || webUploadPending}
+              onClick={() => {
+                setImportError(null)
+                void importDocuments().catch((err: unknown) => {
+                  const msg = err instanceof Error ? err.message : String(err)
+                  setImportError(msg)
+                })
+              }}
             >
               <Upload size={13} />
               <Cloud size={11} />
               {importing ? '上传中...' : '上传文件'}
             </UploadButton>
-            <UploadNote>文件将上传到远程知识库（如不可用则导入本地）</UploadNote>
+            <UploadNote>
+              {webUploadPending
+                ? 'Web 版知识库上传需要使用浏览器文件上传，将在下一步接入'
+                : '文件将上传到远程知识库（如不可用则导入本地）'}
+            </UploadNote>
+            {importError && (
+              <UploadNote style={{ color: '#c0392b' }}>{importError}</UploadNote>
+            )}
           </Footer>
         </>
       )}

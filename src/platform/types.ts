@@ -1,3 +1,10 @@
+import type {
+  Department,
+  KnowledgeDocumentMeta,
+  KnowledgeImportResult,
+  KnowledgeLibraryInfo,
+} from '../types/knowledge'
+
 export interface UserInfo {
   id: string
   email: string
@@ -62,6 +69,8 @@ export interface SkillResult {
   error?: string
 }
 
+export type { Department, KnowledgeLibraryInfo, KnowledgeDocumentMeta, KnowledgeImportResult }
+
 /**
  * Unified platform API — business components must use this instead of
  * calling window.electronAPI directly or scattering fetch('/api/*') calls.
@@ -120,6 +129,18 @@ export interface PlatformApi {
     list(): Promise<SkillInfo[]>
     /** Runs a skill; returns the result (may include an Artifact). */
     run(skillId: string, input: SkillInput): Promise<SkillResult>
+  }
+
+  departments: {
+    /** Lists remote knowledge-base partitions exposed as departments. */
+    list(): Promise<Department[]>
+  }
+
+  knowledge: {
+    getBaseInfo(departmentId: string): Promise<KnowledgeLibraryInfo>
+    listDocuments(departmentId: string): Promise<KnowledgeDocumentMeta[]>
+    importDocuments(departmentId: string): Promise<KnowledgeImportResult>
+    deleteDocument(departmentId: string, documentId: string): Promise<void>
   }
 
   system: {

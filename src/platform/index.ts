@@ -17,6 +17,10 @@ export type {
   SkillInfo,
   SkillInput,
   SkillResult,
+  Department,
+  KnowledgeLibraryInfo,
+  KnowledgeDocumentMeta,
+  KnowledgeImportResult,
 } from './types'
 
 import { detectPlatform } from './detect'

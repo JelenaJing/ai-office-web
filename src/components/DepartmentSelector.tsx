@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import styled from 'styled-components'
 import { Check, ChevronDown, ChevronRight, FileText, Image as ImageIcon } from 'lucide-react'
 import { useDepartment } from '../contexts/DepartmentContext'
+import { platformApi } from '../platform'
 import type { Department, KnowledgeDocumentMeta } from '../types/knowledge'
 
 // ---------------------------------------------------------------------------
@@ -177,8 +178,8 @@ export const DepartmentSelector: React.FC<DepartmentSelectorProps> = (props) => 
       // lazy-load files if not cached
       if (!filesMap[selectedDepartmentId]) {
         setFilesMap((p) => ({ ...p, [selectedDepartmentId]: { docs: [], loading: true } }))
-        window.electronAPI.listKnowledgeDocuments(selectedDepartmentId)
-          .then((docs: KnowledgeDocumentMeta[]) => setFilesMap((p) => ({ ...p, [selectedDepartmentId]: { docs, loading: false } })))
+        platformApi.knowledge.listDocuments(selectedDepartmentId)
+          .then((docs) => setFilesMap((p) => ({ ...p, [selectedDepartmentId]: { docs, loading: false } })))
           .catch(() => setFilesMap((p) => ({ ...p, [selectedDepartmentId]: { docs: [], loading: false } })))
       }
     } else if (!selectedDepartmentId && prev) {
@@ -206,7 +207,7 @@ export const DepartmentSelector: React.FC<DepartmentSelectorProps> = (props) => 
     if (!filesMap[id] && !expandedIds.has(id)) {
       setFilesMap((prev) => ({ ...prev, [id]: { docs: [], loading: true } }))
       try {
-        const docs: KnowledgeDocumentMeta[] = await window.electronAPI.listKnowledgeDocuments(id)
+        const docs = await platformApi.knowledge.listDocuments(id)
         setFilesMap((prev) => ({ ...prev, [id]: { docs, loading: false } }))
       } catch {
         setFilesMap((prev) => ({ ...prev, [id]: { docs: [], loading: false } }))

@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { KnowledgeDocumentDetail, KnowledgeDocumentMeta, KnowledgeImportResult, KnowledgeLibraryInfo } from '../types/knowledge'
 import { useDepartment } from './DepartmentContext'
+import { platformApi } from '../platform'
 
 interface KnowledgeState {
   info: KnowledgeLibraryInfo | null
@@ -49,8 +50,8 @@ export function KnowledgeProvider({ children }: { children: ReactNode }) {
     setLoading(true)
     try {
       const [nextInfo, nextDocuments] = await Promise.all([
-        window.electronAPI.getKnowledgeBaseInfo(selectedDepartmentId),
-        window.electronAPI.listKnowledgeDocuments(selectedDepartmentId),
+        platformApi.knowledge.getBaseInfo(selectedDepartmentId),
+        platformApi.knowledge.listDocuments(selectedDepartmentId),
       ])
       setInfo(nextInfo)
       setDocuments(nextDocuments)
@@ -65,7 +66,7 @@ export function KnowledgeProvider({ children }: { children: ReactNode }) {
   const importDocuments = useCallback(async (): Promise<KnowledgeImportResult> => {
     setImporting(true)
     try {
-      const result = await window.electronAPI.importKnowledgeDocuments(selectedDepartmentId)
+      const result = await platformApi.knowledge.importDocuments(selectedDepartmentId)
       await refresh()
       return result
     } finally {
@@ -80,7 +81,7 @@ export function KnowledgeProvider({ children }: { children: ReactNode }) {
   const deleteDocument = useCallback(async (documentId: string) => {
     const normalizedId = String(documentId || '').trim()
     if (!normalizedId) return
-    await window.electronAPI.deleteKnowledgeDocument(selectedDepartmentId, normalizedId)
+    await platformApi.knowledge.deleteDocument(selectedDepartmentId, normalizedId)
     await refresh()
   }, [refresh, selectedDepartmentId])
 

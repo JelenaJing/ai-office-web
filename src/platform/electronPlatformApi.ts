@@ -8,6 +8,10 @@ import type {
   SkillInfo,
   SkillInput,
   SkillResult,
+  Department,
+  KnowledgeLibraryInfo,
+  KnowledgeDocumentMeta,
+  KnowledgeImportResult,
 } from './types'
 
 type ElectronApiShape = {
@@ -17,6 +21,17 @@ type ElectronApiShape = {
   getWorkspaces?: () => Promise<Array<{ path: string; name: string }>>
   createWorkspace?: (name: string, parentDir?: string) => Promise<{ path: string; name: string }>
   deleteWorkspace?: (path: string) => Promise<void>
+  listDepartments?: () => Promise<Department[]>
+  getKnowledgeBaseInfo?: (departmentId?: string) => Promise<KnowledgeLibraryInfo>
+  listKnowledgeDocuments?: (
+    departmentId?: string,
+    query?: string,
+  ) => Promise<KnowledgeDocumentMeta[]>
+  importKnowledgeDocuments?: (departmentId?: string) => Promise<KnowledgeImportResult>
+  deleteKnowledgeDocument?: (
+    departmentId: string,
+    documentId: string,
+  ) => Promise<{ success: boolean }>
   [key: string]: unknown
 }
 
@@ -163,6 +178,52 @@ export const electronPlatformApi: PlatformApi = {
     },
     async run(_skillId: string, _input: SkillInput): Promise<SkillResult> {
       notSupported('platformApi.skills.run')
+    },
+  },
+
+  // ── departments / remote knowledge ─────────────────────────────────────────
+
+  departments: {
+    async list(): Promise<Department[]> {
+      const api = getElectronApi()
+      if (typeof api.listDepartments !== 'function') {
+        notSupported('departments.list')
+      }
+      return api.listDepartments()
+    },
+  },
+
+  knowledge: {
+    async getBaseInfo(departmentId: string): Promise<KnowledgeLibraryInfo> {
+      const api = getElectronApi()
+      if (typeof api.getKnowledgeBaseInfo !== 'function') {
+        notSupported('knowledge.getBaseInfo')
+      }
+      return api.getKnowledgeBaseInfo(departmentId)
+    },
+
+    async listDocuments(departmentId: string): Promise<KnowledgeDocumentMeta[]> {
+      const api = getElectronApi()
+      if (typeof api.listKnowledgeDocuments !== 'function') {
+        notSupported('knowledge.listDocuments')
+      }
+      return api.listKnowledgeDocuments(departmentId)
+    },
+
+    async importDocuments(departmentId: string): Promise<KnowledgeImportResult> {
+      const api = getElectronApi()
+      if (typeof api.importKnowledgeDocuments !== 'function') {
+        notSupported('knowledge.importDocuments')
+      }
+      return api.importKnowledgeDocuments(departmentId)
+    },
+
+    async deleteDocument(departmentId: string, documentId: string): Promise<void> {
+      const api = getElectronApi()
+      if (typeof api.deleteKnowledgeDocument !== 'function') {
+        notSupported('knowledge.deleteDocument')
+      }
+      await api.deleteKnowledgeDocument(departmentId, documentId)
     },
   },
 

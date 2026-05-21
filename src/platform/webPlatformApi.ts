@@ -8,6 +8,10 @@ import type {
   SkillInfo,
   SkillInput,
   SkillResult,
+  Department,
+  KnowledgeLibraryInfo,
+  KnowledgeDocumentMeta,
+  KnowledgeImportResult,
 } from './types'
 
 // ── Token storage ─────────────────────────────────────────────────────────────
@@ -252,6 +256,58 @@ export const webPlatformApi: PlatformApi = {
     },
   },
 
+  // ── departments / remote knowledge ─────────────────────────────────────────
+
+  departments: {
+    async list(): Promise<Department[]> {
+      const data = await apiFetch<{ departments: Department[] }>('/api/departments')
+      return data.departments ?? []
+    },
+  },
+
+  knowledge: {
+    async getBaseInfo(departmentId: string): Promise<KnowledgeLibraryInfo> {
+      return apiFetch<KnowledgeLibraryInfo>(
+        `/api/knowledge/${encodeURIComponent(departmentId)}/info`,
+      )
+    },
+
+    async listDocuments(departmentId: string): Promise<KnowledgeDocumentMeta[]> {
+      const data = await apiFetch<{ documents: KnowledgeDocumentMeta[] }>(
+        `/api/knowledge/${encodeURIComponent(departmentId)}/documents`,
+      )
+      return data.documents ?? []
+    },
+
+    async importDocuments(departmentId: string): Promise<KnowledgeImportResult> {
+      const res = await fetch(
+        `/api/knowledge/${encodeURIComponent(departmentId)}/import`,
+        {
+          method: 'POST',
+          headers: authHeaders(),
+        },
+      )
+      const payload = await res.json().catch(() => ({
+        message: res.statusText,
+      })) as KnowledgeImportResult & { message?: string }
+      if (!res.ok) {
+        throw new Error(
+          payload.message ??
+            (payload as { error?: string }).error ??
+            `导入失败 (${res.status})`,
+        )
+      }
+      return payload
+    },
+
+    async deleteDocument(departmentId: string, documentId: string): Promise<void> {
+      await apiFetch<{ success: boolean }>(
+        `/api/knowledge/${encodeURIComponent(departmentId)}/documents/${encodeURIComponent(documentId)}`,
+        { method: 'DELETE' },
+      )
+    },
+  },
+
   // ── system ──────────────────────────────────────────────────────────────────
 
   system: {
@@ -269,6 +325,8 @@ export const webPlatformApi: PlatformApi = {
         'file.delete',
         'artifact.list',
         'artifact.download',
+        'knowledge',
+        'departments',
       ])
       return webFeatures.has(featureKey)
     },

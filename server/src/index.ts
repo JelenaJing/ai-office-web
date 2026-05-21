@@ -5,6 +5,8 @@ import skillsRouter from './routes/skills'
 import artifactsRouter from './routes/artifacts'
 import workspacesRouter from './routes/workspaces'
 import filesRouter from './routes/files'
+import departmentsRouter from './routes/departments'
+import knowledgeRouter from './routes/knowledge'
 import {
   globalRateLimit,
   authRateLimit,
@@ -60,6 +62,8 @@ app.use('/api/auth', authRateLimit, authRouter)
 app.use('/api/artifacts', artifactsRouter)
 app.use('/api/workspaces', workspacesRouter)
 app.use('/api/files', filesRouter)
+app.use('/api/departments', departmentsRouter)
+app.use('/api/knowledge', knowledgeRouter)
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() })

@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { Department } from '../types/knowledge'
+import { platformApi } from '../platform'
 
 interface DepartmentState {
   departments: Department[]
@@ -36,7 +37,7 @@ export function DepartmentProvider({ children }: { children: ReactNode }) {
     setLoading(true)
     setError(null)
     try {
-      const list: Department[] = await window.electronAPI.listDepartments()
+      const list: Department[] = await platformApi.departments.list()
       setDepartments(list)
 
       // Restore from localStorage or use default
