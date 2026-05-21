@@ -2,6 +2,7 @@ import type { HeaderFooterSpec, PageSpec } from './webDocumentTypes'
 
 export type WebDocumentSkillKind =
   | 'document-generator'
+  | 'document-editor'
   | 'document-template'
   | 'document-importer'
   | 'document-exporter'

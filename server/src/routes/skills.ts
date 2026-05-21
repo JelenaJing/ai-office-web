@@ -235,6 +235,7 @@ router.post('/:skillId/run', skillRunRateLimit, async (req, res) => {
       documentText: params.documentText,
       documentHtml: params.documentHtml,
       templateSkillId: params.templateSkillId,
+      templateManifest: params.templateManifest,
       knowledgeBaseIds: params.knowledgeBaseIds,
       fileIds: params.fileIds,
     })

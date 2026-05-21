@@ -27,7 +27,7 @@ export function logWebWorkbenchViewport(detail: Record<string, unknown>): void {
 }
 
 export const WEB_WORKBENCH_PANEL_COMPONENT: Record<string, string> = {
-  freewrite: 'WebDocumentWorkbench|DocumentEngineHost',
+  freewrite: 'WordLikeDocumentEditor|DocumentEngineHost',
   paper: 'DocumentEngineHost',
   workbench: 'GenerationWorkbenchPanel',
   email: 'CommunicationWorkbench',

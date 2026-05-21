@@ -12,6 +12,7 @@ export interface WebDocumentSkillsState {
   importerSkills: WebDocumentSkillManifest[]
   exporterSkills: WebDocumentSkillManifest[]
   transformerSkills: WebDocumentSkillManifest[]
+  editorSkills: WebDocumentSkillManifest[]
 }
 
 function byKind(skills: WebDocumentSkillManifest[], kind: WebDocumentSkillKind): WebDocumentSkillManifest[] {
@@ -32,7 +33,7 @@ export function useWebDocumentSkills(): WebDocumentSkillsState {
         const extras: WebDocumentSkillManifest[] = []
         for (const s of list) {
           const meta = s as { kind?: WebDocumentSkillKind; mapsToSkillId?: string }
-          if (meta.kind && ['document-generator', 'document-template', 'document-importer', 'document-exporter', 'document-transformer'].includes(meta.kind)) {
+          if (meta.kind && ['document-generator', 'document-editor', 'document-template', 'document-importer', 'document-exporter', 'document-transformer'].includes(meta.kind)) {
             extras.push({
               id: s.id,
               kind: meta.kind,
@@ -79,5 +80,6 @@ export function useWebDocumentSkills(): WebDocumentSkillsState {
     importerSkills: byKind(all, 'document-importer'),
     exporterSkills: byKind(all, 'document-exporter'),
     transformerSkills: byKind(all, 'document-transformer'),
+    editorSkills: byKind(all, 'document-editor'),
   }), [all, error, loading])
 }

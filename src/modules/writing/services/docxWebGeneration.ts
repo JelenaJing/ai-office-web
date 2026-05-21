@@ -3,7 +3,13 @@ import type { Artifact, SkillInput, SkillResult } from '../../../platform'
 import { getBuiltinDocumentSkill } from '../webDocumentBuiltInSkills'
 import type { WebDocumentSkillManifest } from '../webDocumentSkillTypes'
 import type { WebDocumentSession } from '../webDocumentTypes'
-import { DEFAULT_PAGE_SPEC, EMPTY_HEADER_FOOTER } from '../webDocumentTypes'
+import {
+  applyTemplateToSession,
+  createEmptyWebDocumentSession,
+  normalizeWebDocumentSession,
+  recordExportArtifact,
+  toExportDocumentSessionPayload,
+} from '../webDocumentTypes'
 
 export async function runWebDocumentSkill(
   skillId: string,
@@ -28,83 +34,52 @@ export function resolveMapsToSkillId(manifest: WebDocumentSkillManifest): string
   return manifest.mapsToSkillId || manifest.id
 }
 
-export function applyTemplateToSession(
+export function applyTemplateManifestToSession(
   session: WebDocumentSession,
   template: WebDocumentSkillManifest,
 ): WebDocumentSession {
-  return {
-    ...session,
-    selectedTemplateSkillId: template.id,
-    pageSpec: template.pageSpec ? { ...DEFAULT_PAGE_SPEC, ...template.pageSpec } : session.pageSpec,
-    headerFooter: template.headerFooter
-      ? { ...EMPTY_HEADER_FOOTER, ...template.headerFooter }
-      : session.headerFooter,
-    updatedAt: new Date().toISOString(),
-  }
+  return applyTemplateToSession(
+    session,
+    template.id,
+    template.pageSpec,
+    template.headerFooter,
+  )
 }
 
 export function sessionFromSkillResult(
   result: SkillResult & { data?: Record<string, unknown> },
   template: WebDocumentSkillManifest,
-  generatorId: string,
-  sourceRefs: WebDocumentSession['sourceRefs'],
+  knowledgeBaseIds: string[],
+  fileIds: string[],
 ): WebDocumentSession | null {
-  const raw = result.data?.documentSession as WebDocumentSession | undefined
-  if (raw?.content) {
-    const merged = applyTemplateToSession(
-      {
-        ...raw,
-        selectedGeneratorSkillId: generatorId,
-        sourceRefs: {
-          knowledgeBaseIds: sourceRefs.knowledgeBaseIds.length
-            ? sourceRefs.knowledgeBaseIds
-            : raw.sourceRefs?.knowledgeBaseIds ?? [],
-          fileIds: sourceRefs.fileIds.length ? sourceRefs.fileIds : raw.sourceRefs?.fileIds ?? [],
-        },
-        lastArtifactId: result.artifact?.id ?? raw.lastArtifactId,
-        artifacts: result.artifact?.id
-          ? [...new Set([...(raw.artifacts ?? []), result.artifact.id])]
-          : raw.artifacts ?? [],
-      },
-      template,
-    )
-    if (result.data?.html && typeof result.data.html === 'string') {
-      merged.content.html = result.data.html
+  const raw = result.data?.documentSession
+  let session = raw ? normalizeWebDocumentSession(raw) : null
+
+  if (!session && result.data?.html && typeof result.data.html === 'string') {
+    session = {
+      ...createEmptyWebDocumentSession(),
+      title: (result.artifact?.title as string) || '文稿',
+      html: result.data.html as string,
+      markdown: (result.data.markdown as string) || '',
     }
-    if (result.data?.markdown && typeof result.data.markdown === 'string') {
-      merged.content.markdown = result.data.markdown
-    }
-    return merged
   }
+
+  if (!session) return null
+
+  session = applyTemplateManifestToSession(session, template)
+  session.knowledgeBaseIds = knowledgeBaseIds.length ? knowledgeBaseIds : session.knowledgeBaseIds
+  session.fileIds = fileIds.length ? fileIds : session.fileIds
+
   if (result.data?.html && typeof result.data.html === 'string') {
-    const now = new Date().toISOString()
-    return applyTemplateToSession(
-      {
-        id: `doc-${Date.now()}`,
-        title: (result.artifact?.title as string) || '文稿',
-        selectedGeneratorSkillId: generatorId,
-        selectedTemplateSkillId: template.id,
-        selectedExporterSkillIds: [
-          'document.export.docx',
-          'document.export.pdf',
-          'document.export.markdown',
-        ],
-        sourceRefs,
-        content: {
-          blocks: [],
-          html: result.data.html as string,
-          markdown: (result.data.markdown as string) || '',
-        },
-        pageSpec: { ...DEFAULT_PAGE_SPEC },
-        headerFooter: { ...EMPTY_HEADER_FOOTER },
-        artifacts: result.artifact?.id ? [result.artifact.id] : [],
-        lastArtifactId: result.artifact?.id,
-        updatedAt: now,
-      },
-      template,
-    )
+    session.html = result.data.html
   }
-  return null
+  if (result.data?.markdown && typeof result.data.markdown === 'string') {
+    session.markdown = result.data.markdown
+  }
+  if (result.artifact?.id) {
+    session = recordExportArtifact(session, 'docx', result.artifact.id)
+  }
+  return session
 }
 
 export async function runWebDocumentExport(
@@ -114,18 +89,26 @@ export async function runWebDocumentExport(
   bodyHtml: string,
 ): Promise<SkillResult> {
   const skillId = resolveMapsToSkillId(exporter)
+  const format = exporter.outputFormats?.[0]
   return runWebDocumentSkill(skillId, {
     workspacePath,
     params: {
       title: session.title,
-      documentSession: session,
-      html: bodyHtml || session.content.html,
-      markdown: session.content.markdown,
+      documentSession: toExportDocumentSessionPayload(session, bodyHtml),
+      html: bodyHtml,
+      markdown: session.markdown,
       pageSpec: session.pageSpec,
       headerFooter: session.headerFooter,
-      format: exporter.outputFormats?.[0],
+      format,
     },
   })
+}
+
+export function exportFormatFromManifest(exporter: WebDocumentSkillManifest): 'docx' | 'pdf' | 'markdown' {
+  const f = exporter.outputFormats?.[0]
+  if (f === 'pdf') return 'pdf'
+  if (f === 'md' || f === 'markdown') return 'markdown'
+  return 'docx'
 }
 
 export function webDocxSuccessMessage(artifact: Artifact): string {
@@ -140,3 +123,6 @@ export function getDefaultGeneratorSkill(): WebDocumentSkillManifest {
 export function getDefaultTemplateSkill(): WebDocumentSkillManifest {
   return getBuiltinDocumentSkill('document.template.general')!
 }
+
+/** @deprecated 使用 applyTemplateManifestToSession */
+export const applyTemplateToSession = applyTemplateManifestToSession

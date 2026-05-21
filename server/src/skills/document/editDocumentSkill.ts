@@ -20,6 +20,7 @@ export interface EditDocumentInput {
   documentText?: string
   documentHtml?: string
   templateSkillId?: string
+  templateManifest?: unknown
   knowledgeBaseIds?: string[]
   fileIds?: string[]
 }
