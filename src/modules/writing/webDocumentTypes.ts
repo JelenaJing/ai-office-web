@@ -12,6 +12,7 @@ export interface PageSpec {
   marginMm: PageMarginsMm
   lineHeight?: number
   fontFamily?: string
+  fontSize?: string
   fontSizePt?: number
 }
 
@@ -56,6 +57,7 @@ export const DEFAULT_PAGE_SPEC: PageSpec = {
   marginMm: { top: 25, right: 20, bottom: 25, left: 25 },
   lineHeight: 1.6,
   fontFamily: '"PingFang SC", "Microsoft YaHei", sans-serif',
+  fontSize: '12pt',
   fontSizePt: 12,
 }
 

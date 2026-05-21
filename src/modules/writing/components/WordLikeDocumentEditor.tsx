@@ -226,6 +226,13 @@ function DocumentFormatToolbar({
       </FormatBtn>
       <FormatBtn
         type="button"
+        $active={editor.isActive('heading', { level: 3 })}
+        onClick={() => run(() => editor.chain().focus().toggleHeading({ level: 3 }).run())}
+      >
+        三级
+      </FormatBtn>
+      <FormatBtn
+        type="button"
         $active={editor.isActive('paragraph')}
         onClick={() => run(() => editor.chain().focus().setParagraph().run())}
       >
@@ -240,10 +247,58 @@ function DocumentFormatToolbar({
       </FormatBtn>
       <FormatBtn
         type="button"
+        $active={editor.isActive('underline')}
+        onClick={() => run(() => editor.chain().focus().toggleUnderline().run())}
+      >
+        下划线
+      </FormatBtn>
+      <FormatBtn
+        type="button"
         $active={editor.isActive('bulletList')}
         onClick={() => run(() => editor.chain().focus().toggleBulletList().run())}
       >
-        列表
+        无序
+      </FormatBtn>
+      <FormatBtn
+        type="button"
+        $active={editor.isActive('orderedList')}
+        onClick={() => run(() => editor.chain().focus().toggleOrderedList().run())}
+      >
+        有序
+      </FormatBtn>
+      <FormatBtn
+        type="button"
+        $active={editor.isActive({ textAlign: 'left' })}
+        onClick={() => run(() => editor.chain().focus().setTextAlign('left').run())}
+      >
+        左
+      </FormatBtn>
+      <FormatBtn
+        type="button"
+        $active={editor.isActive({ textAlign: 'center' })}
+        onClick={() => run(() => editor.chain().focus().setTextAlign('center').run())}
+      >
+        居中
+      </FormatBtn>
+      <FormatBtn
+        type="button"
+        $active={editor.isActive({ textAlign: 'right' })}
+        onClick={() => run(() => editor.chain().focus().setTextAlign('right').run())}
+      >
+        右
+      </FormatBtn>
+      <FormatBtn
+        type="button"
+        $active={editor.isActive('highlight')}
+        onClick={() => run(() => editor.chain().focus().toggleHighlight().run())}
+      >
+        高亮
+      </FormatBtn>
+      <FormatBtn
+        type="button"
+        onClick={() => run(() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run())}
+      >
+        表格
       </FormatBtn>
       <FormatBtn type="button" onClick={() => run(() => editor.chain().focus().clearNodes().unsetAllMarks().run())}>
         清除格式
