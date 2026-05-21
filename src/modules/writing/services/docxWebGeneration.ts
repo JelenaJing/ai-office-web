@@ -36,8 +36,10 @@ export function resolveMapsToSkillId(manifest: WebDocumentSkillManifest): string
 
 export function applyTemplateManifestToSession(
   session: WebDocumentSession,
-  template: WebDocumentSkillManifest,
+  template?: WebDocumentSkillManifest | null,
 ): WebDocumentSession {
+  if (!template) return session
+
   return applyTemplateToSession(
     session,
     template.id,
@@ -48,9 +50,9 @@ export function applyTemplateManifestToSession(
 
 export function sessionFromSkillResult(
   result: SkillResult & { data?: Record<string, unknown> },
-  template: WebDocumentSkillManifest,
-  knowledgeBaseIds: string[],
-  fileIds: string[],
+  template?: WebDocumentSkillManifest | null,
+  knowledgeBaseIds: string[] = [],
+  fileIds: string[] = [],
 ): WebDocumentSession | null {
   const raw = result.data?.documentSession
   let session = raw ? normalizeWebDocumentSession(raw) : null

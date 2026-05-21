@@ -271,16 +271,35 @@ export default function WordLikeDocumentEditor() {
   const [formatTick, setFormatTick] = useState(0)
   const editorRef = useRef<A4EditorHandle>(null)
 
-  const template = useMemo(
-    () => skills.templateSkills.find((s) => s.id === templateId)
-      ?? getBuiltinDocumentSkill(templateId),
-    [templateId, skills.templateSkills],
-  )
+  const defaultTemplate =
+    getBuiltinDocumentSkill('document.template.general')
+    ?? skills.templateSkills[0]
+    ?? null
+
+  const template = useMemo(() => {
+    return (
+      skills.templateSkills.find((s) => s.id === templateId)
+      ?? getBuiltinDocumentSkill(templateId)
+      ?? defaultTemplate
+      ?? null
+    )
+  }, [templateId, skills.templateSkills, defaultTemplate])
+
+  const templateOptions = skills.templateSkills.length
+    ? skills.templateSkills
+    : defaultTemplate
+      ? [defaultTemplate]
+      : []
+
+  useEffect(() => {
+    if (!template) return
+    if (templateId !== template.id) setTemplateId(template.id)
+  }, [template, templateId])
 
   useEffect(() => {
     if (!template) return
     setSession((prev) => applyTemplateManifestToSession(prev, template))
-  }, [template, templateId])
+  }, [template])
 
   useEffect(() => {
     setSession((prev) => (prev.title === title ? prev : { ...prev, title, updatedAt: new Date().toISOString() }))
@@ -407,10 +426,12 @@ export default function WordLikeDocumentEditor() {
     }
   }
 
-  if (!template) {
+  if (!template || templateOptions.length === 0) {
     return (
       <Shell data-testid="word-like-document-editor">
-        <StatusBanner $tone="err">模板技能未加载</StatusBanner>
+        <StatusBanner $tone="err">
+          文稿模板技能未加载，请刷新或检查 skills 配置。
+        </StatusBanner>
       </Shell>
     )
   }
@@ -431,7 +452,7 @@ export default function WordLikeDocumentEditor() {
         <TopField>
           <TopLabel>模板</TopLabel>
           <TopSelect value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
-            {skills.templateSkills.map((s) => (
+            {templateOptions.map((s) => (
               <option key={s.id} value={s.id}>{s.name}</option>
             ))}
           </TopSelect>

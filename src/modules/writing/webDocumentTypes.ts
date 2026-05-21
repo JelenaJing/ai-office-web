@@ -67,6 +67,13 @@ export const EMPTY_HEADER_FOOTER: HeaderFooterSpec = {
   footerAlign: 'center',
 }
 
+const DEFAULT_TEMPLATE_HEADER_FOOTER: HeaderFooterSpec = {
+  ...EMPTY_HEADER_FOOTER,
+  showPageNumber: true,
+  footerText: '第 {page} 页',
+  footerAlign: 'center',
+}
+
 export function createEmptyWebDocumentSession(): WebDocumentSession {
   const now = new Date().toISOString()
   return {
@@ -78,7 +85,7 @@ export function createEmptyWebDocumentSession(): WebDocumentSession {
     html: '<p></p>',
     markdown: '',
     pageSpec: { ...DEFAULT_PAGE_SPEC },
-    headerFooter: { ...EMPTY_HEADER_FOOTER },
+    headerFooter: { ...DEFAULT_TEMPLATE_HEADER_FOOTER },
     artifacts: {},
     updatedAt: now,
   }
