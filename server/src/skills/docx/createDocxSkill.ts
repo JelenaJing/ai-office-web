@@ -171,8 +171,10 @@ function augmentPrompt(
   return parts.join('')
 }
 
-export async function runCreateDocxSkill(
+export async function runCreateDocxFromGeneratedContent(
   input: CreateDocxInput,
+  content: GeneratedDocxContent,
+  skillId = 'web.docx.create',
 ): Promise<CreateDocxResult> {
   if (!input.workspacePath) {
     return { success: false, error: '请先选择工作区（workspacePath 不能为空）' }
@@ -191,34 +193,8 @@ export async function runCreateDocxSkill(
 
   try {
     const artifactId = randomUUID()
-    const title = params?.title?.trim() || input.title?.trim() || 'AI Office 文稿'
-    const rawPrompt = input.prompt?.trim() || ''
-    if (!rawPrompt) {
-      return { success: false, error: '请输入生成提示词' }
-    }
-    const prompt = augmentPrompt(rawPrompt, params)
     const now = new Date()
-
-    const { content, meta } = await generateDocumentContentDetailed({ title, prompt })
-
-    if (meta.fallback) {
-      console.warn(
-        `[web.docx.create] fallback=true userId=${userId} workspaceId=${workspaceId} model=${meta.model}`,
-      )
-    }
-
-    appendAiInvocationLog({
-      userId,
-      workspaceId,
-      skillId: 'web.docx.create',
-      model: meta.model,
-      promptHash: hashPrompt(prompt),
-      promptLength: prompt.length,
-      outputLength: JSON.stringify(content).length,
-      fallback: meta.fallback,
-    })
-
-    const filename = sanitizeFilename(content.title || title, 'docx')
+    const filename = sanitizeFilename(content.title, 'docx')
     const dir = createArtifactDir(userId, workspaceId, artifactId)
 
     const doc = new Document({
@@ -270,7 +246,7 @@ export async function runCreateDocxSkill(
       type: 'document',
       title: content.title,
       editable: false,
-      createdBySkillId: 'web.docx.create',
+      createdBySkillId: skillId,
       createdAt: now.toISOString(),
       exports: [
         {
@@ -305,4 +281,42 @@ export async function runCreateDocxSkill(
     const msg = err instanceof Error ? err.message : String(err)
     return { success: false, error: msg }
   }
+}
+
+export async function runCreateDocxSkill(
+  input: CreateDocxInput,
+): Promise<CreateDocxResult> {
+  const params = input.params
+  const title = params?.title?.trim() || input.title?.trim() || 'AI Office 文稿'
+  const rawPrompt = input.prompt?.trim() || ''
+  if (!rawPrompt) {
+    return { success: false, error: '请输入生成提示词' }
+  }
+  const prompt = augmentPrompt(rawPrompt, params)
+
+  const parsed = parseWorkspacePath(input.workspacePath)
+  if (!parsed) {
+    return { success: false, error: `workspacePath 格式无效：${input.workspacePath}` }
+  }
+
+  const { content, meta } = await generateDocumentContentDetailed({ title, prompt })
+
+  if (meta.fallback) {
+    console.warn(
+      `[web.docx.create] fallback=true userId=${parsed.userId} workspaceId=${parsed.wsId} model=${meta.model}`,
+    )
+  }
+
+  appendAiInvocationLog({
+    userId: parsed.userId,
+    workspaceId: parsed.wsId,
+    skillId: 'web.docx.create',
+    model: meta.model,
+    promptHash: hashPrompt(prompt),
+    promptLength: prompt.length,
+    outputLength: JSON.stringify(content).length,
+    fallback: meta.fallback,
+  })
+
+  return runCreateDocxFromGeneratedContent(input, content, 'web.docx.create')
 }

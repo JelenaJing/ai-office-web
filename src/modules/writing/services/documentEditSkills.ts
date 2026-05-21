@@ -3,10 +3,32 @@ import type { SkillResult } from '../../../platform'
 import type { DocumentEditMode } from '../webDocumentPatchTypes'
 import type { WebDocumentPatch } from '../webDocumentPatchTypes'
 
+export interface DocumentTypePresetPayload {
+  id?: string
+  label?: string
+  promptHint?: string
+}
+
+export interface TemplateDocumentPayload {
+  title?: string
+  sourceType?: string
+  extractedText?: string
+  outline?: string[]
+}
+
 export interface DocumentGenerateInput {
   instruction: string
   workspacePath: string
   title?: string
+  documentText?: string
+  selectedText?: string
+  selectedHtml?: string
+  language?: 'zh' | 'en'
+  outputLanguage?: 'zh-CN' | 'en-US'
+  extraContext?: string
+  generationMode?: 'default' | 'knowledge-template-document'
+  templateDocument?: TemplateDocumentPayload | null
+  documentTypePreset?: DocumentTypePresetPayload | null
   templateSkillId?: string
   templateManifest?: Record<string, unknown>
   knowledgeBaseIds?: string[]
@@ -23,7 +45,12 @@ export interface DocumentEditInput {
   selectedHtml?: string
   documentText?: string
   documentHtml?: string
+  language?: 'zh' | 'en'
+  outputLanguage?: 'zh-CN' | 'en-US'
+  extraContext?: string
+  documentTypePreset?: DocumentTypePresetPayload | null
   templateSkillId?: string
+  templateManifest?: Record<string, unknown>
   knowledgeBaseIds?: string[]
   fileIds?: string[]
 }
@@ -34,23 +61,84 @@ export type DocumentSkillResult = SkillResult & {
     documentSession?: Record<string, unknown>
     html?: string
     markdown?: string
+    text?: string
   }
+}
+
+function buildGenerateParams(input: DocumentGenerateInput): Record<string, unknown> {
+  return {
+    instruction: input.instruction.trim(),
+    title: input.title,
+    documentText: input.documentText ?? input.currentDocumentText,
+    selectedText: input.selectedText,
+    selectedHtml: input.selectedHtml,
+    language: input.language,
+    outputLanguage: input.outputLanguage,
+    extraContext: input.extraContext,
+    generationMode: input.generationMode,
+    templateDocument: input.templateDocument,
+    documentTypePreset: input.documentTypePreset,
+    templateSkillId: input.templateSkillId,
+    templateManifest: input.templateManifest,
+    knowledgeBaseIds: input.knowledgeBaseIds,
+    fileIds: input.fileIds,
+  }
+}
+
+/** 选择生成 skill：模板 > 知识库 legacy > 默认 legacy workflow */
+export function resolveGenerateSkillId(input: DocumentGenerateInput): string {
+  const hasTemplateText = Boolean(input.templateDocument?.extractedText?.trim())
+  if (input.generationMode === 'knowledge-template-document' || hasTemplateText) {
+    return 'web.template.document.generate.legacy'
+  }
+  if ((input.knowledgeBaseIds?.length ?? 0) > 0) {
+    return 'web.knowledge.writing.legacy'
+  }
+  return 'web.document.generate'
 }
 
 export async function runDocumentGenerate(
   input: DocumentGenerateInput,
 ): Promise<DocumentSkillResult> {
+  const skillId = resolveGenerateSkillId(input)
+  const params = buildGenerateParams(input)
+
+  if (skillId === 'web.template.document.generate.legacy') {
+    return platformApi.skills.run(skillId, {
+      workspacePath: input.workspacePath,
+      params: {
+        instruction: input.instruction.trim(),
+        title: input.title,
+        templateTitle: input.templateDocument?.title,
+        templateExtractedText: input.templateDocument?.extractedText,
+        templateOutline: input.templateDocument?.outline,
+        language: input.language,
+        extraContext: input.extraContext,
+        knowledgeBaseIds: input.knowledgeBaseIds,
+        fileIds: input.fileIds,
+      },
+    }) as Promise<DocumentSkillResult>
+  }
+
+  if (skillId === 'web.knowledge.writing.legacy') {
+    return platformApi.skills.run(skillId, {
+      workspacePath: input.workspacePath,
+      params: {
+        instruction: input.instruction.trim(),
+        title: input.title,
+        documentText: input.documentText ?? input.currentDocumentText,
+        language: input.language,
+        extraContext: input.extraContext,
+        knowledgeBaseIds: input.knowledgeBaseIds,
+        fileIds: input.fileIds,
+      },
+    }) as Promise<DocumentSkillResult>
+  }
+
   return platformApi.skills.run('web.document.generate', {
     prompt: input.instruction.trim(),
     workspacePath: input.workspacePath,
-    params: {
-      title: input.title,
-      templateSkillId: input.templateSkillId,
-      templateManifest: input.templateManifest,
-      knowledgeBaseIds: input.knowledgeBaseIds,
-      fileIds: input.fileIds,
-      currentDocumentText: input.currentDocumentText,
-    },
+    params,
   }) as Promise<DocumentSkillResult>
 }
 
@@ -65,7 +153,12 @@ export async function runDocumentEdit(input: DocumentEditInput): Promise<Documen
       selectedHtml: input.selectedHtml,
       documentText: input.documentText,
       documentHtml: input.documentHtml,
+      language: input.language,
+      outputLanguage: input.outputLanguage,
+      extraContext: input.extraContext,
+      documentTypePreset: input.documentTypePreset,
       templateSkillId: input.templateSkillId,
+      templateManifest: input.templateManifest,
       knowledgeBaseIds: input.knowledgeBaseIds,
       fileIds: input.fileIds,
     },
@@ -93,9 +186,7 @@ export function applyWebDocumentPatch(
       break
     case 'append_section': {
       const block = `${patch.title ? `<h2>${patch.title}</h2>` : ''}${patch.html}`
-      if (editor.focusEnd) {
-        editor.focusEnd()
-      }
+      if (editor.focusEnd) editor.focusEnd()
       editor.insertAtCursor(block)
       break
     }
@@ -104,7 +195,6 @@ export function applyWebDocumentPatch(
   }
 }
 
-/** 根据指令与编辑区状态推断 server edit mode */
 export function inferDocumentEditMode(
   instruction: string,
   hasSelection: boolean,
@@ -160,4 +250,3 @@ export function patchResultMessage(patch: WebDocumentPatch): string {
       return 'AI 已更新文稿'
   }
 }
-

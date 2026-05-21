@@ -17,6 +17,9 @@ import { runCreateImageSkill } from '../skills/image/createImageSkill'
 import { runCreatePptxSkill } from '../skills/ppt/createPptxSkill'
 import { runDailyReportSkill } from '../skills/report/dailyReportSkill'
 import { runEditDocumentSkill, type EditDocumentInput } from '../skills/document/editDocumentSkill'
+import { runGenerateDocumentSkill, type GenerateDocumentInput } from '../skills/document/generateDocumentSkill'
+import { runKnowledgeWritingLegacySkill } from '../skills/document/knowledgeWritingLegacySkill'
+import { runTemplateDocumentGenerateLegacySkill } from '../skills/document/templateDocumentGenerateLegacySkill'
 import { skillRunRateLimit } from '../middleware/rateLimit'
 
 const router = Router()
@@ -44,6 +47,24 @@ const BUILTIN_SKILLS = [
     id: 'web.document.edit',
     name: 'Web 文稿 AI 编辑',
     description: '根据自然语言指令改写选区、插入或润色全文。',
+    category: 'document',
+    outputArtifactType: 'document',
+    version: '1.0.0',
+    enabled: true,
+  },
+  {
+    id: 'web.knowledge.writing.legacy',
+    name: '知识库写作（Legacy 工作流）',
+    description: '复用 Electron 写作助手 prompt，结合知识库上下文生成文稿。',
+    category: 'document',
+    outputArtifactType: 'document',
+    version: '1.0.0',
+    enabled: true,
+  },
+  {
+    id: 'web.template.document.generate.legacy',
+    name: '模板文稿生成（Legacy 工作流）',
+    description: '两段式模板分析 + 全文生成。',
     category: 'document',
     outputArtifactType: 'document',
     version: '1.0.0',
@@ -215,8 +236,89 @@ router.post('/:skillId/run', skillRunRateLimit, async (req, res) => {
   }
 
   if (skillId === 'web.document.generate') {
-    const out = await runWebDocxCreateHandler(req.body, true)
-    return res.status(out.status).json(out.body)
+    const body = req.body as Record<string, unknown>
+    const params = (body.params ?? body) as Record<string, unknown>
+    const workspacePath = String(body.workspacePath ?? params.workspacePath ?? '')
+    if (!workspacePath) {
+      return res.status(400).json({ success: false, error: '请先选择工作区（缺少 workspacePath）' })
+    }
+    const result = await runGenerateDocumentSkill({
+      instruction: String(body.prompt ?? params.instruction ?? ''),
+      workspacePath,
+      title: params.title as string | undefined,
+      documentText: params.documentText as string | undefined,
+      language: params.language as 'zh' | 'en' | undefined,
+      outputLanguage: params.outputLanguage as 'zh-CN' | 'en-US' | undefined,
+      extraContext: params.extraContext as string | undefined,
+      generationMode: params.generationMode as 'default' | 'knowledge-template-document' | undefined,
+      templateDocument: params.templateDocument as GenerateDocumentInput['templateDocument'],
+      documentTypePreset: params.documentTypePreset as GenerateDocumentInput['documentTypePreset'],
+      templateSkillId: params.templateSkillId as string | undefined,
+      templateManifest: params.templateManifest,
+      knowledgeBaseIds: params.knowledgeBaseIds as string[] | undefined,
+      fileIds: params.fileIds as string[] | undefined,
+    })
+    if (result.success) {
+      return res.json({
+        success: true,
+        artifact: result.artifact,
+        artifactId: result.artifact.id,
+        data: result.data,
+      })
+    }
+    return res.status(500).json({ success: false, error: result.error })
+  }
+
+  if (skillId === 'web.knowledge.writing.legacy') {
+    const body = req.body as Record<string, unknown>
+    const params = (body.params ?? body) as Record<string, unknown>
+    const workspacePath = String(body.workspacePath ?? params.workspacePath ?? '')
+    const result = await runKnowledgeWritingLegacySkill({
+      instruction: String(params.instruction ?? body.prompt ?? ''),
+      workspacePath,
+      title: params.title as string | undefined,
+      documentText: params.documentText as string | undefined,
+      language: params.language as 'zh' | 'en' | undefined,
+      extraContext: params.extraContext as string | undefined,
+      knowledgeBaseIds: params.knowledgeBaseIds as string[] | undefined,
+      fileIds: params.fileIds as string[] | undefined,
+    })
+    if (result.success) {
+      return res.json({
+        success: true,
+        artifact: result.artifact,
+        artifactId: result.artifact?.id,
+        data: result.data,
+      })
+    }
+    return res.status(500).json({ success: false, error: result.error })
+  }
+
+  if (skillId === 'web.template.document.generate.legacy') {
+    const body = req.body as Record<string, unknown>
+    const params = (body.params ?? body) as Record<string, unknown>
+    const workspacePath = String(body.workspacePath ?? params.workspacePath ?? '')
+    const result = await runTemplateDocumentGenerateLegacySkill({
+      instruction: String(params.instruction ?? body.prompt ?? ''),
+      workspacePath,
+      title: params.title as string | undefined,
+      templateTitle: params.templateTitle as string | undefined,
+      templateExtractedText: params.templateExtractedText as string | undefined,
+      templateOutline: params.templateOutline as string[] | undefined,
+      language: params.language as 'zh' | 'en' | undefined,
+      extraContext: params.extraContext as string | undefined,
+      knowledgeBaseIds: params.knowledgeBaseIds as string[] | undefined,
+      fileIds: params.fileIds as string[] | undefined,
+    })
+    if (result.success) {
+      return res.json({
+        success: true,
+        artifact: result.artifact,
+        artifactId: result.artifact?.id,
+        data: result.data,
+      })
+    }
+    return res.status(500).json({ success: false, error: result.error })
   }
 
   if (skillId === 'web.document.edit') {
@@ -234,10 +336,15 @@ router.post('/:skillId/run', skillRunRateLimit, async (req, res) => {
       selectedHtml: params.selectedHtml,
       documentText: params.documentText,
       documentHtml: params.documentHtml,
+      language: params.language,
+      outputLanguage: params.outputLanguage,
+      extraContext: params.extraContext,
+      documentTypePreset: params.documentTypePreset,
       templateSkillId: params.templateSkillId,
       templateManifest: params.templateManifest,
       knowledgeBaseIds: params.knowledgeBaseIds,
       fileIds: params.fileIds,
+      workspacePath,
     })
     if (result.success) {
       return res.json({ success: true, data: result.data })

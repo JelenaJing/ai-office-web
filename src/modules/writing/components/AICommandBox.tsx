@@ -95,6 +95,9 @@ export interface AICommandBoxProps {
   onSessionUpdate: (session: WebDocumentSession) => void
   onStatus?: (message: string, tone?: 'ok' | 'err') => void
   disabled?: boolean
+  generationMode?: 'default' | 'knowledge-template-document'
+  templateDocument?: import('../services/documentEditSkills').TemplateDocumentPayload | null
+  documentTypePreset?: import('../services/documentEditSkills').DocumentTypePresetPayload | null
 }
 
 export function AICommandBox({
@@ -108,6 +111,9 @@ export function AICommandBox({
   onSessionUpdate,
   onStatus,
   disabled,
+  generationMode,
+  templateDocument,
+  documentTypePreset,
 }: AICommandBoxProps) {
   const [instruction, setInstruction] = useState('')
   const [busy, setBusy] = useState(false)
@@ -192,11 +198,15 @@ export function AICommandBox({
         instruction: prompt,
         workspacePath,
         title,
+        documentText: ed?.getText() ?? '',
+        currentDocumentText: ed?.getText() ?? '',
         templateSkillId: template.id,
         templateManifest: template as unknown as Record<string, unknown>,
         knowledgeBaseIds,
         fileIds,
-        currentDocumentText: ed?.getText() ?? '',
+        generationMode: templateDocument ? 'knowledge-template-document' : 'default',
+        templateDocument: templateDocument ?? undefined,
+        documentTypePreset: documentTypePreset ?? undefined,
       })
 
       if (!result.success) {
@@ -275,8 +285,10 @@ export function AICommandBox({
         documentText: ed?.getText(),
         documentHtml: ed?.getHtml(),
         templateSkillId: template.id,
+        templateManifest: template as unknown as Record<string, unknown>,
         knowledgeBaseIds,
         fileIds,
+        documentTypePreset: documentTypePreset ?? undefined,
       })
 
       if (!result.success) {

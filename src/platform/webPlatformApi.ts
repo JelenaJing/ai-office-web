@@ -470,6 +470,8 @@ export const webPlatformApi: PlatformApi = {
         'web.docx.create',
         'web.document.generate',
         'web.document.edit',
+        'web.knowledge.writing.legacy',
+        'web.template.document.generate.legacy',
         'web.docx.export',
         'web.markdown.export',
         'web.pdf.export',

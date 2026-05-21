@@ -5,6 +5,7 @@
 export type { LlmMessage, LlmInvokeOptions } from './llmClient'
 export {
   invokeLlmJson,
+  invokeLlmText,
   getLlmModel,
   isLlmConfigured,
   resolveBaseUrl,
