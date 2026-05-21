@@ -30,6 +30,8 @@ import {
 } from '../webDocumentTypes'
 import { A4RichTextEditor, type A4EditorHandle } from './A4RichTextEditor'
 import { AICommandBox } from './AICommandBox'
+import { DocumentContextMenu } from './DocumentContextMenu'
+import { useDocumentPatchActions } from '../hooks/useDocumentPatchActions'
 
 const Shell = styled.div`
   flex: 1;
@@ -324,6 +326,7 @@ export default function WordLikeDocumentEditor() {
   const [pendingImportFile, setPendingImportFile] = useState<File | null>(null)
   const [uploadedFiles, setUploadedFiles] = useState<FileEntry[]>([])
   const [formatTick, setFormatTick] = useState(0)
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; hasSelection: boolean } | null>(null)
   const editorRef = useRef<A4EditorHandle>(null)
 
   const defaultTemplate =
@@ -398,6 +401,35 @@ export default function WordLikeDocumentEditor() {
 
   const tipTapEditor = editorRef.current?.getTipTapEditor() ?? null
   void formatTick
+
+  const patchActions = useDocumentPatchActions({
+    editorRef,
+    session,
+    workspacePath: activeWorkspacePath,
+    title,
+    template: template ?? ({ id: '', name: '' } as import('../webDocumentSkillTypes').WebDocumentSkillManifest),
+    knowledgeBaseIds: workspaceKbIds,
+    fileIds: session.fileIds,
+    onSessionUpdate: setSession,
+    onStatus: (msg, tone) => {
+      setStatus(msg)
+      setStatusTone(tone)
+    },
+  })
+
+  const handleClipboard = useCallback((action: 'copy' | 'cut' | 'paste' | 'selectAll') => {
+    const ed = editorRef.current
+    if (action === 'selectAll') {
+      ed?.focus()
+      document.execCommand('selectAll')
+      return
+    }
+    const ok = document.execCommand(action)
+    if (!ok) {
+      setStatus(`浏览器限制了剪贴板访问，请使用快捷键 Ctrl+${action === 'copy' ? 'C' : action === 'cut' ? 'X' : 'V'}`)
+      setStatusTone('err')
+    }
+  }, [])
 
   const handleExport = async (exporterId: string) => {
     if (!activeWorkspacePath || !template) return
@@ -573,6 +605,7 @@ export default function WordLikeDocumentEditor() {
                 updatedAt: new Date().toISOString(),
               }))
             }}
+            onContextMenu={(x, y, hasSelection) => setCtxMenu({ x, y, hasSelection })}
           />
         </EditorColumn>
 
@@ -592,6 +625,7 @@ export default function WordLikeDocumentEditor() {
               setStatusTone(tone)
             }}
             disabled={exportBusy}
+            patchActions={patchActions}
           />
         </AiSidebar>
       </Body>
@@ -631,6 +665,35 @@ export default function WordLikeDocumentEditor() {
             </div>
           </ModalCard>
         </ModalBackdrop>
+      )}
+
+      {ctxMenu && (
+        <DocumentContextMenu
+          x={ctxMenu.x}
+          y={ctxMenu.y}
+          hasSelection={ctxMenu.hasSelection}
+          running={patchActions.running}
+          onAiAction={(instruction, mode) => {
+            setCtxMenu(null)
+            void patchActions.runAiEditAction(instruction, mode)
+          }}
+          onHeading={(level) => {
+            editorRef.current?.setHeading(level)
+            setCtxMenu(null)
+          }}
+          onFormat={(action) => {
+            editorRef.current?.[action]?.()
+            setCtxMenu(null)
+            setFormatTick((n) => n + 1)
+          }}
+          onTextAlign={(align) => {
+            editorRef.current?.setTextAlign(align)
+            setCtxMenu(null)
+            setFormatTick((n) => n + 1)
+          }}
+          onClipboard={handleClipboard}
+          onClose={() => setCtxMenu(null)}
+        />
       )}
     </Shell>
   )

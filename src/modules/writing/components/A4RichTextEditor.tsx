@@ -52,6 +52,7 @@ export interface A4RichTextEditorProps {
   pageSpec: PageSpec
   headerFooter: HeaderFooterSpec
   onChange?: (html: string) => void
+  onContextMenu?: (x: number, y: number, hasSelection: boolean) => void
 }
 
 const PageScroll = styled.div`
@@ -362,7 +363,7 @@ const emptyHandle: A4EditorHandle = {
 }
 
 export const A4RichTextEditor = forwardRef<A4EditorHandle, A4RichTextEditorProps>(
-  function A4RichTextEditor({ initialHtml, pageSpec, headerFooter, onChange }, ref) {
+  function A4RichTextEditor({ initialHtml, pageSpec, headerFooter, onChange, onContextMenu }, ref) {
     const editor = useEditor({
       extensions: [
         StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
@@ -429,7 +430,16 @@ export const A4RichTextEditor = forwardRef<A4EditorHandle, A4RichTextEditorProps
             $fontSize={fontSize}
             $lineHeight={lineHeight}
           >
-            <EditorContent editor={editor} />
+            <div
+              onContextMenu={(e) => {
+                if (!onContextMenu) return
+                e.preventDefault()
+                const hasSel = (editor?.state.selection.empty === false) ?? false
+                onContextMenu(e.clientX, e.clientY, hasSel)
+              }}
+            >
+              <EditorContent editor={editor} />
+            </div>
           </EditorWrap>
           {footerText ? (
             <PageFooter $align={footerAlign} $leftPx={leftPx} $rightPx={rightPx}>

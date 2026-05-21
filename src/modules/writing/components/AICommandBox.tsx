@@ -7,17 +7,16 @@ import { Sparkles, Undo2 } from 'lucide-react'
 import type { A4EditorHandle } from './A4RichTextEditor'
 import {
   AI_MODE_HINT_LABELS,
-  applyWebDocumentPatch,
   inferDocumentEditMode,
   patchResultMessage,
   resolveAiCommandModeHint,
-  runDocumentEdit,
   runDocumentGenerate,
 } from '../services/documentEditSkills'
 import { sessionFromSkillResult } from '../services/docxWebGeneration'
 import type { WebDocumentSkillManifest } from '../webDocumentSkillTypes'
 import type { WebDocumentSession } from '../webDocumentTypes'
 import type { DocumentEditMode, WebDocumentPatch } from '../webDocumentPatchTypes'
+import type { UseDocumentPatchActionsReturn } from '../hooks/useDocumentPatchActions'
 
 const Panel = styled.div`
   display: flex;
@@ -98,6 +97,8 @@ export interface AICommandBoxProps {
   generationMode?: 'default' | 'knowledge-template-document'
   templateDocument?: import('../services/documentEditSkills').TemplateDocumentPayload | null
   documentTypePreset?: import('../services/documentEditSkills').DocumentTypePresetPayload | null
+  /** Shared patch/undo hook instance from parent (WordLikeDocumentEditor) */
+  patchActions: UseDocumentPatchActionsReturn
 }
 
 export function AICommandBox({
@@ -114,13 +115,13 @@ export function AICommandBox({
   generationMode,
   templateDocument,
   documentTypePreset,
+  patchActions,
 }: AICommandBoxProps) {
   const [instruction, setInstruction] = useState('')
   const [busy, setBusy] = useState(false)
   const [modeHint, setModeHint] = useState('')
   const [resultMsg, setResultMsg] = useState('')
   const [resultTone, setResultTone] = useState<'ok' | 'err' | undefined>()
-  const [undoHtml, setUndoHtml] = useState<string | null>(null)
 
   const readEditor = () => editorRef.current
 
@@ -141,38 +142,17 @@ export function AICommandBox({
     return () => document.removeEventListener('selectionchange', onSel)
   }, [refreshModeHint])
 
-  const syncSessionHtml = (html: string, markdown?: string) => {
-    onSessionUpdate({
-      ...session,
-      title,
-      html,
-      markdown: markdown ?? session.markdown,
-      updatedAt: new Date().toISOString(),
-    })
-  }
-
   const applyPatchWithUndo = (patch: WebDocumentPatch) => {
-    const ed = readEditor()
-    if (!ed) return
-    const previousHtml = ed.getHtml()
-    setUndoHtml(previousHtml)
-    applyWebDocumentPatch(ed, patch)
-    syncSessionHtml(ed.getHtml(), patch.markdown)
-    setResultMsg(patchResultMessage(patch))
+    patchActions.applyPatchWithUndo(patch)
+    const msg = patchResultMessage(patch)
+    setResultMsg(msg)
     setResultTone('ok')
-    onStatus?.(patchResultMessage(patch), 'ok')
   }
 
   const handleUndo = () => {
-    if (!undoHtml) return
-    const ed = readEditor()
-    if (!ed) return
-    ed.replaceDocument(undoHtml)
-    syncSessionHtml(undoHtml)
-    setUndoHtml(null)
+    patchActions.undoLastPatch()
     setResultMsg('已撤销上一次 AI 修改')
     setResultTone('ok')
-    onStatus?.('已撤销', 'ok')
   }
 
   const handleGenerateDraft = async (promptOverride?: string) => {
@@ -225,8 +205,7 @@ export function AICommandBox({
 
       const next = sessionFromSkillResult(result, template, knowledgeBaseIds, fileIds)
       if (next?.html && ed) {
-        setUndoHtml(ed.getHtml())
-        ed.replaceDocument(next.html)
+        patchActions.applyPatchWithUndo({ type: 'replace_document', html: next.html, markdown: next.markdown ?? undefined })
         onSessionUpdate(next)
         setResultMsg('初稿已生成')
         setResultTone('ok')
@@ -275,37 +254,7 @@ export function AICommandBox({
     setResultMsg('AI 正在修改文稿…')
     setResultTone(undefined)
     try {
-      const result = await runDocumentEdit({
-        instruction: cmd,
-        mode,
-        workspacePath,
-        title,
-        selectedText: ed?.getSelectionText(),
-        selectedHtml: ed?.getSelectionHtml(),
-        documentText: ed?.getText(),
-        documentHtml: ed?.getHtml(),
-        templateSkillId: template.id,
-        templateManifest: template as unknown as Record<string, unknown>,
-        knowledgeBaseIds,
-        fileIds,
-        documentTypePreset: documentTypePreset ?? undefined,
-      })
-
-      if (!result.success) {
-        setResultMsg(result.error || '编辑失败')
-        setResultTone('err')
-        onStatus?.(result.error || '编辑失败', 'err')
-        return
-      }
-
-      const patch = result.data?.patch
-      if (!patch) {
-        setResultMsg('未返回文稿补丁')
-        setResultTone('err')
-        return
-      }
-
-      applyPatchWithUndo(patch)
+      await patchActions.runAiEditAction(cmd, mode)
       setInstruction('')
     } catch (e) {
       const msg = e instanceof Error ? e.message : '编辑失败'
@@ -350,7 +299,7 @@ export function AICommandBox({
         <CmdBtn type="button" disabled={busy || disabled} onClick={() => void handlePolish()}>
           优化全文
         </CmdBtn>
-        <CmdBtn type="button" disabled={!undoHtml || busy || disabled} onClick={handleUndo}>
+        <CmdBtn type="button" disabled={!patchActions.canUndo || busy || disabled} onClick={handleUndo}>
           <Undo2 size={14} /> 撤销
         </CmdBtn>
       </BtnRow>
