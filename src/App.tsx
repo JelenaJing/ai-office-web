@@ -937,7 +937,7 @@ function WriterWorkspaceRuntime({
               )}
             </WorkspaceTopBar>
             <MainArea>
-              {mode === 'free' && <DocumentFilePanel />}
+              {mode === 'free' && !isWebShim() && <DocumentFilePanel />}
               <CenterColumn>
                 <DocumentViewport>
                   <WorkspaceViewportHost ghostTextEnabled={false} />

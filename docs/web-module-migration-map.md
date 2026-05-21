@@ -3,7 +3,56 @@
 > 扫描时间：2026-05-21  
 > 分支基线：`feat/web-service-migration-p1`（含 P0/P0.5、远程知识库 platformApi）  
 > 目的：将 **原 UI → platformApi → Web server API → server module → 复用 Electron 业务逻辑** 的剩余迁移路径文档化。  
-> **本文件为审计文档，不包含业务代码改动。**
+> **本文件为审计与裁剪决策文档**；`WorkspaceContext` Web 裁剪已落地，其余实现仍按章节推进。  
+> **Web 不是 Electron 本地工作区的网页克隆。**
+
+---
+
+## Web 产品形态（与 Electron 的差异）
+
+| 维度 | Electron 桌面版 | AI Office Web |
+|---|---|---|
+| 资源组织 | 本地工作区目录 + 文件树 + `.aidoc.json` | **资源中心**（我的文件 / 生成记录 / 知识库资料） |
+| 工作场景 | 同一套 UI，大量本地路径操作 | 场景入口 + **platformApi**，无本地树 |
+| 资源引用 | `workspacePath`、绝对路径 | **`fileId` / `artifactId` / `knowledgeDocumentId` / workspace token** |
+| 禁止项 | — | 本地绝对路径、`open*Dialog`、`getWorkspaceTree`、展示 `documents/` 等内部目录 |
+
+### Web 保留的 UI 壳（不重写）
+
+1. **资源中心** — `ResourceWorkspace`、`MyFilesView`、Artifacts、`RemoteKnowledgePanel`  
+2. **工作场景** — 文稿（`WebWritingPanel`）、Excel / PPT / 图片 / 邮件 / 日报（入口保留，执行层迁移）  
+3. **设置 / Skill** — 设置页、Skill 文稿 Tab；Store 后续 server 签发 embed  
+
+---
+
+## 不迁移到 Web（Electron-only）
+
+以下能力**不要**为其设计 Web API，Web 端继续 feature gate / 隐藏 / 资源中心替代：
+
+| 类别 | IPC / 能力 | Web 处理 |
+|---|---|---|
+| 本地文件树 | `workspace:tree`、`createFolder`、`createFile`、`renamePath`、`movePath`、`deletePath` | `electron-only`；`WorkspaceContext.refreshTree` Web 为 no-op |
+| 注册本地目录 | `registerWorkspace`、`openDirectoryDialog` | `electron-only` |
+| 本地路径打开 | `openExternal`、`openDocumentPath`、按绝对路径打开 | `electron-only` |
+| 本地保存对话框 | `saveDialog`、导出到用户自选路径 | `electron-only`；Web 用 artifact 下载 |
+| `.aidoc.json` 树 | 侧栏文件树、`.aidoc.json` 主入口 | Web 不展示；`web-replace-with-resource-center` |
+| 本地 Vosk | `voice:*` | `electron-only`；后续 Web Speech / server STT |
+| Matrix / 作业 / AI课堂 / AI论坛 | 相关 IPC 与 Workbench | `hidden-for-web`（已有 ComingSoon） |
+
+---
+
+## 需要迁移到 Web（保留原 UI，迁移执行层）
+
+| 模块 | 说明 |
+|---|---|
+| Knowledge | 远程读接口已迁移；下一步仅 **multipart 上传** |
+| Excel | `fileId` + server 分析 → **artifact** |
+| PPT | 保留 Deck/PPT UI 思路；server `pptxGenerator` → **pptx artifact** |
+| 图片 | `imageClient`；参考图 `fileId`/`artifactId` |
+| 邮件 | 保留 Communication/Email UI；凭据仅存 server |
+| 日报 | server 生成；来源 files/artifacts/activity log |
+| 设置 | provider/model 在 server；API Key 不下发浏览器 |
+| Skill Store | server embed URL + 包管理 |
 
 ---
 
@@ -30,7 +79,7 @@
 | 能力 | UI | platformApi | server route | server module | 备注 |
 |---|---|---|---|---|---|
 | 登录 / 会话 | LoginPage 等 | `auth.*` | `/api/auth/*` | AccountCenter 代理 | Bearer = AC token |
-| 默认工作区 | WorkspaceContext（部分） | `workspaces.*` | `/api/workspaces/*` | `workspaceStore` | **树/本地路径仍走 IPC** |
+| 默认工作区 token | WorkspaceContext（Web） | `workspaces.getDefault` | `/api/workspaces/default` | `workspaceStore` | **无 fileTree；不走 getWorkspaceTree** |
 | 我的文件 | ResourceWorkspace / MyFilesView | `files.*` | `/api/files/*` | `routes/files` | `fileId`，非绝对路径 |
 | 生成记录 | ResourceWorkspace | `artifacts.*` | `/api/artifacts/*` | `routes/artifacts` | 下载走 artifactId |
 | 文稿生成 Word | WebWritingPanel / Skill 页 | `skills.run('web.docx.create')` | `/api/skills/:id/run` | `ai-gateway` + `createDocxSkill` | **必须进 Artifact** |
@@ -192,22 +241,22 @@
 
 ---
 
-### 9. 本地文件树 / 文档打开 / 导出
+### 9. 本地文件树 / 文档打开 / 导出（Web 结论）
 
 | 字段 | 内容 |
 |---|---|
-| **模块** | 工作区文件树 / 文档生命周期 |
-| **UI 入口** | `FileExplorer.tsx`；`WorkspaceContext.tsx`；`DocumentFilePanel.tsx`；`WorkspaceFilesPanel`；`WorkspaceGate.tsx`；`utils/workspaceFiles.ts` |
-| **当前 Electron IPC** | `workspace:list/create/rename/delete/register/tree`；`workspace:createFolder/createFile/createBlankDocument/renamePath/movePath/deletePath/importFiles`；`workspace:read/saveDocumentSchema`；`file:openDirectoryDialog/openFileDialog/saveDialog/read/write/openExternal` |
-| **当前 Electron service** | `workspaceService.ts` |
-| **当前前端调用点** | `WorkspaceContext.tsx`（**仍全量 IPC**）；`FileExplorer.tsx`；`DocumentFilePanel.tsx`；`workspaceFiles.ts` |
-| **目标 platformApi** | 扩展 `platformApi.workspaces.{getTree,createNode,rename,delete,import}`；`platformApi.files` 已有扁平列表 |
-| **目标 server route** | `/api/workspaces/tree`、`POST /api/workspaces/nodes`、`POST /api/workspaces/import`（multipart） |
-| **目标 server module** | 扩展 `server/src/lib/workspaceStore` + `routes/workspaces`（**部分已有** default workspace） |
-| **Artifact 输出** | 导入文件进 **files**；生成物进 **artifacts** |
-| **迁移优先级** | **P0 扩展 / P1**（树 + 打开编辑器） |
-| **Web 约束** | 所有 `wsPath` 使用已有 `web-workspace:{userId}:{id}` token；树节点 ID 非磁盘相对路径暴露 |
-| **可搬 server** | ✅ 元数据索引；⚠️ 大文件走 files API；❌ `openExternal` / 目录选择 |
+| **模块** | 工作区文件树 / 本地文档生命周期 |
+| **UI 入口（Electron）** | `FileExplorer.tsx`；`DocumentFilePanel.tsx`（侧栏树）；`WorkspaceFilesPanel`；`WorkspaceGate.tsx` |
+| **UI 入口（Web）** | **不显示** FileExplorer / 文件树 / `.aidoc.json`；`App.tsx` Web 下隐藏 `DocumentFilePanel`；用 **资源中心** + `WebWritingPanel` |
+| **当前 Electron IPC** | `workspace:tree`、`createFolder`、`createFile`、`renamePath`、`importFiles`；`file:openDialog/saveDialog/openExternal`；`readWorkspaceDocumentSchema` |
+| **当前 Electron service** | `workspaceService.ts`、`documentEngineService.ts` |
+| **Web 决策** | **不迁移完整本地文件树** |
+| **Web 替代** | 我的文件（`fileId`）、生成记录（`artifactId`）、知识库（`knowledgeDocumentId`）、默认 workspace **token**（`web-workspace:{userId}:{wsId}`） |
+| **目标 platformApi（Web）** | 已有 `files.*`、`artifacts.*`；`workspaces.getDefault`（**仅 token，无 tree**）；未来 `web-later-document-session` 做高级编辑会话 |
+| **目标 server route（Web）** | 不实现 `/api/workspaces/tree`；继续 `/api/files`、`/api/artifacts`、`/api/workspaces/default` |
+| **Artifact 输出** | 生成物进 artifacts；上传进 files |
+| **迁移优先级** | Web：**N/A（electron-only 树）**；Electron：保持现状 |
+| **可搬 server** | ❌ 树操作不搬；✅ 扁平 files/artifacts 已具备 |
 
 ---
 
@@ -310,8 +359,8 @@
 3. **P1-C**：Image `image.generate` skill + artifact  
 4. **P1-D**：知识库高级检索 `previewTaskContext` / `getDocument`（复用 remoteKnowledgeClient）  
 5. **P1-E**：Activity 日报 → skill + artifact  
-6. **P2**：Email、Settings、Workspace 文件树、Skill Store  
-7. **P2+**：Calendar server 持久化、Editor 全量 parity  
+6. **P2**：Email、Settings、Skill Store  
+7. **P2+**：Calendar server 持久化、`web-later-document-session`（非文件树）  
 
 ---
 
@@ -324,4 +373,51 @@
 
 ---
 
-*文档仅用于规划；实现时请按模块拆 PR，避免「重写 UI」或「ComingSoon 替代原面板」。*
+# Web Conversion Decision
+
+> 决策值枚举：`convert-to-web` | `electron-only` | `web-replace-with-resource-center` | `web-later-document-session` | `hidden-for-web`
+
+| 功能 | 当前状态 | Web 决策 | 处理方式 | 优先级 |
+|---|---|---|---|---|
+| 登录 / AccountCenter | Web 已接 AC 代理 | convert-to-web | `platformApi.auth` + `/api/auth/*` | P0 ✅ |
+| 我的文件 | platformApi.files | convert-to-web | `/api/files/*` | P0 ✅ |
+| 生成记录 | platformApi.artifacts | convert-to-web | `/api/artifacts/*` | P0 ✅ |
+| 远程知识库列表/读/删 | platformApi.knowledge | convert-to-web | `/api/knowledge/*` + remoteKnowledgeClient | P0 ✅ |
+| 知识库上传 | IPC 系统对话框 | convert-to-web | `POST .../import` multipart（待做） | P1 |
+| 默认 workspace token | Web 已用 getDefault | convert-to-web | 无 fileTree；`WorkspaceContext` Web 裁剪 ✅ | P0 ✅ |
+| 本地 workspace 文件树 | Electron IPC tree | electron-only | Web 不调用 `getWorkspaceTree` | — |
+| FileExplorer / 侧栏树 | Electron UI | electron-only | Web 隐藏 | — |
+| .aidoc.json 文稿树 | DocumentFilePanel | web-replace-with-resource-center | Web 用 WebWritingPanel + 生成记录 | P0 ✅ |
+| 文稿生成 Word | WebWritingPanel + skill | convert-to-web | `web.docx.create` → artifact | P0 ✅ |
+| Excel 数据分析 | ExcelAnalysisWorkbench | convert-to-web | fileId + server `runExcelAnalysis` → artifact | P1 |
+| PPT 生成 | GenerationWorkbench | convert-to-web | skill/job + pptx artifact | P1 |
+| 图片生成 | ImageWorkspace | convert-to-web | skill + image artifact | P1 |
+| 邮件收发 | EmailContext / Communication | convert-to-web | `/api/email/*`，凭据 server-only | P1 |
+| 日报 / 审计 | ActivityReportPanel | convert-to-web | server activity + report artifact | P1 |
+| 设置中心 | FullSettingsPanel | convert-to-web | `/api/settings/ai`，key 不下发 | P2 |
+| Skill Store | SkillManagementView 商店 Tab | convert-to-web | server embed + 包管理 | P2 |
+| Formal Template / EditorPanel | 桌面编辑器 | web-later-document-session | 非文件树；artifact 会话 | P2+ |
+| 本地路径打开/保存对话框 | file/workspace IPC | electron-only | artifact 下载 / multipart 上传 | — |
+| 日历 | localStorage | convert-to-web | `/api/calendar/events`（新建） | P2 |
+| Vosk 语音 | voice IPC | electron-only | 后续 Web Speech / STT | P3 |
+| Matrix 聊天 | matrix IPC | hidden-for-web | 非 Web 主线 | — |
+| 作业辅助 / AI课堂 / AI论坛 | homework IPC | hidden-for-web | feature gate + ComingSoon | — |
+| Plot 实时图表（附属） | plot IPC | electron-only 或合并 Excel | 随 Excel P1 规划 | P2 |
+| 论文生成 / compat 任务 | paper IPC | hidden-for-web 或 P3 | 非 Web 主线 | P3 |
+| 个人文库 personal-lib | personalLibraryAPI | electron-only / P3 | 非资源中心主线 | P3 |
+| electronAPIShim 全量 mock | 启动 shim | web-replace-with-resource-center | 随各域迁移缩小 mock | 持续 |
+
+---
+
+## Web UI 裁剪清单（代码已做 / 应保持）
+
+| Web 显示 | 组件 |
+|---|---|
+| ✅ | `ResourceWorkspace`、`MyFilesView`、Artifacts、`RemoteKnowledgePanel` |
+| ✅ | `WebWritingPanel`（文稿）；`WorkspaceViewportHost` feature gate |
+| ❌ | `FileExplorer`、`DocumentFilePanel`（Web 已隐藏侧栏）、workspace 文件树、`.aidoc.json` 树 |
+| ⏳ | PPT/Excel/Email 未迁移前：`WebFeatureComingSoon`，不挂载旧 Electron 面板 |
+
+---
+
+*实现时请按模块拆 PR：保留原场景 UI，迁移执行层到 platformApi + server module，勿把 Electron 本地工作区完整搬到 Web。*

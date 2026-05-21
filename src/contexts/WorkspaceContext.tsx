@@ -46,6 +46,12 @@ export function useWorkspace(): WorkspaceState {
   return ctx
 }
 
+function workspaceNameFromToken(wsPath: string, fallback?: string): string {
+  if (fallback) return fallback
+  const parts = wsPath.split(':')
+  return parts[parts.length - 1] || wsPath
+}
+
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [workspaceRoot, setWorkspaceRoot] = useState<string | null>(null)
   const [projectRoot, setProjectRoot] = useState<string | null>(null)
@@ -57,12 +63,31 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(false)
 
   const refreshWorkspaces = useCallback(async () => {
+    if (isWebShim()) {
+      try {
+        const ws = await platformApi.workspaces.getDefault()
+        setWorkspaces([
+          {
+            name: ws.name,
+            path: ws.path,
+            hasDocument: true,
+            modifiedAt: new Date().toISOString(),
+          },
+        ])
+      } catch {
+        setWorkspaces([])
+      }
+      setInitialized(true)
+      return
+    }
+
     const list = await window.electronAPI.listWorkspaces()
     setWorkspaces(list as WorkspaceInfo[])
     setInitialized(true)
   }, [])
 
   const refreshTree = useCallback(async () => {
+    if (isWebShim()) return
     if (!activeWorkspacePath) return
     const tree = await window.electronAPI.getWorkspaceTree(activeWorkspacePath)
     setFileTree(tree as FileTreeNode[])
@@ -71,6 +96,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const createWorkspace = useCallback(async (name: string, parentDir?: string) => {
     setLoading(true)
     try {
+      if (isWebShim()) {
+        const result = await platformApi.workspaces.create(name)
+        await refreshWorkspaces()
+        return result.path
+      }
       const result = await window.electronAPI.createWorkspace(name, parentDir)
       await refreshWorkspaces()
       return result.path
@@ -80,6 +110,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, [refreshWorkspaces])
 
   const renameWorkspace = useCallback(async (wsPath: string, nextName: string) => {
+    if (isWebShim()) {
+      throw new Error('Web 版不支持重命名本地工作区目录')
+    }
     setLoading(true)
     try {
       const result = await window.electronAPI.renameWorkspace(wsPath, nextName)
@@ -99,6 +132,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, [activeWorkspacePath, refreshWorkspaces])
 
   const registerWorkspace = useCallback(async (wsPath: string) => {
+    if (isWebShim()) {
+      throw new Error('Web 版不支持注册本地工作区目录')
+    }
     setLoading(true)
     try {
       const result = await window.electronAPI.registerWorkspace(wsPath)
@@ -112,14 +148,23 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const openWorkspace = useCallback(async (wsPath: string) => {
     setLoading(true)
     try {
+      if (isWebShim()) {
+        const known = workspaces.find((w) => w.path === wsPath)
+        const name = known?.name ?? workspaceNameFromToken(wsPath)
+        setWorkspaceRoot(wsPath)
+        setProjectRoot(wsPath)
+        setActiveWorkspacePath(wsPath)
+        setActiveWorkspaceName(name)
+        setFileTree([])
+        return
+      }
+
       const tree = await window.electronAPI.getWorkspaceTree(wsPath)
       setWorkspaceRoot(wsPath)
       setProjectRoot(wsPath)
       setActiveWorkspacePath(wsPath)
       setActiveWorkspaceName(wsPath.split(/[/\\]/).pop() || wsPath)
       setFileTree(tree as FileTreeNode[])
-      // Fire-and-forget: attempt to load document.json and notify the editor so
-      // it can restore persisted content without blocking the open flow.
       void (async () => {
         try {
           const api = window.electronAPI
@@ -142,7 +187,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [workspaces])
 
   const closeWorkspace = useCallback(() => {
     setWorkspaceRoot(null)
@@ -153,7 +198,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const deleteWorkspace = useCallback(async (wsPath: string) => {
-    await window.electronAPI.deleteWorkspace(wsPath)
+    if (isWebShim()) {
+      await platformApi.workspaces.delete(wsPath)
+    } else {
+      await window.electronAPI.deleteWorkspace(wsPath)
+    }
     if (activeWorkspacePath === wsPath) {
       closeWorkspace()
     }
@@ -164,7 +213,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     void refreshWorkspaces()
   }, [refreshWorkspaces])
 
-  // Auto-open default workspace in web mode so the user skips WorkspaceGate
   useEffect(() => {
     if (!initialized) return
     if (activeWorkspacePath) return
@@ -172,7 +220,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
     void platformApi.workspaces
       .getDefault()
-      .then(ws => {
+      .then((ws) => {
         if (ws.path) void openWorkspace(ws.path)
       })
       .catch(() => {
