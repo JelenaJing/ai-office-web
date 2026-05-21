@@ -3,7 +3,14 @@
  */
 
 export type { LlmMessage, LlmInvokeOptions } from './llmClient'
-export { invokeLlmJson, getLlmModel, isLlmConfigured } from './llmClient'
+export {
+  invokeLlmJson,
+  getLlmModel,
+  isLlmConfigured,
+  resolveBaseUrl,
+  resolveModel,
+  resolveProvider,
+} from './llmClient'
 
 export type {
   GeneratedDocxContent,

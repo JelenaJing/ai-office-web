@@ -10,6 +10,9 @@ import { Router } from 'express'
 import { resolveUserId } from '../lib/authUser'
 import { runCreateDocxSkill } from '../skills/docx/createDocxSkill'
 import { runAnalyzeXlsxSkill } from '../skills/excel/analyzeXlsxSkill'
+import { runCreateImageSkill } from '../skills/image/createImageSkill'
+import { runCreatePptxSkill } from '../skills/ppt/createPptxSkill'
+import { runDailyReportSkill } from '../skills/report/dailyReportSkill'
 import { skillRunRateLimit } from '../middleware/rateLimit'
 
 const router = Router()
@@ -30,6 +33,33 @@ const BUILTIN_SKILLS = [
     description: '对已上传的 xlsx/csv 生成 Markdown 分析报告。',
     category: 'analysis',
     outputArtifactType: 'excel_analysis',
+    version: '1.0.0',
+    enabled: true,
+  },
+  {
+    id: 'web.image.generate',
+    name: '图片生成',
+    description: '根据描述生成图片 artifact。',
+    category: 'image',
+    outputArtifactType: 'image',
+    version: '1.0.0',
+    enabled: true,
+  },
+  {
+    id: 'web.pptx.create',
+    name: 'PPT 生成',
+    description: '根据主题生成 pptx 演示文稿。',
+    category: 'presentation',
+    outputArtifactType: 'presentation',
+    version: '1.0.0',
+    enabled: true,
+  },
+  {
+    id: 'web.daily.report',
+    name: '工作日报',
+    description: '汇总文件与生成记录，输出日报 Markdown。',
+    category: 'report',
+    outputArtifactType: 'report',
     version: '1.0.0',
     enabled: true,
   },
@@ -147,6 +177,64 @@ router.post('/:skillId/run', skillRunRateLimit, async (req, res) => {
     }
     const status = result.status ?? 500
     return res.status(status).json({ success: false, error: result.error })
+  }
+
+  const userId = await resolveUserId(req)
+  const body = req.body as {
+    prompt?: string
+    workspacePath?: string
+    params?: Record<string, unknown>
+  }
+  const workspacePath = String(
+    body.workspacePath ?? body.params?.workspacePath ?? '',
+  )
+  const params = (body.params ?? body) as Record<string, unknown>
+
+  if (skillId === 'web.image.generate') {
+    if (!workspacePath) {
+      return res.status(400).json({ success: false, error: '缺少 workspacePath' })
+    }
+    const result = await runCreateImageSkill({
+      userId,
+      workspacePath,
+      prompt: String(body.prompt ?? params.prompt ?? ''),
+    })
+    if (result.success) {
+      return res.json({ success: true, artifactId: result.artifactId, artifact: result.artifact })
+    }
+    return res.status(result.status ?? 500).json({ success: false, error: result.error })
+  }
+
+  if (skillId === 'web.pptx.create') {
+    if (!workspacePath) {
+      return res.status(400).json({ success: false, error: '缺少 workspacePath' })
+    }
+    const result = await runCreatePptxSkill({
+      userId,
+      workspacePath,
+      title: String(params.title ?? ''),
+      prompt: String(body.prompt ?? params.prompt ?? ''),
+      templateId: String(params.templateId ?? ''),
+    })
+    if (result.success) {
+      return res.json({ success: true, artifactId: result.artifactId, artifact: result.artifact })
+    }
+    return res.status(result.status ?? 500).json({ success: false, error: result.error })
+  }
+
+  if (skillId === 'web.daily.report') {
+    if (!workspacePath) {
+      return res.status(400).json({ success: false, error: '缺少 workspacePath' })
+    }
+    const result = await runDailyReportSkill({
+      userId,
+      workspacePath,
+      date: String(params.date ?? ''),
+    })
+    if (result.success) {
+      return res.json({ success: true, artifactId: result.artifactId, artifact: result.artifact })
+    }
+    return res.status(result.status ?? 500).json({ success: false, error: result.error })
   }
 
   const skill = BUILTIN_SKILLS.find((s) => s.id === skillId)
