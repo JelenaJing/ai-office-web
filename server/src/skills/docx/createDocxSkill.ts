@@ -1,9 +1,5 @@
 /**
  * createDocxSkill.ts — web.docx.create skill implementation
- *
- * Generates a real .docx file using AI Gateway (or fallback template).
- * Artifact is stored inside the workspace:
- *   server/data/workspaces/{userId}/{workspaceId}/artifacts/{artifactId}/
  */
 
 import fs from 'fs'
@@ -15,6 +11,8 @@ import {
   Paragraph,
   TextRun,
   AlignmentType,
+  Header,
+  Footer,
 } from 'docx'
 import {
   createArtifactDir,
@@ -28,6 +26,16 @@ import {
   hashPrompt,
   type GeneratedDocxContent,
 } from '../../modules/ai-gateway'
+import {
+  buildDocumentSessionFromContent,
+  contentToHtml,
+  contentToMarkdown,
+  resolveHeaderFooterFromTemplate,
+  resolvePageSpecFromTemplate,
+  sanitizeFilename,
+  type HeaderFooterSpecJson,
+  type PageSpecJson,
+} from './documentSessionBuilder'
 
 const HEADING_COLOR = '2E74B5'
 
@@ -35,36 +43,59 @@ export interface CreateDocxInput {
   prompt?: string
   title?: string
   workspacePath: string
+  params?: {
+    title?: string
+    templateSkillId?: string
+    templateManifest?: { pageSpec?: PageSpecJson; headerFooter?: HeaderFooterSpecJson }
+    knowledgeBaseIds?: string[]
+    fileIds?: string[]
+    currentDocumentText?: string
+  }
 }
 
 export type CreateDocxResult =
-  | { success: true; artifact: Artifact }
+  | {
+      success: true
+      artifact: Artifact
+      data: {
+        documentSession: ReturnType<typeof buildDocumentSessionFromContent>
+        html: string
+        markdown: string
+      }
+    }
   | { success: false; error: string }
 
 function buildDocxParagraphs(
   content: GeneratedDocxContent,
   generatedAt: Date,
+  headerFooter: HeaderFooterSpecJson,
 ): Paragraph[] {
-  const children: Paragraph[] = [
+  const children: Paragraph[] = []
+
+  if (headerFooter.headerText?.trim()) {
+    children.push(
+      new Paragraph({
+        children: [
+          new TextRun({ text: headerFooter.headerText, color: '666666', size: 20 }),
+        ],
+        alignment: AlignmentType.CENTER,
+        spacing: { after: 160 },
+      }),
+    )
+  }
+
+  children.push(
     new Paragraph({
-      children: [
-        new TextRun({ text: content.title, bold: true, size: 32 }),
-      ],
+      children: [new TextRun({ text: content.title, bold: true, size: 32 })],
       alignment: AlignmentType.CENTER,
       spacing: { after: 200 },
     }),
-  ]
+  )
 
   if (content.subtitle?.trim()) {
     children.push(
       new Paragraph({
-        children: [
-          new TextRun({
-            text: content.subtitle.trim(),
-            color: '666666',
-            size: 22,
-          }),
-        ],
+        children: [new TextRun({ text: content.subtitle.trim(), color: '666666', size: 22 })],
         alignment: AlignmentType.CENTER,
         spacing: { after: 200 },
       }),
@@ -89,12 +120,7 @@ function buildDocxParagraphs(
     children.push(
       new Paragraph({
         children: [
-          new TextRun({
-            text: section.heading,
-            bold: true,
-            color: HEADING_COLOR,
-            size: 26,
-          }),
+          new TextRun({ text: section.heading, bold: true, color: HEADING_COLOR, size: 26 }),
         ],
         spacing: { before: 280, after: 160 },
       }),
@@ -109,21 +135,40 @@ function buildDocxParagraphs(
     }
   }
 
-  children.push(
-    new Paragraph({
-      children: [
-        new TextRun({
-          text: '— 由 AI Office Web 自动生成 —',
-          italics: true,
-          color: '999999',
-        }),
-      ],
-      alignment: AlignmentType.CENTER,
-      spacing: { before: 600 },
-    }),
-  )
+  if (headerFooter.footerText?.trim()) {
+    children.push(
+      new Paragraph({
+        children: [
+          new TextRun({
+            text: headerFooter.footerText.replace('{page}', '1'),
+            color: '888888',
+            size: 18,
+          }),
+        ],
+        alignment: AlignmentType.CENTER,
+        spacing: { before: 400 },
+      }),
+    )
+  }
 
   return children
+}
+
+function augmentPrompt(
+  prompt: string,
+  params?: CreateDocxInput['params'],
+): string {
+  const parts = [prompt]
+  if (params?.knowledgeBaseIds?.length) {
+    parts.push(`\n[知识库 ID: ${params.knowledgeBaseIds.join(', ')}]`)
+  }
+  if (params?.fileIds?.length) {
+    parts.push(`\n[参考资料文件 ID: ${params.fileIds.join(', ')}]`)
+  }
+  if (params?.currentDocumentText?.trim()) {
+    parts.push(`\n[当前文稿摘要]\n${params.currentDocumentText.trim().slice(0, 2000)}`)
+  }
+  return parts.join('')
 }
 
 export async function runCreateDocxSkill(
@@ -139,21 +184,22 @@ export async function runCreateDocxSkill(
   }
 
   const { userId, wsId: workspaceId } = parsed
+  const params = input.params
+  const templateManifest = params?.templateManifest
+  const pageSpec = resolvePageSpecFromTemplate(templateManifest)
+  const headerFooter = resolveHeaderFooterFromTemplate(templateManifest)
 
   try {
     const artifactId = randomUUID()
-    const title = input.title?.trim() || 'AI Office 文稿'
-    const prompt = input.prompt?.trim() || ''
-    const now = new Date()
-
-    if (!prompt) {
+    const title = params?.title?.trim() || input.title?.trim() || 'AI Office 文稿'
+    const rawPrompt = input.prompt?.trim() || ''
+    if (!rawPrompt) {
       return { success: false, error: '请输入生成提示词' }
     }
+    const prompt = augmentPrompt(rawPrompt, params)
+    const now = new Date()
 
-    const { content, meta } = await generateDocumentContentDetailed({
-      title,
-      prompt,
-    })
+    const { content, meta } = await generateDocumentContentDetailed({ title, prompt })
 
     if (meta.fallback) {
       console.warn(
@@ -161,7 +207,6 @@ export async function runCreateDocxSkill(
       )
     }
 
-    const outputJson = JSON.stringify(content)
     appendAiInvocationLog({
       userId,
       workspaceId,
@@ -169,23 +214,53 @@ export async function runCreateDocxSkill(
       model: meta.model,
       promptHash: hashPrompt(prompt),
       promptLength: prompt.length,
-      outputLength: outputJson.length,
+      outputLength: JSON.stringify(content).length,
       fallback: meta.fallback,
     })
 
+    const filename = sanitizeFilename(content.title || title, 'docx')
     const dir = createArtifactDir(userId, workspaceId, artifactId)
 
     const doc = new Document({
       sections: [
         {
-          children: buildDocxParagraphs(content, now),
+          headers: headerFooter.headerText?.trim()
+            ? {
+                default: new Header({
+                  children: [
+                    new Paragraph({
+                      children: [new TextRun({ text: headerFooter.headerText, size: 18, color: '666666' })],
+                      alignment: AlignmentType.CENTER,
+                    }),
+                  ],
+                }),
+              }
+            : undefined,
+          footers: headerFooter.footerText?.trim()
+            ? {
+                default: new Footer({
+                  children: [
+                    new Paragraph({
+                      children: [
+                        new TextRun({
+                          text: headerFooter.footerText.replace('{page}', ''),
+                          size: 18,
+                          color: '888888',
+                        }),
+                      ],
+                      alignment: AlignmentType.CENTER,
+                    }),
+                  ],
+                }),
+              }
+            : undefined,
+          children: buildDocxParagraphs(content, now, headerFooter),
         },
       ],
     })
 
     const buffer = await Packer.toBuffer(doc)
-    const docxPath = path.join(dir, 'output.docx')
-    fs.writeFileSync(docxPath, buffer)
+    fs.writeFileSync(path.join(dir, filename), buffer)
 
     const artifact: Artifact = {
       id: artifactId,
@@ -200,14 +275,32 @@ export async function runCreateDocxSkill(
       exports: [
         {
           format: 'docx',
-          filename: 'output.docx',
+          filename,
           url: `/api/artifacts/${artifactId}/download`,
         },
       ],
     }
 
     saveArtifactMetadata(artifact)
-    return { success: true, artifact }
+
+    const documentSession = buildDocumentSessionFromContent(content, {
+      generatorSkillId: 'document.generator.office_draft',
+      templateSkillId: params?.templateSkillId ?? 'document.template.general',
+      knowledgeBaseIds: params?.knowledgeBaseIds,
+      fileIds: params?.fileIds,
+      artifactId,
+      pageSpec,
+      headerFooter,
+    })
+
+    const html = contentToHtml(content, headerFooter)
+    const markdown = contentToMarkdown(content)
+
+    return {
+      success: true,
+      artifact,
+      data: { documentSession, html, markdown },
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return { success: false, error: msg }

@@ -64,6 +64,8 @@ export interface SkillInput {
 export interface SkillResult {
   success: boolean
   artifact?: Artifact
+  /** Server skill 附加数据（如 documentSession / html / markdown） */
+  data?: Record<string, unknown>
   taskId?: string
   status?: string
   error?: string

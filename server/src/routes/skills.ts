@@ -8,7 +8,10 @@
 
 import { Router } from 'express'
 import { resolveUserId } from '../lib/authUser'
-import { runCreateDocxSkill } from '../skills/docx/createDocxSkill'
+import { runCreateDocxSkill, type CreateDocxInput } from '../skills/docx/createDocxSkill'
+import { runExportDocxSkill, type ExportDocxInput } from '../skills/docx/exportDocxSkill'
+import { runExportMarkdownSkillFromRequest } from '../skills/document/exportMarkdownSkill'
+import { runExportPdfSkill } from '../skills/document/exportPdfSkill'
 import { runAnalyzeXlsxSkill } from '../skills/excel/analyzeXlsxSkill'
 import { runCreateImageSkill } from '../skills/image/createImageSkill'
 import { runCreatePptxSkill } from '../skills/ppt/createPptxSkill'
@@ -21,7 +24,34 @@ const BUILTIN_SKILLS = [
   {
     id: 'web.docx.create',
     name: '正式文稿生成',
-    description: '根据提示词生成 Word 文稿，第一版输出 docx 文件。',
+    description: '根据提示词生成 Word 文稿，返回 documentSession 与 artifact。',
+    category: 'document',
+    outputArtifactType: 'document',
+    version: '1.0.0',
+    enabled: true,
+  },
+  {
+    id: 'web.docx.export',
+    name: '导出 Word',
+    description: '根据 documentSession 导出 docx。',
+    category: 'document',
+    outputArtifactType: 'document',
+    version: '1.0.0',
+    enabled: true,
+  },
+  {
+    id: 'web.markdown.export',
+    name: '导出 Markdown',
+    description: '导出 Markdown 文稿 artifact。',
+    category: 'document',
+    outputArtifactType: 'document',
+    version: '1.0.0',
+    enabled: true,
+  },
+  {
+    id: 'web.pdf.export',
+    name: '导出 PDF',
+    description: '导出 PDF（需服务配置）。',
     category: 'document',
     outputArtifactType: 'document',
     version: '1.0.0',
@@ -119,9 +149,9 @@ router.post('/:skillId/run', skillRunRateLimit, async (req, res) => {
     const { prompt, workspacePath, params } = req.body as {
       prompt?: string
       workspacePath?: string
-      params?: { title?: string; workspacePath?: string }
+      params?: CreateDocxInput['params']
     }
-    const resolvedWorkspacePath = workspacePath ?? params?.workspacePath ?? ''
+    const resolvedWorkspacePath = workspacePath ?? ''
     if (!resolvedWorkspacePath) {
       return res.status(400).json({ success: false, error: '请先选择工作区（缺少 workspacePath）' })
     }
@@ -129,11 +159,55 @@ router.post('/:skillId/run', skillRunRateLimit, async (req, res) => {
       prompt,
       title: params?.title,
       workspacePath: resolvedWorkspacePath,
+      params: params as CreateDocxInput['params'],
     })
     if (result.success) {
-      return res.json(result)
+      return res.json({
+        success: true,
+        artifact: result.artifact,
+        artifactId: result.artifact.id,
+        data: result.data,
+      })
     }
     return res.status(500).json({ success: false, error: result.error })
+  }
+
+  if (skillId === 'web.docx.export') {
+    const body = req.body as Record<string, unknown>
+    const params = (body.params ?? body) as Record<string, unknown>
+    const workspacePath = String(body.workspacePath ?? params.workspacePath ?? '')
+    if (!workspacePath) {
+      return res.status(400).json({ success: false, error: '缺少 workspacePath' })
+    }
+    const result = await runExportDocxSkill({
+      workspacePath,
+      title: String(params.title ?? ''),
+      html: String(params.html ?? ''),
+      markdown: String(params.markdown ?? ''),
+      documentSession: params.documentSession as ExportDocxInput['documentSession'],
+      pageSpec: params.pageSpec as ExportDocxInput['pageSpec'],
+      headerFooter: params.headerFooter as ExportDocxInput['headerFooter'],
+    })
+    if (result.success) {
+      return res.json({ success: true, artifact: result.artifact, artifactId: result.artifact.id })
+    }
+    return res.status(500).json({ success: false, error: result.error })
+  }
+
+  if (skillId === 'web.markdown.export') {
+    const userId = await resolveUserId(req)
+    const result = await runExportMarkdownSkillFromRequest(userId, req.body as Record<string, unknown>)
+    if (result.success) {
+      return res.json({ success: true, artifact: result.artifact, artifactId: result.artifact.id })
+    }
+    return res.status(500).json({ success: false, error: result.error })
+  }
+
+  if (skillId === 'web.pdf.export') {
+    const body = req.body as Record<string, unknown>
+    const workspacePath = String(body.workspacePath ?? (body.params as Record<string, unknown>)?.workspacePath ?? '')
+    const result = await runExportPdfSkill({ workspacePath })
+    return res.status(result.success ? 200 : 503).json(result)
   }
 
   if (skillId === 'web.xlsx.analyze') {
