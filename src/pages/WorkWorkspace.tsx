@@ -6,6 +6,7 @@ import { SceneFeatureRow } from '../components/scene/SceneFeatureRow'
 import type { PrimarySection } from '../components/nav/PrimaryNav'
 import MyFilesPanel from './MyFilesPanel'
 import { platformApi } from '../platform'
+import { runWebFeatureAction, sceneStatusForWebFeature } from '../platform/useWebFeatureAction'
 
 interface WorkWorkspaceProps {
   onGoToWorkspace: () => void
@@ -62,11 +63,15 @@ export default function WorkWorkspace({ onGoToWorkspace, onNavigate }: WorkWorks
 
   const go = (fn: () => void) => { fn(); onGoToWorkspace() }
 
+  const blockMsg = (text: string) => {
+    setUploadMessage({ type: 'err', text })
+  }
+
   const handleQuickUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
     if (!platformApi.system.isFeatureAvailable('file.upload')) {
-      setUploadMessage({ type: 'err', text: 'Web 版即将开放：文件上传' })
+      blockMsg('Web 版即将开放：文件上传')
       return
     }
     setUploading(true)
@@ -117,58 +122,65 @@ export default function WorkWorkspace({ onGoToWorkspace, onNavigate }: WorkWorks
             title="文稿编辑"
             description="新建、编辑、生成和导出文稿 / PPT / 模板材料"
             accent="blue"
+            status={sceneStatusForWebFeature('docx.generate')}
             actionLabel="进入"
-            onClick={() => go(enterFreeMode)}
+            onClick={() => runWebFeatureAction('docx.generate', () => go(enterFreeMode), blockMsg)}
           />
           <SceneFeatureRow
             icon={<Mail size={24} />}
             title="邮件收发"
             description="收发邮件、新建邮件、AI 预回复和附件管理"
             accent="purple"
+            status={sceneStatusForWebFeature('email')}
             actionLabel="进入"
-            onClick={() => go(enterEmailMode)}
+            onClick={() => runWebFeatureAction('email', () => go(enterEmailMode), blockMsg)}
           />
           <SceneFeatureRow
             icon={<CalendarClock size={24} />}
             title="日程管理"
             description="AI识别邮件中的会议、截止事项和候选时间，自动生成日程并检测时间冲突"
             accent="indigo"
+            status={sceneStatusForWebFeature('calendar')}
             actionLabel="进入"
-            onClick={() => onNavigate('calendar')}
+            onClick={() => runWebFeatureAction('calendar', () => onNavigate('calendar'), blockMsg)}
           />
           <SceneFeatureRow
             icon={<BarChart2 size={24} />}
             title="数据分析"
             description="分析表格、生成图表、整理数据结论"
             accent="teal"
+            status={sceneStatusForWebFeature('excel.analysis')}
             actionLabel="进入"
-            onClick={() => go(enterDataMode)}
+            onClick={() => runWebFeatureAction('excel.analysis', () => go(enterDataMode), blockMsg)}
           />
           <SceneFeatureRow
             icon={<Presentation size={24} />}
             title="PPT 生成"
             description="根据主题、资料和模板生成演示文稿，支持 Skill 模板"
             accent="orange"
+            status={sceneStatusForWebFeature('ppt.generate')}
             actionLabel="进入"
-            onClick={() => go(enterPptGenerationMode)}
+            onClick={() => runWebFeatureAction('ppt.generate', () => go(enterPptGenerationMode), blockMsg)}
           />
           <SceneFeatureRow
             icon={<FolderOpen size={24} />}
             title="我的文件"
             description="查看、下载、删除已上传的文件；后续文稿和 PPT 可从这里选取资料"
             accent="green"
+            status={sceneStatusForWebFeature('files')}
             actionLabel="查看"
-            onClick={() => setShowFiles(true)}
+            onClick={() => runWebFeatureAction('files', () => setShowFiles(true), blockMsg)}
           />
           <SceneFeatureRow
             icon={<Upload size={24} />}
             title="上传文件"
             description="将 docx、pdf、pptx、xlsx、csv、txt、图片等文件上传到工作区"
             accent="teal"
+            status={sceneStatusForWebFeature('files')}
             actionLabel={uploading ? '上传中…' : '选择文件'}
             onClick={() => {
               if (uploading) return
-              uploadRef.current?.click()
+              runWebFeatureAction('files', () => uploadRef.current?.click(), blockMsg)
             }}
           />
         </FeatureList>
@@ -176,4 +188,3 @@ export default function WorkWorkspace({ onGoToWorkspace, onNavigate }: WorkWorks
     </>
   )
 }
-

@@ -4,6 +4,9 @@ import { listSkills } from '../skills'
 import { useWorkspace } from '../contexts/WorkspaceContext'
 import { platformApi } from '../platform'
 import type { Artifact } from '../platform'
+import { isWebShim } from '../platform/detect'
+import { getWebFeatureStatus } from '../platform/featureGate'
+import WebFeatureComingSoon from '../components/WebFeatureComingSoon'
 
 // ── Layout shells ─────────────────────────────────────────────────────────────
 
@@ -852,12 +855,31 @@ function WebDocxCreatePanel() {
 
 export default function SkillManagementView() {
   const registeredSkills = listSkills()
-  const [tab, setTab] = React.useState<'manage' | 'docx' | 'store'>('manage')
+  const [tab, setTab] = React.useState<'manage' | 'docx' | 'store'>(isWebShim() ? 'docx' : 'manage')
+  const [webGateHint, setWebGateHint] = React.useState<string | null>(null)
   const [storeStatus, setStoreStatus] = React.useState<StoreStatus>('idle')
   const [storeError, setStoreError] = React.useState<string | null>(null)
   const [embedUrl, setEmbedUrl] = React.useState<string | null>(null)
 
+  function tryWebTab(next: 'manage' | 'docx' | 'store') {
+    if (!isWebShim()) {
+      setTab(next)
+      setWebGateHint(null)
+      return
+    }
+    if (next === 'docx') {
+      setTab('docx')
+      setWebGateHint(null)
+      return
+    }
+    setWebGateHint(getWebFeatureStatus('settings.ai').message)
+  }
+
   async function handleOpenStore() {
+    if (isWebShim()) {
+      setWebGateHint(getWebFeatureStatus('settings.ai').message)
+      return
+    }
     setTab('store')
     if (storeStatus === 'ready' && embedUrl) return
     setStoreStatus('loading')
@@ -881,10 +903,10 @@ export default function SkillManagementView() {
     <ViewWrapper>
       {/* ── Tab Bar ── */}
       <TabBar>
-        <TabBtn $active={tab === 'manage'} onClick={() => setTab('manage')}>
+        <TabBtn $active={tab === 'manage'} onClick={() => tryWebTab('manage')}>
           🧩 我的 Skill 包
         </TabBtn>
-        <TabBtn $active={tab === 'docx'} onClick={() => setTab('docx')}>
+        <TabBtn $active={tab === 'docx'} onClick={() => tryWebTab('docx')}>
           🗒 生成文稿
         </TabBtn>
         <TabBtn
@@ -900,42 +922,55 @@ export default function SkillManagementView() {
         )}
       </TabBar>
 
+      {webGateHint && (
+        <div style={{
+          padding: '8px 24px', fontSize: 13, color: '#c0392b',
+          background: '#fff5f5', borderBottom: '1px solid #f5c6c6',
+        }}>
+          {webGateHint}
+        </div>
+      )}
+
       {/* ── Tab Content ── */}
       <TabContent>
         {/* Manage tab */}
         <PageSlot $active={tab === 'manage'}>
-          <ManageScrollArea>
-            <div style={{ marginBottom: 20 }}>
-              <h1 style={{ fontSize: 22, fontWeight: 700, color: '#1f3142', margin: '0 0 4px' }}>Skill 中心</h1>
-              <p style={{ fontSize: 14, color: '#627385', margin: '0 0 0' }}>
-                管理已购买和授权的 AI Skill 包，或切换到"Skill 商店"标签浏览购买。
-              </p>
-            </div>
+          {isWebShim() ? (
+            <WebFeatureComingSoon featureKey="settings.ai" />
+          ) : (
+            <ManageScrollArea>
+              <div style={{ marginBottom: 20 }}>
+                <h1 style={{ fontSize: 22, fontWeight: 700, color: '#1f3142', margin: '0 0 4px' }}>Skill 中心</h1>
+                <p style={{ fontSize: 14, color: '#627385', margin: '0 0 0' }}>
+                  管理已购买和授权的 AI Skill 包，或切换到"Skill 商店"标签浏览购买。
+                </p>
+              </div>
 
-            <SkillManagementPanel />
+              <SkillManagementPanel />
 
-            {registeredSkills.length > 0 && (
-              <>
-                <SectionDivider>本地已注册 Skill</SectionDivider>
-                <SkillList>
-                  {registeredSkills.map(skill => (
-                    <SkillCard key={skill.manifest.id}>
-                      <SkillName>{skill.manifest.name}</SkillName>
-                      <SkillMeta>
-                        类别：{skill.manifest.category}　版本：{skill.manifest.version}
-                      </SkillMeta>
-                      <SkillMeta>
-                        <SkillId>{skill.manifest.id}</SkillId>
-                      </SkillMeta>
-                      {skill.manifest.description && (
-                        <SkillMeta>{skill.manifest.description}</SkillMeta>
-                      )}
-                    </SkillCard>
-                  ))}
-                </SkillList>
-              </>
-            )}
-          </ManageScrollArea>
+              {registeredSkills.length > 0 && (
+                <>
+                  <SectionDivider>本地已注册 Skill</SectionDivider>
+                  <SkillList>
+                    {registeredSkills.map(skill => (
+                      <SkillCard key={skill.manifest.id}>
+                        <SkillName>{skill.manifest.name}</SkillName>
+                        <SkillMeta>
+                          类别：{skill.manifest.category}　版本：{skill.manifest.version}
+                        </SkillMeta>
+                        <SkillMeta>
+                          <SkillId>{skill.manifest.id}</SkillId>
+                        </SkillMeta>
+                        {skill.manifest.description && (
+                          <SkillMeta>{skill.manifest.description}</SkillMeta>
+                        )}
+                      </SkillCard>
+                    ))}
+                  </SkillList>
+                </>
+              )}
+            </ManageScrollArea>
+          )}
         </PageSlot>
 
         {/* Docx generate tab */}

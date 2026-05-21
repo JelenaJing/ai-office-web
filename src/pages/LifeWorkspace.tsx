@@ -2,6 +2,7 @@ import styled from 'styled-components'
 import { Globe, PenLine, Palette, BookHeart, Sparkles, Coffee, Microscope } from 'lucide-react'
 import { useWorkspaceMode } from '../contexts/WorkspaceModeContext'
 import { SceneFeatureRow } from '../components/scene/SceneFeatureRow'
+import { runWebFeatureAction, sceneStatusForWebFeature } from '../platform/useWebFeatureAction'
 
 interface LifeWorkspaceProps {
   onGoToWorkspace: () => void
@@ -51,6 +52,7 @@ export default function LifeWorkspace({ onGoToWorkspace }: LifeWorkspaceProps) {
   } = useWorkspaceMode()
 
   const go = (fn: () => void) => { fn(); onGoToWorkspace() }
+  const block = () => {}
 
   return (
     <Page>
@@ -65,34 +67,36 @@ export default function LifeWorkspace({ onGoToWorkspace }: LifeWorkspaceProps) {
           title="AI 论坛"
           description="连接在线社区，浏览和参与讨论内容"
           accent="orange"
-          status="requiresNetwork"
+          status={sceneStatusForWebFeature('knowledge')}
           actionLabel="打开论坛"
-          onClick={() => go(enterAiForumMode)}
+          onClick={() => runWebFeatureAction('knowledge', () => go(enterAiForumMode), block)}
         />
         <SceneFeatureRow
           icon={<PenLine size={24} />}
           title="轻量写作"
           description="自由写作、随笔和日常表达，轻松记录想法"
           accent="orange"
+          status={sceneStatusForWebFeature('docx.generate')}
           actionLabel="开始写作"
-          onClick={() => go(enterFreeMode)}
+          onClick={() => runWebFeatureAction('docx.generate', () => go(enterFreeMode), block)}
         />
         <SceneFeatureRow
           icon={<Palette size={24} />}
           title="图片创作"
           description="生成生活图片、头像、海报和创意图"
           accent="orange"
+          status={sceneStatusForWebFeature('image.generate')}
           actionLabel="创作图片"
-          onClick={() => go(enterImageGenerationMode)}
+          onClick={() => runWebFeatureAction('image.generate', () => go(enterImageGenerationMode), block)}
         />
         <SceneFeatureRow
           icon={<Microscope size={24} />}
           title="科学资讯"
           description="浏览最新科研动态，阅读科学解读文章（需要网络连接）"
           accent="orange"
-          status="requiresNetwork"
+          status={sceneStatusForWebFeature('knowledge')}
           actionLabel="科学资讯"
-          onClick={() => go(enterDailyFeedMode)}
+          onClick={() => runWebFeatureAction('knowledge', () => go(enterDailyFeedMode), block)}
         />
         <SceneFeatureRow
           icon={<BookHeart size={24} />}

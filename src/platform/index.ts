@@ -1,4 +1,11 @@
 export { detectPlatform, isWebShim } from './detect'
+export {
+  isWebFeatureEnabled,
+  getWebFeatureStatus,
+  runWebFeatureAction,
+} from './featureGate'
+export type { WebFeatureKey } from './featureGate'
+export { sceneStatusForWebFeature } from './useWebFeatureAction'
 export type {
   PlatformApi,
   UserInfo,

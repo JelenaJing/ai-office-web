@@ -449,3 +449,94 @@ grep -r "window\.electronAPI" src --include="*.ts" --include="*.tsx"
 ---
 
 *下一步（不在本 audit 范围）：按第三节违规清单完成 P0 platformApi 收敛，再跑 build/tsc 验收。*
+
+---
+
+# Web Service Migration Plan
+
+> 阶段：**Web Service Migration P1**（`feat/web-service-migration-p1`）  
+> 机制：`src/platform/featureGate.ts` + `useWebFeatureAction` + `WebFeatureComingSoon`  
+> 原则：Web 可点击业务走 `platformApi` → `/api/*`；未迁移入口显示「Web 版即将开放」；Electron 保留旧页面。
+
+## 模块迁移矩阵
+
+### 1. Knowledge（知识库）
+
+| 模块 | 当前本地依赖 | 目标 server API | 目标 platformApi | 输出 artifact | Web 当前处理 | 优先级 |
+|---|---|---|---|---|---|---|
+| Knowledge | `electronAPI` 知识库 IPC、`KnowledgeConversationDock` | `GET/POST/DELETE /api/knowledge/sources`、`POST /api/knowledge/search`（见 `server/docs/knowledge-service.md`） | `platformApi.knowledge.*`（待增） | 检索摘要、生成引用片段 | `web-coming-soon`（ResourceWorkspace 知识库 Tab、Study/Life 相关入口 gate） | P1-1 |
+
+### 2. Excel（数据分析）
+
+| 模块 | 当前本地依赖 | 目标 server API | 目标 platformApi | 输出 artifact | Web 当前处理 | 优先级 |
+|---|---|---|---|---|---|---|
+| Excel | `PlotService` / `PlotWorkspace`、`excelListDataModels` IPC | `POST /api/skills/excel.analyze/run`（草案） | `platformApi.skills.run('excel.analyze')` | 分析报告 `.md` / `.xlsx` | `web-coming-soon`（WorkWorkspace 数据分析、Viewport `data` 面板） | P1-2 |
+
+### 3. PPT（演示文稿）
+
+| 模块 | 当前本地依赖 | 目标 server API | 目标 platformApi | 输出 artifact | Web 当前处理 | 优先级 |
+|---|---|---|---|---|---|---|
+| PPT | `generatePptx` IPC、`presentationGenerateLegacySkill` | `POST /api/skills/ppt.generate/run` | `platformApi.skills.run('ppt.generate')` | `.pptx` artifact | `web-coming-soon`（WorkWorkspace PPT、Viewport `ppt` 面板） | P1-2 |
+
+### 4. PDF
+
+| 模块 | 当前本地依赖 | 目标 server API | 目标 platformApi | 输出 artifact | Web 当前处理 | 优先级 |
+|---|---|---|---|---|---|---|
+| PDF | `exportPdfFromEditor`、`writeOoxmlPackage` 等 IPC | `POST /api/skills/pdf.process/run` 或 files 转换端点 | `platformApi.skills.run('pdf.process')` | `.pdf` artifact | `web-coming-soon`（Editor 导出链、作业辅助等） | P1-3 |
+
+### 5. Email（邮件）
+
+| 模块 | 当前本地依赖 | 目标 server API | 目标 platformApi | 输出 artifact | Web 当前处理 | 优先级 |
+|---|---|---|---|---|---|---|
+| Email | `EmailWorkspace` + 本地 SMTP/IPC | `/api/email/*`（收发、草稿） | `platformApi.email.*`（待增） | 邮件摘要、附件 artifact | `web-coming-soon`（WorkWorkspace 邮件、Viewport `email`） | P1-3 |
+
+### 6. Calendar（日程）
+
+| 模块 | 当前本地依赖 | 目标 server API | 目标 platformApi | 输出 artifact | Web 当前处理 | 优先级 |
+|---|---|---|---|---|---|---|
+| Calendar | `CalendarWorkspace` + 本地日历 IPC | `/api/calendar/*` | `platformApi.calendar.*`（待增） | 日程导出 `.ics`（可选） | `web-coming-soon`（App 一级 `calendar` 入口） | P1-3 |
+
+### 7. Daily Report / Audit（日报 / 审计）
+
+| 模块 | 当前本地依赖 | 目标 server API | 目标 platformApi | 输出 artifact | Web 当前处理 | 优先级 |
+|---|---|---|---|---|---|---|
+| Daily Report / Audit | `daily-feed`、论文写作、审计类 IPC | `POST /api/skills/daily.report/run` | `platformApi.skills.run('daily.report')` | 日报 `.docx` / `.md` | `web-coming-soon`（Study 论文写作、Life 科学资讯、Viewport `daily-feed`） | P1-3 |
+
+### 8. Image（图片生成）
+
+| 模块 | 当前本地依赖 | 目标 server API | 目标 platformApi | 输出 artifact | Web 当前处理 | 优先级 |
+|---|---|---|---|---|---|---|
+| Image | `ImageWorkspace`、`sharedImageGeneration` IPC | `POST /api/skills/image.generate/run` | `platformApi.skills.run('image.generate')` | 图片 artifact | `web-coming-soon`（Study/Life 图片入口、Viewport `image`） | P1-3 |
+
+### 9. Settings（设置 / AI 配置）
+
+| 模块 | 当前本地依赖 | 目标 server API | 目标 platformApi | 输出 artifact | Web 当前处理 | 优先级 |
+|---|---|---|---|---|---|---|
+| Settings | Skill 包管理 IPC、Skill Store embed、`BackendDiagnostic` | `/api/settings/ai`、`/api/skills/store`（草案） | `platformApi.system.*` 扩展 | 配置导出（可选） | Skill 管理/商店 Tab `web-coming-soon`；文稿 Tab ✅ | P1-4 |
+
+## 已完成 Web 能力（featureGate enabled）
+
+| featureKey | 说明 | platformApi / API |
+|---|---|---|
+| `files`（内部） | 资源中心上传/下载/删除 | `platformApi.files.*` → `/api/files/*` |
+| `artifacts`（内部） | 生成记录列表/下载 | `platformApi.artifacts.*` → `/api/artifacts/*` |
+| `docx.generate` | 文稿编辑生成 Word | `platformApi.skills.run('web.docx.create')` → AI Gateway |
+
+## 一级入口 gate 状态
+
+| 入口 | Web 行为 |
+|---|---|
+| WorkWorkspace | 文稿 ✅；邮件/PPT/Excel `comingSoon`；上传 ✅ |
+| WorkspaceViewportHost | `docx`/`free` ✅；其余场景 `WebFeatureComingSoon` |
+| ResourceWorkspace | 我的文件 ✅；生成记录 ✅；知识库 Tab 文案 gate |
+| SkillManagementView | 默认「生成文稿」Tab；管理/商店 `comingSoon` |
+| App `calendar` | `WebFeatureComingSoon` |
+| StudyWorkspace / LifeWorkspace | 场景行 `runWebFeatureAction` + `comingSoon` 状态 |
+
+## P1 明确不做（本阶段）
+
+- 向量库 / embedding / 复杂检索
+- PPT / Excel / Email 业务实现
+- AI Gateway 文稿质量调优
+- 公网部署
+- 提交 `server/data`、`server/.env.local`
