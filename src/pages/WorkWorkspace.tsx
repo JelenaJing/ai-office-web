@@ -149,7 +149,14 @@ export default function WorkWorkspace({ onGoToWorkspace, onNavigate }: WorkWorks
             accent="indigo"
             status={sceneStatusForWebFeature('calendar')}
             actionLabel="进入"
-            onClick={() => runWebFeatureAction('calendar', () => onNavigate('calendar'), blockMsg)}
+            onClick={() => runWebFeatureAction('calendar', () => {
+              logWebWorkbenchEntry('日程管理', {
+                method: 'navigate(calendar)',
+                scene: 'work',
+                renderComponent: 'CalendarWorkspace',
+              })
+              onNavigate('calendar')
+            }, blockMsg)}
           />
           <SceneFeatureRow
             icon={<BarChart2 size={24} />}

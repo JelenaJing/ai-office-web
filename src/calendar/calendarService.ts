@@ -1,4 +1,6 @@
+import { isWebShim } from '../platform/detect'
 import type { CalendarEvent } from './types'
+import * as calendarRuntime from './calendarRuntime'
 
 const CALENDAR_EVENTS_STORAGE_KEY = 'aioffice.calendar.events.v1'
 
@@ -32,15 +34,15 @@ function saveEvents(events: CalendarEvent[]): void {
   localStorage.setItem(CALENDAR_EVENTS_STORAGE_KEY, JSON.stringify([...events].sort(compareByStartTime)))
 }
 
-export async function listCalendarEvents(): Promise<CalendarEvent[]> {
+async function listCalendarEventsLocal(): Promise<CalendarEvent[]> {
   return loadEvents()
 }
 
-export async function getCalendarEventById(id: string): Promise<CalendarEvent | null> {
+async function getCalendarEventByIdLocal(id: string): Promise<CalendarEvent | null> {
   return loadEvents().find((event) => event.id === id) ?? null
 }
 
-export async function createCalendarEvent(
+async function createCalendarEventLocal(
   input: Omit<CalendarEvent, 'id' | 'createdAt' | 'updatedAt'>,
 ): Promise<CalendarEvent> {
   const ts = now()
@@ -55,7 +57,7 @@ export async function createCalendarEvent(
   return event
 }
 
-export async function updateCalendarEvent(
+async function updateCalendarEventLocal(
   id: string,
   patch: Partial<Omit<CalendarEvent, 'id' | 'createdAt'>>,
 ): Promise<CalendarEvent | null> {
@@ -75,7 +77,7 @@ export async function updateCalendarEvent(
   return updated
 }
 
-export async function deleteCalendarEvent(id: string): Promise<boolean> {
+async function deleteCalendarEventLocal(id: string): Promise<boolean> {
   const events = loadEvents()
   const nextEvents = events.filter((event) => event.id !== id)
   if (nextEvents.length === events.length) return false
@@ -83,7 +85,7 @@ export async function deleteCalendarEvent(id: string): Promise<boolean> {
   return true
 }
 
-export async function listCalendarEventsByRange(
+async function listCalendarEventsByRangeLocal(
   startTime: string,
   endTime: string,
 ): Promise<CalendarEvent[]> {
@@ -95,4 +97,38 @@ export async function listCalendarEventsByRange(
     if (!Number.isFinite(eventStart)) return false
     return eventStart >= start && eventStart <= end
   })
+}
+
+export async function listCalendarEvents(): Promise<CalendarEvent[]> {
+  return isWebShim() ? calendarRuntime.listCalendarEvents() : listCalendarEventsLocal()
+}
+
+export async function getCalendarEventById(id: string): Promise<CalendarEvent | null> {
+  return isWebShim() ? calendarRuntime.getCalendarEventById(id) : getCalendarEventByIdLocal(id)
+}
+
+export async function createCalendarEvent(
+  input: Omit<CalendarEvent, 'id' | 'createdAt' | 'updatedAt'>,
+): Promise<CalendarEvent> {
+  return isWebShim() ? calendarRuntime.createCalendarEvent(input) : createCalendarEventLocal(input)
+}
+
+export async function updateCalendarEvent(
+  id: string,
+  patch: Partial<Omit<CalendarEvent, 'id' | 'createdAt'>>,
+): Promise<CalendarEvent | null> {
+  return isWebShim() ? calendarRuntime.updateCalendarEvent(id, patch) : updateCalendarEventLocal(id, patch)
+}
+
+export async function deleteCalendarEvent(id: string): Promise<boolean> {
+  return isWebShim() ? calendarRuntime.deleteCalendarEvent(id) : deleteCalendarEventLocal(id)
+}
+
+export async function listCalendarEventsByRange(
+  startTime: string,
+  endTime: string,
+): Promise<CalendarEvent[]> {
+  return isWebShim()
+    ? calendarRuntime.listCalendarEventsByRange(startTime, endTime)
+    : listCalendarEventsByRangeLocal(startTime, endTime)
 }

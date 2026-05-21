@@ -142,7 +142,11 @@ function renderPanelContent(
     case 'ai-forum':
       return <AiForumWorkbench />
     case 'data':
-      return <ExcelAnalysisWorkbench />
+      return (
+        <EditorViewportShell>
+          <ExcelAnalysisWorkbench />
+        </EditorViewportShell>
+      )
     case 'model':
       return isWebShim() ? <WebSettingsPanel /> : <ModelDevPanel />
     case 'daily-feed':

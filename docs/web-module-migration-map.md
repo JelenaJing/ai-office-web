@@ -41,7 +41,8 @@
 | 文稿 | `DocumentEngineHost` / `EditorPanel` | `web.docx.create` | 是 | 生成 / 保存 / 导出 → `platformApi` |
 | 邮件 | `CommunicationWorkbench` / `EmailContext` | `/api/email` | 是 | 收件箱 / 发送 / 账号 → `platformApi.email` |
 | PPT | `GenerationWorkbenchPanel` / `PptWorkbenchPanel` | `web.pptx.create` | 是 | 生成 / 模板 / 下载 → `platformApi.skills.run` |
-| Excel | `ExcelAnalysisWorkbench` | `web.xlsx.analyze` | 是 | 分析 / 下载（已双轨，继续收敛 IPC） |
+| Excel | `ExcelAnalysisWorkbench` | `web.xlsx.analyze` | 是 | 与 Electron 同一壳；Web 仅替换文件选择与 `platformApi.excel.analyze` |
+| 日程 | `CalendarWorkspace` | `/api/calendar/events` | 是 | Web/Electron 均用原 `CalendarWorkspace`；Web 经 `calendarRuntime` → `platformApi.calendar` |
 | 图片 | `ImageWorkspace` | `web.image.generate` | 是（原 `ImageWorkspace` 壳） | `ImageService` Web 走 `platformApi.skills.run`；本地保存/文件夹拼接已禁用并提示 |
 | 日报 | `ActivityReportPanel` | `web.daily.report` | 临时（`WebDailyReportPanel`） | 生成报告 → `platformApi` |
 | 设置 | `FullSettingsPanel` / `ModelDevPanel` | `/api/settings/ai` | 临时（`WebSettingsPanel`） | 查看 / 测试 LLM |
@@ -73,8 +74,13 @@
 | 文稿编辑 | `free` | （不变） | `freewrite` | `DocumentEngineHost` |
 | 数据分析 | `generation` | `data` | `data` | `ExcelAnalysisWorkbench` |
 | 图片生成 | `generation` | `image` | `image` | `ImageWorkspace` |
+| 日程管理 | —（`primarySection=calendar`） | — | — | `CalendarWorkspace` |
 
 Web 文稿：`EditorPanel` 进入 `freewrite` 且无标签时自动 `openTab` 内存文档（`webDocumentSession.ts`），不调用 `createBlankDocument`。
+
+Web 日程：`App.tsx` 不再使用 `WebCalendarPanel` 作主入口；`calendarService` Web 分支走 `calendarRuntime.ts` 与 server 持久化。
+
+Web 数据分析：`ExcelAnalysisWorkbench` 占满视口（`flex:1`），禁止退回 `WebExcelAnalysisPanel`。
 
 ### 执行层接入（第一批：文稿 / 邮件 / PPT）
 

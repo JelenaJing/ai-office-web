@@ -18,7 +18,7 @@ type PythonEnvState = 'idle' | 'checking' | 'installing' | 'rebuilding' | 'ready
 const WEB_ENV_BANNER = {
   bg: '#eff6ff',
   color: '#1d4ed8',
-  text: () => 'Web 版分析由服务器执行，无需本机 Python 环境',
+  text: () => 'Web 版由服务器执行，无需本机 Python 环境',
 }
 
 const SPREADSHEET_EXTS = new Set(['xlsx', 'csv', 'xls'])
@@ -39,11 +39,14 @@ const ENV_BANNER: Record<PythonEnvState, { bg: string; color: string; text: (msg
 // ─── Styles ────────────────────────────────────────────────────────────────────
 
 const Shell = styled.div`
-  flex: 0 0 auto;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
   width: 100%;
   display: flex;
   flex-direction: column;
-  background: transparent;
+  background: linear-gradient(180deg, #f8fbfe 0%, #eef4f9 100%);
+  overflow: hidden;
 `
 
 const EnvBanner = styled.div<{ $bg: string; $color: string }>`
@@ -70,9 +73,10 @@ const PhaseBanner = styled.div`
 `
 
 const Body = styled.div`
-  flex: 0 0 auto;
-  overflow: visible;
-  padding: 14px 18px 10px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 18px 18px;
   display: grid;
   gap: 12px;
   align-content: start;
