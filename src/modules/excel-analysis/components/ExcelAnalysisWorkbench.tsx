@@ -4,9 +4,28 @@ import { useWorkspace } from '../../../contexts/WorkspaceContext'
 import { useGenerationWorkbench } from '../../../contexts/GenerationWorkbenchContext'
 import { toFileUrl } from '../../../shared/url/fileUrlHelper'
 import { listPlotDataModels, type PlotDataModelOption } from '../../plot/services/PlotService'
+import { isWebShim } from '../../../platform/detect'
+import { platformApi } from '../../../platform'
+import type { Artifact, FileEntry } from '../../../platform'
+import {
+  artifactDownloadFilename,
+  artifactHasExport,
+} from '../../../utils/artifactDisplay'
 
 // ─── Python env state machine ─────────────────────────────────────────────────
 type PythonEnvState = 'idle' | 'checking' | 'installing' | 'rebuilding' | 'ready' | 'failed'
+
+const WEB_ENV_BANNER = {
+  bg: '#eff6ff',
+  color: '#1d4ed8',
+  text: () => 'Web 版分析由服务器执行，无需本机 Python 环境',
+}
+
+const SPREADSHEET_EXTS = new Set(['xlsx', 'csv', 'xls'])
+
+function isSpreadsheetEntry(f: FileEntry): boolean {
+  return SPREADSHEET_EXTS.has(f.ext.toLowerCase())
+}
 
 const ENV_BANNER: Record<PythonEnvState, { bg: string; color: string; text: (msg?: string) => string }> = {
   idle:       { bg: '#f1f5f9', color: '#475569', text: () => '未检测到 Python 环境，点击「开始分析」时将自动安装。' },
@@ -164,6 +183,18 @@ const FilePathLine = styled.div`
   word-break: break-all;
 `
 
+const FileSelect = styled.select`
+  flex: 1;
+  min-width: 200px;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid #cad6e2;
+  border-radius: 8px;
+  font-size: var(--font-size-sm);
+  color: #304255;
+  background: #fff;
+`
+
 const TextArea = styled.textarea`
   width: 100%;
   min-height: 100px;
@@ -253,10 +284,14 @@ function isDataFile(p: string): boolean {
 const ENV_BUSY: PythonEnvState[] = ['checking', 'installing', 'rebuilding']
 
 export default function ExcelAnalysisWorkbench() {
-  console.log('[ExcelAnalysisWorkbench] mounted version: local-image-render-v1')
+  const webMode = isWebShim()
   const { activeWorkspacePath, refreshTree } = useWorkspace()
   const workbench = useGenerationWorkbench()
   const [sourcePath, setSourcePath] = useState('')
+  const [selectedFileId, setSelectedFileId] = useState('')
+  const [spreadsheetFiles, setSpreadsheetFiles] = useState<FileEntry[]>([])
+  const [filesLoading, setFilesLoading] = useState(false)
+  const [webArtifact, setWebArtifact] = useState<Artifact | null>(null)
   const [pickingFile, setPickingFile] = useState(false)
   const [analysisRunning, setAnalysisRunning] = useState(false)
   const [lastError, setLastError] = useState<string | null>(null)
@@ -264,7 +299,7 @@ export default function ExcelAnalysisWorkbench() {
   const [lastScriptPath, setLastScriptPath] = useState<string | null>(null)
   const [plotDataModels, setPlotDataModels] = useState<PlotDataModelOption[]>([])
   const [selectedDataModelId, setSelectedDataModelId] = useState('')
-  const [envState, setEnvState] = useState<PythonEnvState>('idle')
+  const [envState, setEnvState] = useState<PythonEnvState>(webMode ? 'ready' : 'idle')
   const [envMessage, setEnvMessage] = useState<string>('')
   const [envLogs, setEnvLogs] = useState<string[]>([])
   const appendEnvLog = useCallback((line: string) => setEnvLogs((prev) => [...prev, line]), [])
@@ -273,41 +308,73 @@ export default function ExcelAnalysisWorkbench() {
   const [localOutputImages, setLocalOutputImages] = useState<string[]>([])
   const [localResultTitle, setLocalResultTitle] = useState('')
 
-  const isEnvBusy = ENV_BUSY.includes(envState)
-  const canRun = Boolean(activeWorkspacePath && sourcePath && !analysisRunning && !isEnvBusy)
+  const isEnvBusy = !webMode && ENV_BUSY.includes(envState)
+  const hasDataSource = webMode ? Boolean(selectedFileId) : Boolean(sourcePath)
+  const canRun = Boolean(activeWorkspacePath && hasDataSource && !analysisRunning && !isEnvBusy)
 
-  // ── Load data models on mount ──────────────────────────────────────────────
+  const selectedWebFile = spreadsheetFiles.find((f) => f.id === selectedFileId)
+
+  // ── Load data models on mount (Electron IPC) ────────────────────────────────
   useEffect(() => {
+    if (webMode) return
     void listPlotDataModels().then(setPlotDataModels).catch(() => setPlotDataModels([]))
-  }, [])
+  }, [webMode])
 
-  // ── Fast stamp check on mount (no subprocess — immediate) ─────────────────
+  // ── Web: load uploaded spreadsheets from resource center ─────────────────
+  const loadWebSpreadsheetFiles = useCallback(async () => {
+    setFilesLoading(true)
+    try {
+      const list = await platformApi.files.list()
+      const sheets = list.filter(isSpreadsheetEntry)
+      setSpreadsheetFiles(sheets)
+      if (sheets.length > 0 && !selectedFileId) {
+        setSelectedFileId(sheets[0].id)
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      setLastError(msg)
+      appendEnvLog(`[error] 加载文件列表失败：${msg}`)
+    } finally {
+      setFilesLoading(false)
+    }
+  }, [appendEnvLog, selectedFileId])
+
   useEffect(() => {
+    if (!webMode) return
+    void loadWebSpreadsheetFiles()
+  }, [webMode, loadWebSpreadsheetFiles])
+
+  // ── Fast stamp check on mount (Electron only) ─────────────────────────────
+  useEffect(() => {
+    if (webMode) return
     void window.electronAPI?.excelCheckEnvStatus?.().then((r) => {
       if (r?.status) setEnvState(r.status as PythonEnvState)
       if (r?.message) setEnvMessage(r.message)
     }).catch(() => undefined)
-  }, [])
+  }, [webMode])
 
-  // ── Subscribe to real-time env logs ───────────────────────────────────────
+  // ── Subscribe to real-time env logs (Electron only) ───────────────────────
   useEffect(() => {
+    if (webMode) return
     const unsub = window.electronAPI?.onExcelAnalysisEnvLog?.((payload) => {
       setEnvLogs((prev) => [...prev.slice(-400), payload.message])
     })
     return () => unsub?.()
-  }, [])
+  }, [webMode])
 
-  // ── Subscribe to env status updates ───────────────────────────────────────
+  // ── Subscribe to env status updates (Electron only) ───────────────────────
   useEffect(() => {
+    if (webMode) return
     const unsub = window.electronAPI?.onExcelAnalysisEnvStatus?.((payload) => {
       if (payload?.status) setEnvState(payload.status as PythonEnvState)
       if (payload?.message !== undefined) setEnvMessage(payload.message ?? '')
     })
     return () => unsub?.()
-  }, [])
+  }, [webMode])
 
-  // ── Analysis progress ─────────────────────────────────────────────────────
+  // ── Analysis progress (Electron only) ─────────────────────────────────────
   useEffect(() => {
+    if (webMode) return
     const unsub = window.electronAPI?.onExcelAnalysisProgress?.((rawPayload) => {
       const payload = rawPayload as Record<string, unknown>
       const phase = String(payload?.['phase'] || '').trim()
@@ -315,7 +382,7 @@ export default function ExcelAnalysisWorkbench() {
       workbench.setGenerationStatus('running', phase)
     })
     return () => unsub?.()
-  }, [workbench])
+  }, [webMode, workbench])
 
   // ── Auto-scroll debug log ─────────────────────────────────────────────────
   useEffect(() => {
@@ -348,18 +415,78 @@ export default function ExcelAnalysisWorkbench() {
     }
   }, [])
 
+  const downloadWebReport = useCallback(async () => {
+    if (!webArtifact) return
+    const filename = artifactDownloadFilename(webArtifact)
+    if (!filename) {
+      setLastError('分析完成但暂无可下载文件')
+      return
+    }
+    try {
+      await platformApi.artifacts.download(webArtifact.id, filename)
+      appendEnvLog(`[ok] 已下载 ${filename}`)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      setLastError(`下载失败：${msg}`)
+      appendEnvLog(`[error] ${msg}`)
+    }
+  }, [appendEnvLog, webArtifact])
+
   // ── Run analysis ──────────────────────────────────────────────────────────
   const runAnalysis = useCallback(async () => {
-    if (!activeWorkspacePath || !sourcePath) return
+    if (!activeWorkspacePath || !hasDataSource) return
     setAnalysisRunning(true)
     setLastError(null)
     setLastOutputDir(null)
     setLastScriptPath(null)
     setLocalOutputImages([])
     setLocalResultTitle('')
-    setShowDebug(true)  // auto-open debug panel so user can see heartbeat logs
+    setWebArtifact(null)
+    setShowDebug(true)
     workbench.clearCurrentResult()
-    workbench.setGenerationStatus('running', '正在启动分析…')
+    workbench.setGenerationStatus('running', webMode ? '正在提交服务器分析…' : '正在启动分析…')
+
+    if (webMode) {
+      try {
+        appendEnvLog(`[web] 分析文件：${selectedWebFile?.name ?? selectedFileId}`)
+        const result = await platformApi.excel.analyze({
+          fileId: selectedFileId,
+          prompt: workbench.generationPrompt.trim() || undefined,
+          workspacePath: activeWorkspacePath,
+          options: {
+            dataModelId: selectedDataModelId.trim() || undefined,
+            modelId: selectedDataModelId.trim() || undefined,
+          },
+        })
+        let artifact = result.artifact
+        if (!artifact) {
+          const list = await platformApi.artifacts.list()
+          artifact = list.find((a) => a.id === result.artifactId)
+        }
+        if (!artifact) {
+          throw new Error('分析完成但未返回生成记录')
+        }
+        if (!artifactHasExport(artifact)) {
+          workbench.setGenerationStatus('error', '分析完成但暂无可下载文件')
+          setLastError('分析完成但暂无可下载文件')
+          appendEnvLog('[warn] artifact 无 exports')
+          return
+        }
+        setWebArtifact(artifact)
+        workbench.setGenerationStatus('completed', '分析完成')
+        appendEnvLog(`[ok] 已生成报告：${artifact.title}`)
+        appendEnvLog('[hint] 可在资源中心 › 生成记录查看（类型：表格分析）')
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        workbench.setGenerationStatus('error', msg)
+        setLastError(msg)
+        appendEnvLog(`[error] ${msg}`)
+      } finally {
+        setAnalysisRunning(false)
+      }
+      return
+    }
+
     try {
       const raw = (await window.electronAPI.excelAnalysisRun({
         workspacePath: activeWorkspacePath,
@@ -433,29 +560,47 @@ export default function ExcelAnalysisWorkbench() {
     } finally {
       setAnalysisRunning(false)
     }
-  }, [activeWorkspacePath, appendEnvLog, refreshTree, selectedDataModelId, sourcePath, workbench])
+  }, [
+    activeWorkspacePath,
+    appendEnvLog,
+    hasDataSource,
+    refreshTree,
+    selectedDataModelId,
+    selectedFileId,
+    selectedWebFile?.name,
+    sourcePath,
+    webMode,
+    workbench,
+  ])
 
   const phaseVisible =
     analysisRunning &&
     workbench.generationStatus.phase === 'running' &&
     Boolean(workbench.generationStatus.message?.trim())
 
-  const bannerCfg = ENV_BANNER[envState]
+  const bannerCfg = webMode ? WEB_ENV_BANNER : ENV_BANNER[envState]
 
   return (
     <Shell data-testid="excel-analysis-workbench">
       {/* ── Python env status banner ── */}
-      {envState !== 'ready' || true ? (
-        <EnvBanner $bg={bannerCfg.bg} $color={bannerCfg.color} role="status" aria-live="polite">
-          <span style={{ flex: 1 }}>{bannerCfg.text(envMessage)}</span>
-          <DebugToggle type="button" onClick={() => setShowDebug((v) => !v)} title="显示/隐藏调试日志">
-            {showDebug ? '▲ 日志' : '▼ 日志'}
-          </DebugToggle>
-          {(envState === 'failed' || envState === 'idle') && (
-            <DangerBtn type="button" onClick={() => void rebuildEnv()} disabled={isEnvBusy}>
-              重建 Python 环境
-            </DangerBtn>
-          )}
+      <EnvBanner $bg={bannerCfg.bg} $color={bannerCfg.color} role="status" aria-live="polite">
+        <span style={{ flex: 1 }}>{bannerCfg.text(envMessage)}</span>
+        <DebugToggle type="button" onClick={() => setShowDebug((v) => !v)} title="显示/隐藏调试日志">
+          {showDebug ? '▲ 日志' : '▼ 日志'}
+        </DebugToggle>
+        {!webMode && (envState === 'failed' || envState === 'idle') && (
+          <DangerBtn type="button" onClick={() => void rebuildEnv()} disabled={isEnvBusy}>
+            重建 Python 环境
+          </DangerBtn>
+        )}
+        {webMode ? (
+          <span
+            style={{ fontSize: 11, color: '#64748b', marginLeft: 4 }}
+            title="服务器环境由管理员维护"
+          >
+            服务器环境由管理员维护
+          </span>
+        ) : (
           <DebugToggle
             type="button"
             onClick={() => void window.electronAPI?.excelPythonDiagnostics?.().then((d) => {
@@ -467,8 +612,8 @@ export default function ExcelAnalysisWorkbench() {
           >
             🔍 诊断
           </DebugToggle>
-        </EnvBanner>
-      ) : null}
+        )}
+      </EnvBanner>
       {/* ── Debug log panel ── */}
       {showDebug && envLogs.length > 0 && (
         <DebugLog>
@@ -490,10 +635,48 @@ export default function ExcelAnalysisWorkbench() {
         <Card>
           <Label>数据文件</Label>
           <FileActionsRow>
-            {/* File picker: NEVER disabled by Python env */}
-            <Btn type="button" onClick={() => void pickFile()} disabled={pickingFile}>选择文件</Btn>
-            {/* Start Analysis: disabled while env is busy or analysis running */}
-            <PrimaryBtn type="button" onClick={() => void runAnalysis()} disabled={!canRun}>开始分析</PrimaryBtn>
+            {webMode ? (
+              <>
+                {filesLoading ? (
+                  <HintLine style={{ flex: 1 }}>正在加载资源中心表格文件…</HintLine>
+                ) : spreadsheetFiles.length === 0 ? (
+                  <HintLine style={{ flex: 1 }}>
+                    请先到 <strong>资源中心 › 我的文件</strong> 上传 xlsx 或 csv 表格。
+                  </HintLine>
+                ) : (
+                  <FileSelect
+                    value={selectedFileId}
+                    onChange={(e) => {
+                      setSelectedFileId(e.target.value)
+                      setLastError(null)
+                    }}
+                    disabled={analysisRunning}
+                    aria-label="选择表格文件"
+                  >
+                    {spreadsheetFiles.map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.name} ({(f.size / 1024).toFixed(1)} KB)
+                      </option>
+                    ))}
+                  </FileSelect>
+                )}
+                <Btn
+                  type="button"
+                  onClick={() => void loadWebSpreadsheetFiles()}
+                  disabled={filesLoading || analysisRunning}
+                  title="刷新文件列表"
+                >
+                  刷新列表
+                </Btn>
+              </>
+            ) : (
+              <Btn type="button" onClick={() => void pickFile()} disabled={pickingFile}>
+                选择文件
+              </Btn>
+            )}
+            <PrimaryBtn type="button" onClick={() => void runAnalysis()} disabled={!canRun}>
+              开始分析
+            </PrimaryBtn>
           </FileActionsRow>
           <Label style={{ marginTop: 2 }}>模型选择</Label>
           {/* Model buttons: only disabled while analysis running, NOT by Python env */}
@@ -519,12 +702,19 @@ export default function ExcelAnalysisWorkbench() {
             ))}
           </ModelToggleRow>
           <HintLine>
-            {selectedDataModelId
-              ? `${plotDataModels.find((x) => x.id === selectedDataModelId)?.description || ''} 若下方「分析需求」为空，将直接使用模型随包内置绘图脚本，不再向大模型索要作图代码；填写需求后则按你的描述重新生成 Python 分析脚本（不复用历史脚本）。`
-              : '可选。套用模型时会在分析前预处理表格。'}
+            {webMode
+              ? (selectedDataModelId
+                ? 'Web 版已记录模型选择；服务器第一版分析暂不套用本地绘图模型脚本。'
+                : 'Web 版从资源中心选择已上传表格，由服务器生成 Markdown 分析报告。')
+              : selectedDataModelId
+                ? `${plotDataModels.find((x) => x.id === selectedDataModelId)?.description || ''} 若下方「分析需求」为空，将直接使用模型随包内置绘图脚本，不再向大模型索要作图代码；填写需求后则按你的描述重新生成 Python 分析脚本（不复用历史脚本）。`
+                : '可选。套用模型时会在分析前预处理表格。'}
           </HintLine>
           <HintLine>支持 Excel（.xlsx / .xls）或 CSV，表头从 A1 开始。</HintLine>
-          {sourcePath ? <FilePathLine>{sourcePath}</FilePathLine> : null}
+          {webMode && selectedWebFile ? (
+            <FilePathLine>{selectedWebFile.name}</FilePathLine>
+          ) : null}
+          {!webMode && sourcePath ? <FilePathLine>{sourcePath}</FilePathLine> : null}
           <Label style={{ marginTop: 4 }}>分析需求（可选）</Label>
           {/* Textarea: never disabled */}
           <TextArea
@@ -533,12 +723,32 @@ export default function ExcelAnalysisWorkbench() {
             placeholder="例如：按地区汇总销售额并画柱状图；或说明要看的指标与维度。"
           />
         </Card>
+        {webArtifact ? (
+          <Card>
+            <Label>分析完成</Label>
+            <HintLine style={{ color: '#15803d', fontWeight: 600 }}>
+              {webArtifact.title}
+            </HintLine>
+            <HintLine>
+              可在 <strong>资源中心 › 生成记录</strong> 查看（类型：表格分析）。
+            </HintLine>
+            <FileActionsRow style={{ marginTop: 8 }}>
+              {artifactHasExport(webArtifact) ? (
+                <PrimaryBtn type="button" onClick={() => void downloadWebReport()}>
+                  下载分析报告
+                </PrimaryBtn>
+              ) : (
+                <ErrorBox>分析完成但暂无可下载文件</ErrorBox>
+              )}
+            </FileActionsRow>
+          </Card>
+        ) : null}
         {lastError ? (
           <Card>
             <Label>未能完成</Label>
             <ErrorBox style={{ whiteSpace: 'pre-wrap' }}>{lastError}</ErrorBox>
             <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {lastOutputDir ? (
+              {!webMode && lastOutputDir ? (
                 <button
                   type="button"
                   style={{ fontSize: 12, padding: '4px 10px', cursor: 'pointer', borderRadius: 6, border: '1px solid #d6e0ea', background: '#f8fafc' }}
@@ -549,7 +759,7 @@ export default function ExcelAnalysisWorkbench() {
                   📂 打开输出目录
                 </button>
               ) : null}
-              {lastScriptPath ? (
+              {!webMode && lastScriptPath ? (
                 <button
                   type="button"
                   style={{ fontSize: 12, padding: '4px 10px', cursor: 'pointer', borderRadius: 6, border: '1px solid #d6e0ea', background: '#f8fafc' }}
@@ -574,7 +784,7 @@ export default function ExcelAnalysisWorkbench() {
             </div>
           </Card>
         ) : null}
-        {localOutputImages.length > 0 ? (
+        {!webMode && localOutputImages.length > 0 ? (
           <Card>
             <Label>{localResultTitle}</Label>
             <ChartGrid>

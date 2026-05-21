@@ -1,5 +1,6 @@
 /**
- * WebExcelAnalysisPanel — Web-mode spreadsheet analysis (fileId + server skill).
+ * @deprecated 不再作为 data 面板入口。Web 数据分析使用 ExcelAnalysisWorkbench + platformApi.excel.analyze。
+ * 保留本文件以免破坏构建引用；请勿在 WorkspaceViewportHost 中挂载。
  */
 
 import { useCallback, useEffect, useState } from 'react'
