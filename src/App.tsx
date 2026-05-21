@@ -571,6 +571,41 @@ const LauncherTitle = styled.h1`
   color: #1f3142;
 `
 
+const LauncherPanel = styled.div`
+  text-align: center;
+  max-width: 420px;
+`
+
+const LauncherMessage = styled.p`
+  margin: 0 0 20px;
+  font-size: 14px;
+  color: #64748b;
+  line-height: 1.6;
+`
+
+const LauncherError = styled.p`
+  margin: 0 0 20px;
+  font-size: 13px;
+  color: #b91c1c;
+  line-height: 1.5;
+  word-break: break-word;
+`
+
+const LauncherBtn = styled.button`
+  padding: 10px 22px;
+  border-radius: 8px;
+  border: none;
+  background: #2563eb;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+`
+
 interface WriterWorkspaceRuntimeProps {
   statusMessage: string
   runtimeStatus: string
@@ -1046,7 +1081,14 @@ function WriterWorkspaceRuntime({
 function WriterWorkspaceApp({ onLogout }: { onLogout: () => void }) {
   const { markdown, statusMessage, setStatusMessage } = useDocument()
   const { language, setLanguage } = useLanguage()
-  const { initialized, activeWorkspacePath, closeWorkspace } = useWorkspace()
+  const {
+    initialized,
+    activeWorkspacePath,
+    closeWorkspace,
+    loading: workspaceLoading,
+    initError,
+    initializeDefaultWorkspace,
+  } = useWorkspace()
   const internalSession = useInternalSession()
   const [runtimeStatus, setRuntimeStatus] = useState('本地模式已就绪')
 
@@ -1105,15 +1147,67 @@ function WriterWorkspaceApp({ onLogout }: { onLogout: () => void }) {
   }, [activeWorkspacePath])
 
   if (!initialized) {
-    return <AppShell><Launcher><LauncherTitle>正在加载工作区...</LauncherTitle></Launcher></AppShell>
+    return (
+      <AppShell>
+        <Launcher>
+          <LauncherPanel>
+            <LauncherTitle>正在加载工作区...</LauncherTitle>
+          </LauncherPanel>
+        </Launcher>
+      </AppShell>
+    )
   }
 
   if (!activeWorkspacePath) {
-    // In web mode, auto-init is running (useEffect in WorkspaceContext).
-    // Show a spinner instead of WorkspaceGate to avoid the selection screen.
-    const isWebShim = (window.electronAPI as { __isWebShim?: boolean } | undefined)?.__isWebShim
-    if (isWebShim) {
-      return <AppShell><Launcher><LauncherTitle>正在初始化工作区...</LauncherTitle></Launcher></AppShell>
+    if (isWebShim()) {
+      if (workspaceLoading && !initError) {
+        return (
+          <AppShell>
+            <Launcher>
+              <LauncherPanel>
+                <LauncherTitle>正在初始化工作区...</LauncherTitle>
+                <LauncherMessage>正在连接服务器并获取默认工作区</LauncherMessage>
+              </LauncherPanel>
+            </Launcher>
+          </AppShell>
+        )
+      }
+      if (initError) {
+        return (
+          <AppShell>
+            <Launcher>
+              <LauncherPanel>
+                <LauncherTitle>工作区初始化失败</LauncherTitle>
+                <LauncherError>{initError}</LauncherError>
+                <LauncherBtn
+                  type="button"
+                  disabled={workspaceLoading}
+                  onClick={() => void initializeDefaultWorkspace()}
+                >
+                  {workspaceLoading ? '正在重试…' : '重新初始化'}
+                </LauncherBtn>
+              </LauncherPanel>
+            </Launcher>
+          </AppShell>
+        )
+      }
+      return (
+        <AppShell>
+          <Launcher>
+            <LauncherPanel>
+              <LauncherTitle>未找到默认工作区</LauncherTitle>
+              <LauncherMessage>点击下方按钮创建并打开默认工作区。</LauncherMessage>
+              <LauncherBtn
+                type="button"
+                disabled={workspaceLoading}
+                onClick={() => void initializeDefaultWorkspace()}
+              >
+                {workspaceLoading ? '正在创建…' : '创建默认工作区'}
+              </LauncherBtn>
+            </LauncherPanel>
+          </Launcher>
+        </AppShell>
+      )
     }
     return <WorkspaceGate />
   }

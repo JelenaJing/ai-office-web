@@ -163,12 +163,19 @@ export const webPlatformApi: PlatformApi = {
 
   workspaces: {
     async getDefault(): Promise<WorkspaceInfo> {
-      const data = await apiFetch<{
-        success: boolean
-        workspace: { name: string; path: string; isDefault?: boolean }
-      }>('/api/workspaces/default')
-      const w = data.workspace
-      return { id: w.path, name: w.name, path: w.path, isDefault: w.isDefault }
+      try {
+        const data = await apiFetch<{
+          success: boolean
+          workspace: { name: string; path: string; isDefault?: boolean }
+        }>('/api/workspaces/default')
+        const w = data.workspace
+        if (w?.path) {
+          return { id: w.path, name: w.name, path: w.path, isDefault: w.isDefault }
+        }
+      } catch {
+        // fallback to create below
+      }
+      return webPlatformApi.workspaces.create('默认工作区')
     },
 
     async list(): Promise<WorkspaceInfo[]> {
