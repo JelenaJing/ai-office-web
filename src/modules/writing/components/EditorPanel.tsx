@@ -98,6 +98,8 @@ import {
   normalizeFileLikePath as normalizeSharedFileLikePath,
   toFileUrl as toSharedFileUrl,
 } from '../../../shared/url/fileUrlHelper'
+import { isWebShim } from '../../../platform/detect'
+import { webMigrationLabel } from '../../../platform/webMigration'
 import type { KnowledgeTaskConstraints, PreviewKnowledgeTaskContextResult } from '../../../types/knowledge'
 import { buildKnowledgeTaskConstraints, resolveKnowledgeTaskPreview } from '../../../shared/knowledge/knowledgeTaskHelper'
 import { normalizeContinueDeltaAtStart, normalizeContinueLeadingText } from '../../../utils/continueStreamText'
@@ -2105,6 +2107,10 @@ const EditorPanel: React.FC<EditorPanelProps> = ({
   }, [editor])
 
   const handleSaveCurrentAsDocx = useCallback(async (_request?: DocumentEngineSaveRequest): Promise<DocumentEngineSaveResult | null> => {
+    if (isWebShim()) {
+      setStatusMessage(webMigrationLabel('本地保存；生成结果请在资源中心 › 生成记录下载'))
+      return null
+    }
     const request = _request || {}
     const saveMode = request.mode || 'current'
     const safeBaseName = String(currentFileName || '未命名文档').replace(/\.[^.]+$/, '').replace(/[\\/:*?"<>|]/g, '_') || '未命名文档'

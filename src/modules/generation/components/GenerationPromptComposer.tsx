@@ -43,6 +43,9 @@ import {
   toDisplayUrl,
 } from './generationWorkbenchUtils'
 import { startChineseVoskVoiceInput, supportsVoskVoiceInput, type VoskVoiceInputSession } from '../../../services/voskVoiceInput'
+import { isWebShim } from '../../../platform/detect'
+import { runWebPptxCreate } from '../services/pptWebGeneration'
+import { artifactDownloadFilename } from '../../../utils/artifactDisplay'
 import { assembleDeckDocument } from '../ppt/assembleDeckDocument'
 import { validateDeckDocumentOutput } from '../ppt/validateDeckDocumentOutput'
 import {
@@ -889,8 +892,48 @@ export default function GenerationPromptComposer() {
       return
     }
 
-    // Freeze current user prompt immediately — never read workbench.generationPrompt again after this point
     const rawUserPrompt = workbench.generationPrompt.trim()
+
+    if (isWebShim()) {
+      pptRunningRef.current = true
+      setSubmitting(true)
+      workbench.setGenerationStatus('running', '正在通过服务器生成 PPT...')
+      workbench.clearCurrentResult()
+      try {
+        const title = rawUserPrompt.slice(0, 40) || '演示文稿'
+        const result = await runWebPptxCreate({
+          workspacePath: activeWorkspacePath,
+          title,
+          prompt: rawUserPrompt,
+        })
+        if (!result.success || !result.artifact) {
+          const err = result.error || 'PPT 生成失败'
+          workbench.setGenerationStatus('error', err)
+          setStatusMessage(err)
+          return
+        }
+        const artifact = result.artifact
+        const fn = artifactDownloadFilename(artifact) || `${title}.pptx`
+        workbench.setModeSession('ppt', (session) => ({
+          ...session,
+          pptTaskStatus: 'completed',
+          resultType: 'pptx',
+          resultPath: artifact.id,
+          resultTitle: artifact.title || title,
+          resultPreviewText: `已生成 ${fn}，可在资源中心 › 生成记录下载。`,
+        }))
+        workbench.setGenerationStatus('completed', 'PPT 已生成')
+        setStatusMessage(`PPT 已生成（${fn}）。可在资源中心 › 生成记录下载，或点击右侧「下载 PPT」。`)
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'PPT 生成失败'
+        workbench.setGenerationStatus('error', msg)
+        setStatusMessage(msg)
+      } finally {
+        pptRunningRef.current = false
+        setSubmitting(false)
+      }
+      return
+    }
 
     pptRunningRef.current = true
     pptStopRef.current = false

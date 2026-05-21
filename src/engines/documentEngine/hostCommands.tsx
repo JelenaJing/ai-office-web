@@ -7,6 +7,8 @@ import { plainTextToHtml } from '../../utils/plainTextToHtml'
 import type { KnowledgeDocumentBlock, KnowledgeDocumentJson } from '../../types/knowledgeDocumentJson'
 import type { MailAttachmentSourceContext } from '../../types/mailAttachment'
 import { normalizeDocumentSchema, serializeDocumentSchemaToHtml, type DocumentSchema } from '../../document/schema'
+import { isWebShim } from '../../platform/detect'
+import { webMigrationLabel } from '../../platform/webMigration'
 
 interface OpenDocumentPathOptions {
   sourceContext?: MailAttachmentSourceContext
@@ -197,6 +199,10 @@ export function DocumentEngineHostCommandsProvider({ children }: { children: Rea
   }, [openTab, setStatusMessage, knowledge.departmentId])
 
   const openDocumentPath = useCallback(async (filePath: string, options?: OpenDocumentPathOptions) => {
+    if (isWebShim()) {
+      setStatusMessage(webMigrationLabel('本地文件打开'))
+      return
+    }
     if (!runtime) {
       setStatusMessage('文档引擎尚未就绪，请稍后再试')
       return
@@ -506,10 +512,14 @@ export function DocumentEngineHostCommandsProvider({ children }: { children: Rea
   }, [ensureCurrentDocumentSaved, openTab, runtime, setStatusMessage, knowledge.departmentId])
 
   const requestOpenFromDialog = useCallback(async () => {
+    if (isWebShim()) {
+      setStatusMessage(webMigrationLabel('本地打开文件'))
+      return
+    }
     const selectedPath = await window.electronAPI.openFileDialog()
     if (!selectedPath) return
     await openDocumentPath(selectedPath)
-  }, [openDocumentPath])
+  }, [openDocumentPath, setStatusMessage])
 
   const saveActiveDocument = useCallback(async (request?: DocumentEngineSaveRequest) => {
     if (activeTab?.preview) {
@@ -535,8 +545,12 @@ export function DocumentEngineHostCommandsProvider({ children }: { children: Rea
   // when runSaveHandler() returns false (no workspace active).
 
   const saveActiveDocumentAs = useCallback(async () => {
+    if (isWebShim()) {
+      setStatusMessage(webMigrationLabel('另存为本地路径'))
+      return
+    }
     await saveActiveDocument({ reason: 'manual', mode: 'save-as' })
-  }, [saveActiveDocument])
+  }, [saveActiveDocument, setStatusMessage])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {

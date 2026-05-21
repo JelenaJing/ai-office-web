@@ -24,6 +24,9 @@ import {
 } from '../../image/services/sharedImageGeneration'
 import type { StructuredRemakeContext } from '../../writing/services/sectionAwareRemake'
 import { runWritingAssistant } from '../../writing/services/WritingAssistantService'
+import { isWebShim } from '../../../platform/detect'
+import { webMigrationLabel } from '../../../platform/webMigration'
+import { runWebDocxCreate, webDocxSuccessMessage } from '../../writing/services/docxWebGeneration'
 import {
   buildPaperArtifact,
   getEssayTaskResult,
@@ -2584,6 +2587,59 @@ const GenerationComposer: React.FC<Props> = ({
   const runAssistantTask = useCallback(async (instruction: string) => {
     const normalizedInstruction = instruction.trim()
     if (!normalizedInstruction || running) return
+
+    if (isWebShim() && !isExplicitImageGenerationRequest(normalizedInstruction)) {
+      const dailyReportTemplateActiveEarly =
+        isDailyReportKnowledgeDocument(taskTemplateDocument) || generationMode === 'daily-report'
+      if (dailyReportTemplateActiveEarly) {
+        const msg = webMigrationLabel('日报/长文流式生成')
+        setStatus(msg)
+        setStatusMessage(msg)
+        return
+      }
+      const earlyRoute = resolveDocumentFlow('', normalizedInstruction)
+      if (earlyRoute.flow === 'rewrite') {
+        const msg = webMigrationLabel('选区或全文改写')
+        setStatus(msg)
+        setStatusMessage(msg)
+        return
+      }
+      if (earlyRoute.flow === 'paper-generation') {
+        const msg = webMigrationLabel('论文/长稿流式生成')
+        setStatus(msg)
+        setStatusMessage(msg)
+        return
+      }
+      if (!activeWorkspacePath) {
+        const msg = '请先登录并打开工作区后再生成文稿。'
+        setStatus(msg)
+        setStatusMessage(msg)
+        return
+      }
+      setRunningState(true)
+      setStatus('正在通过服务器生成文稿...')
+      setStatusMessage('正在通过服务器生成文稿...')
+      try {
+        const skillResult = await runWebDocxCreate(normalizedInstruction, activeWorkspacePath)
+        if (!skillResult.success || !skillResult.artifact) {
+          const err = skillResult.error || '文稿生成失败'
+          setStatus(err)
+          setStatusMessage(err)
+          return
+        }
+        const msg = webDocxSuccessMessage(skillResult.artifact)
+        setStatus(msg)
+        setStatusMessage(msg)
+      } catch (e) {
+        const err = e instanceof Error ? e.message : '文稿生成失败'
+        setStatus(err)
+        setStatusMessage(err)
+      } finally {
+        setRunningState(false)
+      }
+      return
+    }
+
     const outputLanguage = resolveDocumentOutputLanguage(normalizedInstruction)
     const generationLanguage = outputLanguage === 'en-US' ? 'en' : 'zh'
 

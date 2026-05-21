@@ -16,6 +16,18 @@ import { resolveEmailAccountId } from '../utils/emailAccountUtils'
 import { computeBodyHash } from '../services/mailTriageCache'
 import { getAiDraft, updateAiDraftStatus } from '../services/mailDraftStore'
 import { getUserDraft, setUserDraft, updateUserDraftStatus } from '../services/userDraftStore'
+import { isWebShim } from '../../../platform/detect'
+import {
+  emailRuntimeClearAccount,
+  emailRuntimeFetchInbox,
+  emailRuntimeFetchMessage,
+  emailRuntimeFetchSent,
+  emailRuntimeFetchTrash,
+  emailRuntimeGetAccount,
+  emailRuntimeSaveAccount,
+  emailRuntimeSendPlain,
+  emailRuntimeSendReply,
+} from '../services/emailRuntime'
 
 /* ------------------------------------------------------------------ */
 /*  helpers                                                           */
@@ -308,8 +320,7 @@ export function EmailProvider({ children }: { children: ReactNode }) {
 
   /* ---- load account config on mount ---- */
   useEffect(() => {
-    if (!window.electronAPI?.emailGetAccount) return
-    window.electronAPI.emailGetAccount().then((config) => {
+    void emailRuntimeGetAccount().then((config) => {
       setAccountConfig(config)
       if (config) fetchRealMails(config)
     }).catch(() => { /* no config */ })
@@ -337,9 +348,7 @@ export function EmailProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (emailAutoStatus !== 'applied') return
-    if (!window.electronAPI?.emailGetAccount) return
-
-    window.electronAPI.emailGetAccount().then((config) => {
+    void emailRuntimeGetAccount().then((config) => {
       if (!config) return
       // Validate config belongs to the current user
       const configEmail = config.email || config.user || ''
@@ -369,14 +378,7 @@ export function EmailProvider({ children }: { children: ReactNode }) {
     setIsFetchingMails(true)
     setFetchError(null)
     try {
-      const response = await window.electronAPI.emailFetchInbox()
-      const inbox = Array.isArray(response)
-        ? response
-        : response.ok
-          ? response.mails
-          : (() => { throw new Error(response.error.message) })()
-
-      const baseMails = inbox as MailItem[]
+      const baseMails = await emailRuntimeFetchInbox()
 
       setMails(baseMails)
     } catch (err) {
@@ -424,30 +426,16 @@ export function EmailProvider({ children }: { children: ReactNode }) {
 
   /* ---- fetch sent mails ---- */
   const fetchSentMails = useCallback(async () => {
-    if (!window.electronAPI?.emailFetchSent) return
     try {
-      const response = await window.electronAPI.emailFetchSent()
-      const items = Array.isArray(response)
-        ? response
-        : response?.ok
-          ? response.mails
-          : []
-      setSentMails(items as MailItem[])
+      setSentMails(await emailRuntimeFetchSent())
     } catch {
       setSentMails([])
     }
   }, [])
 
   const fetchTrashMails = useCallback(async () => {
-    if (!window.electronAPI?.emailFetchTrash) return
     try {
-      const response = await window.electronAPI.emailFetchTrash()
-      const items = Array.isArray(response)
-        ? response
-        : response?.ok
-          ? response.mails
-          : []
-      setTrashMails(items as MailItem[])
+      setTrashMails(await emailRuntimeFetchTrash())
     } catch {
       setTrashMails([])
     }
@@ -492,26 +480,36 @@ export function EmailProvider({ children }: { children: ReactNode }) {
     const toStr = payload.to.join(', ')
     const ccStr = (payload.cc ?? []).join(', ')
     const bccStr = (payload.bcc ?? []).join(', ')
-    const sendOptions: Parameters<typeof window.electronAPI.emailSend>[0] = {
-      from,
-      fromName,
-      to: toStr,
-      subject: payload.subject,
-      body: payload.body,
-    }
-    if (ccStr) (sendOptions as Record<string, unknown>).cc = ccStr
-    if (bccStr) (sendOptions as Record<string, unknown>).bcc = bccStr
-    if (payload.attachments?.length) {
-      sendOptions.attachments = payload.attachments.map((a) => ({ filename: a.fileName, path: a.filePath }))
-    }
-    const res = await window.electronAPI.emailSend(sendOptions)
-    if (res && typeof res === 'object' && 'ok' in res && !res.ok) {
-      const errObj = res as { ok: false; error: { message: string } }
-      throw new Error(errObj.error?.message || '邮件发送失败')
-    }
-    // Surface non-fatal append warning if present
-    if (res && typeof res === 'object' && 'appendWarning' in res && res.appendWarning) {
-      console.warn('[Email] sendBlank append warning:', res.appendWarning)
+    if (isWebShim()) {
+      if (payload.attachments?.length) {
+        throw new Error('Web 版附件发送后续接入')
+      }
+      await emailRuntimeSendPlain({
+        to: toStr,
+        subject: payload.subject,
+        body: payload.body,
+      })
+    } else {
+      const sendOptions: Parameters<typeof window.electronAPI.emailSend>[0] = {
+        from,
+        fromName,
+        to: toStr,
+        subject: payload.subject,
+        body: payload.body,
+      }
+      if (ccStr) (sendOptions as Record<string, unknown>).cc = ccStr
+      if (bccStr) (sendOptions as Record<string, unknown>).bcc = bccStr
+      if (payload.attachments?.length) {
+        sendOptions.attachments = payload.attachments.map((a) => ({ filename: a.fileName, path: a.filePath }))
+      }
+      const res = await window.electronAPI.emailSend(sendOptions)
+      if (res && typeof res === 'object' && 'ok' in res && !res.ok) {
+        const errObj = res as { ok: false; error: { message: string } }
+        throw new Error(errObj.error?.message || '邮件发送失败')
+      }
+      if (res && typeof res === 'object' && 'appendWarning' in res && res.appendWarning) {
+        console.warn('[Email] sendBlank append warning:', res.appendWarning)
+      }
     }
     // Record activity for daily report generation
     if (currentUserId) {
@@ -525,13 +523,13 @@ export function EmailProvider({ children }: { children: ReactNode }) {
 
   /* ---- save / clear account ---- */
   const saveAccount = useCallback(async (config: EmailAccountConfig) => {
-    await window.electronAPI.emailSaveAccount(config)
+    await emailRuntimeSaveAccount(config)
     setAccountConfig(config)
     fetchRealMails(config)
   }, [fetchRealMails])
 
   const clearAccount = useCallback(async () => {
-    await window.electronAPI.emailClearAccount()
+    await emailRuntimeClearAccount()
     setAccountConfig(null)
     setMails([])
   }, [])
@@ -541,8 +539,15 @@ export function EmailProvider({ children }: { children: ReactNode }) {
     setSelectedMailId(id)
     if (!id) return
 
-    // Mark as read
-    setMails((prev) => prev.map((m) => (m.id === id && m.unread ? { ...m, unread: false } : m)))
+    if (isWebShim() && accountConfig) {
+      void emailRuntimeFetchMessage(id).then((full) => {
+        setMails((prev) => prev.map((m) => (m.id === id ? { ...m, ...full, unread: false } : m)))
+      }).catch(() => {
+        setMails((prev) => prev.map((m) => (m.id === id && m.unread ? { ...m, unread: false } : m)))
+      })
+    } else {
+      setMails((prev) => prev.map((m) => (m.id === id && m.unread ? { ...m, unread: false } : m)))
+    }
 
     // Pre-populate draft from persisted user edits, then AI draft, then nothing
     setDrafts((prev) => {
@@ -749,18 +754,30 @@ export function EmailProvider({ children }: { children: ReactNode }) {
     }
 
     if (isRealMode) {
-      // Send via real SMTP
-      window.electronAPI.emailSend({
-        from: perspective.responderAddress,
-        fromName: perspective.responderName,
-        to: perspective.counterpartyAddress,
-        subject: replySubject,
-        body: draft.content,
-        attachments: draft.attachments?.map((a) => ({ filename: a.filename, path: a.path })),
-        inReplyTo: mail.messageId,
-        references: mail.messageId,
-      }).then((response) => {
-        if (response && typeof response === 'object' && 'ok' in response && !response.ok) {
+      const sendPromise = isWebShim()
+        ? (async () => {
+            if (draft.attachments?.length) {
+              throw new Error('Web 版附件发送后续接入')
+            }
+            await emailRuntimeSendReply({
+              to: perspective.counterpartyAddress,
+              subject: replySubject,
+              body: draft.content,
+            })
+          })()
+        : window.electronAPI.emailSend({
+            from: perspective.responderAddress,
+            fromName: perspective.responderName,
+            to: perspective.counterpartyAddress,
+            subject: replySubject,
+            body: draft.content,
+            attachments: draft.attachments?.map((a) => ({ filename: a.filename, path: a.path })),
+            inReplyTo: mail.messageId,
+            references: mail.messageId,
+          })
+
+      sendPromise.then((response) => {
+        if (!isWebShim() && response && typeof response === 'object' && 'ok' in response && !response.ok) {
           throw new Error((response as { ok: false; error: { message: string } }).error?.message || '发送失败')
         }
         const sentAt = now()

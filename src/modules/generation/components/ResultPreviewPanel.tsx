@@ -30,6 +30,10 @@ import {
 } from './generationWorkbenchUtils'
 import { createPptPrimarySourceState } from '../../../utils/pptPrimarySource'
 import PptWorkbenchPanel from './PptWorkbenchPanel'
+import { isWebShim } from '../../../platform/detect'
+import { platformApi } from '../../../platform'
+import { artifactDownloadFilename, artifactHasExport } from '../../../utils/artifactDisplay'
+import { webMigrationLabel } from '../../../platform/webMigration'
 
 const Shell = styled.section`
   flex: 1;
@@ -836,7 +840,16 @@ export default function ResultPreviewPanel() {
     return true
   }, [commitDocumentEdit, getCommitMessages])
 
+  const isWebArtifactId = (path: string) => {
+    const p = String(path || '').trim()
+    return p.length > 0 && !p.includes('/') && !p.includes('\\')
+  }
+
   const handleOpenPath = async (targetPath: string, successMessage: string, failurePrefix: string) => {
+    if (isWebShim()) {
+      setPreviewMessage(webMigrationLabel('用系统程序打开本地文件'))
+      return
+    }
     const normalizedPath = normalizeFileLikePath(targetPath)
     if (!normalizedPath) {
       setPreviewMessage(failurePrefix)
@@ -890,6 +903,24 @@ export default function ResultPreviewPanel() {
     const pptxPath = workbench.resultPath
     if (!pptxPath) {
       setPreviewMessage('请先生成 PPT，再下载结果。')
+      return
+    }
+    if (isWebShim() && isWebArtifactId(pptxPath)) {
+      try {
+        const artifacts = await platformApi.artifacts.list()
+        const artifact = artifacts.find((a) => a.id === pptxPath)
+        const filename = artifact
+          ? (artifactDownloadFilename(artifact) || '演示文稿.pptx')
+          : '演示文稿.pptx'
+        if (artifact && artifactHasExport(artifact)) {
+          await platformApi.artifacts.download(artifact.id, filename)
+          setPreviewMessage(`已下载 ${filename}`)
+        } else {
+          setPreviewMessage('未找到可下载的 PPT 产物')
+        }
+      } catch (e) {
+        setPreviewMessage(e instanceof Error ? e.message : '下载失败')
+      }
       return
     }
     const defaultName = getFileName(pptxPath) || '演示文稿.pptx'
@@ -1767,15 +1798,19 @@ export default function ResultPreviewPanel() {
     if (currentMode === 'ppt') {
       return (
         <>
-          <SecondaryButton type="button" onClick={() => void handleOpenPath(workbench.resultPath || '', '已打开 PPT 文件。', '打开 PPT 文件失败')} disabled={!workbench.resultPath}>
-            打开 PPT
-          </SecondaryButton>
+          {!isWebShim() && (
+            <SecondaryButton type="button" onClick={() => void handleOpenPath(workbench.resultPath || '', '已打开 PPT 文件。', '打开 PPT 文件失败')} disabled={!workbench.resultPath}>
+              打开 PPT
+            </SecondaryButton>
+          )}
           <SecondaryButton type="button" onClick={() => void handleDownloadPptx()} disabled={!workbench.resultPath}>
             下载 PPT
           </SecondaryButton>
-          <SecondaryButton type="button" onClick={() => void handleOpenFolder()} disabled={!workbench.resultPath}>
-            打开目录
-          </SecondaryButton>
+          {!isWebShim() && (
+            <SecondaryButton type="button" onClick={() => void handleOpenFolder()} disabled={!workbench.resultPath}>
+              打开目录
+            </SecondaryButton>
+          )}
         </>
       )
     }

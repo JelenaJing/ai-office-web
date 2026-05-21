@@ -42,6 +42,7 @@ import WorkflowTasksPanel from './components/WorkflowTasksPanel'
 import { shouldAutoStartWorkflow, buildAutoWorkflowInput } from './services/emailWorkflowAutoStart'
 import { detectMatterScenario, buildEmailMatter, serializeMatterToSummary } from './services/emailMatterBuilder'
 import { handleCampusCardReplacementMatter, type AgentWorkflowResult } from './services/cuhkszAgentWorkflow'
+import { emailRuntimeTestConnection } from '../modules/email/services/emailRuntime'
 
 type ImportedDeckSlide = {
   index?: number
@@ -2389,12 +2390,8 @@ function AccountSettingsModal({ onClose }: { onClose: () => void }) {
   const testConnection = async () => {
     setTestStatus({ tone: 'loading', msg: '正在连接...' })
     try {
-      const result = await window.electronAPI?.emailTestConnection?.(form)
-      if (result && typeof result === 'object' && 'ok' in result) {
-        setTestStatus({ tone: result.ok ? 'ok' : 'err', msg: (result as { ok: boolean; message: string }).message })
-      } else {
-        setTestStatus({ tone: 'ok', msg: '连接成功！' })
-      }
+      const result = await emailRuntimeTestConnection(form)
+      setTestStatus({ tone: result.ok ? 'ok' : 'err', msg: result.message })
     } catch (err) {
       setTestStatus({ tone: 'err', msg: err instanceof Error ? err.message : String(err) })
     }

@@ -56,6 +56,14 @@
 - `paper` + `daily-report` → 临时 `WebDailyReportPanel`；`paper` + `document` → `DocumentEngineHost`  
 - `model` → 临时 `WebSettingsPanel`（`ModelDevPanel` 仍依赖 Electron 时）
 
+### 执行层接入（第一批：文稿 / 邮件 / PPT）
+
+| 模块 | 适配层 | Web 行为 |
+|---|---|---|
+| 文稿 | `docxWebGeneration.ts`、`hostCommands`（禁用本地打开/另存为）、`EditorPanel`（禁用本地保存）、`useFormalTemplateGeneration`、`GenerationComposer.runAssistantTask` | `platformApi.skills.run('web.docx.create')` → artifact；状态栏提示资源中心下载 |
+| 邮件 | `emailRuntime.ts` → `EmailContext`；`CommunicationWorkbench` 账号测试 | `platformApi.email.*`；附件 / AI 分拣 / 预回复仍提示后续接入 |
+| PPT | `pptWebGeneration.ts` → `GenerationPromptComposer.handleGeneratePpt`；`ResultPreviewPanel` 下载 | `platformApi.skills.run('web.pptx.create')`；`resultPath` 存 artifactId；下载走 `platformApi.artifacts.download` |
+
 ---
 
 ## 不迁移到 Web（Electron-only）

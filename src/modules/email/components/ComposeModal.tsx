@@ -23,6 +23,9 @@ import * as accountCenterClient from '../../../services/accountCenterClient'
 import type { EmailContact } from '../../../services/accountCenterClient'
 import { generateBulkEmailDrafts } from '../services/bulkEmailDraftService'
 import type { BulkEmailDraft, BulkEmailRecipient } from '../../../types/email'
+import { isWebShim } from '../../../platform/detect'
+import { webMigrationLabel } from '../../../platform/webMigration'
+import { emailRuntimeSupportsAttachments } from '../services/emailRuntime'
 
 /* ================================================================== */
 /*  Constants                                                          */
@@ -971,6 +974,10 @@ export default function ComposeModal({ onClose, initialTo }: ComposeModalProps) 
 
   /* ---- Attachment helpers ---- */
   const handleSelectAttachments = useCallback(async () => {
+    if (!emailRuntimeSupportsAttachments()) {
+      setError(webMigrationLabel('邮件附件'))
+      return
+    }
     const result = await window.electronAPI.emailSelectAttachments()
     if (!result.ok || !result.files?.length) return
     for (const file of result.files) {
@@ -1352,7 +1359,12 @@ export default function ComposeModal({ onClose, initialTo }: ComposeModalProps) 
 
         {/* Attachments */}
         <AttachmentsArea>
-          <AttachBtn type="button" onClick={handleSelectAttachments} disabled={sending}>
+          <AttachBtn
+            type="button"
+            onClick={handleSelectAttachments}
+            disabled={sending || isWebShim()}
+            title={isWebShim() ? webMigrationLabel('邮件附件') : undefined}
+          >
             📎 添加附件
           </AttachBtn>
           {attachments.length > 0 && (
