@@ -1,3 +1,6 @@
+import { isWebShim } from '../../../platform/detect'
+import { platformApi } from '../../../platform'
+import { artifactDownloadFilename, artifactHasExport } from '../../../utils/artifactDisplay'
 import {
   DEFAULT_IMAGE_GENERATION_MODE,
   buildImageReferenceDebugItems,
@@ -315,8 +318,54 @@ export async function generateImage(params: GenerateImageParams): Promise<Genera
     styleOptions,
     styleProfileSummary: params.styleProfile?.summary || null,
     debugEnabled: params.debug?.enabled === true,
-    note: 'Structured image payload is forwarded to IPC at this layer without prompt rewriting',
+    note: isWebShim()
+      ? 'Web: platformApi.skills.run(web.image.generate)'
+      : 'Structured image payload is forwarded to IPC at this layer without prompt rewriting',
   }))
+
+  if (isWebShim()) {
+    let workspacePath = String(params.workspacePath || '').trim()
+    if (!workspacePath) {
+      const ws = await platformApi.workspaces.getDefault()
+      workspacePath = ws.path
+    }
+    const skillResult = await platformApi.skills.run('web.image.generate', {
+      prompt: params.prompt,
+      workspacePath,
+    })
+    if (!skillResult.success || !skillResult.artifact) {
+      return {
+        status: 'failed',
+        error: skillResult.error || '图片生成失败',
+      }
+    }
+    const artifact = skillResult.artifact
+    if (!artifactHasExport(artifact)) {
+      return {
+        status: 'failed',
+        error: '图片生成完成但暂无可预览文件',
+      }
+    }
+    const filename = artifactDownloadFilename(artifact) || 'image.png'
+    const res = await fetch(`/api/artifacts/${artifact.id}/download`, {
+      headers: { Authorization: `Bearer ${platformApi.auth.getToken() ?? ''}` },
+    })
+    if (!res.ok) {
+      return {
+        status: 'failed',
+        error: `下载预览失败 (${res.status})`,
+      }
+    }
+    const blob = await res.blob()
+    const previewUrl = URL.createObjectURL(blob)
+    return {
+      status: 'success',
+      image_url: previewUrl,
+      file_path: artifact.id,
+      filename,
+      alt: artifact.title || filename,
+    }
+  }
 
   const result = (await window.electronAPI.generateImage({
     prompt: params.prompt,

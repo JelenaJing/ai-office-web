@@ -6,6 +6,7 @@ import {
 import { useWorkspaceMode } from '../contexts/WorkspaceModeContext'
 import { SceneFeatureRow } from '../components/scene/SceneFeatureRow'
 import { runWebFeatureAction, sceneStatusForWebFeature } from '../platform/useWebFeatureAction'
+import { logWebWorkbenchEntry } from '../platform/webWorkbenchDebug'
 import { isWebShim } from '../platform/detect'
 
 interface StudyWorkspaceProps {
@@ -60,6 +61,11 @@ export default function StudyWorkspace({ onGoToWorkspace }: StudyWorkspaceProps)
 
   const block = () => { /* SceneFeatureRow shows comingSoon; no navigation */ }
 
+  const enterFeature = (feature: string, method: string, fn: () => void) => {
+    logWebWorkbenchEntry(feature, { method, scene: 'study' })
+    go(fn)
+  }
+
   return (
     <Page>
       <PageHeader>
@@ -106,7 +112,7 @@ export default function StudyWorkspace({ onGoToWorkspace }: StudyWorkspaceProps)
           accent="blue"
           status={sceneStatusForWebFeature('image.generate')}
           actionLabel="生成图表"
-          onClick={() => runWebFeatureAction('image.generate', () => go(enterImageGenerationMode), block)}
+          onClick={() => runWebFeatureAction('image.generate', () => enterFeature('数据图表', 'enterImageGenerationMode', enterImageGenerationMode), block)}
         />
         <SceneFeatureRow
           icon={<FolderOpen size={24} />}

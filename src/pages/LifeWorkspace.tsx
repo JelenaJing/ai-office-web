@@ -3,6 +3,7 @@ import { Globe, PenLine, Palette, BookHeart, Sparkles, Coffee, Microscope } from
 import { useWorkspaceMode } from '../contexts/WorkspaceModeContext'
 import { SceneFeatureRow } from '../components/scene/SceneFeatureRow'
 import { runWebFeatureAction, sceneStatusForWebFeature } from '../platform/useWebFeatureAction'
+import { logWebWorkbenchEntry } from '../platform/webWorkbenchDebug'
 
 interface LifeWorkspaceProps {
   onGoToWorkspace: () => void
@@ -53,6 +54,10 @@ export default function LifeWorkspace({ onGoToWorkspace }: LifeWorkspaceProps) {
 
   const go = (fn: () => void) => { fn(); onGoToWorkspace() }
   const block = () => {}
+  const enterFeature = (feature: string, method: string, fn: () => void) => {
+    logWebWorkbenchEntry(feature, { method, scene: 'life' })
+    go(fn)
+  }
 
   return (
     <Page>
@@ -78,7 +83,7 @@ export default function LifeWorkspace({ onGoToWorkspace }: LifeWorkspaceProps) {
           accent="orange"
           status={sceneStatusForWebFeature('docx.generate')}
           actionLabel="开始写作"
-          onClick={() => runWebFeatureAction('docx.generate', () => go(enterFreeMode), block)}
+          onClick={() => runWebFeatureAction('docx.generate', () => enterFeature('轻量写作', 'enterFreeMode', enterFreeMode), block)}
         />
         <SceneFeatureRow
           icon={<Palette size={24} />}
@@ -87,7 +92,7 @@ export default function LifeWorkspace({ onGoToWorkspace }: LifeWorkspaceProps) {
           accent="orange"
           status={sceneStatusForWebFeature('image.generate')}
           actionLabel="创作图片"
-          onClick={() => runWebFeatureAction('image.generate', () => go(enterImageGenerationMode), block)}
+          onClick={() => runWebFeatureAction('image.generate', () => enterFeature('图片创作', 'enterImageGenerationMode', enterImageGenerationMode), block)}
         />
         <SceneFeatureRow
           icon={<Microscope size={24} />}

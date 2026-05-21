@@ -42,7 +42,7 @@
 | 邮件 | `CommunicationWorkbench` / `EmailContext` | `/api/email` | 是 | 收件箱 / 发送 / 账号 → `platformApi.email` |
 | PPT | `GenerationWorkbenchPanel` / `PptWorkbenchPanel` | `web.pptx.create` | 是 | 生成 / 模板 / 下载 → `platformApi.skills.run` |
 | Excel | `ExcelAnalysisWorkbench` | `web.xlsx.analyze` | 是 | 分析 / 下载（已双轨，继续收敛 IPC） |
-| 图片 | `ImageWorkspace` | `web.image.generate` | 是（原 `ImageWorkspace` 壳） | 生成 / 参考图 → `platformApi` |
+| 图片 | `ImageWorkspace` | `web.image.generate` | 是（原 `ImageWorkspace` 壳） | `ImageService` Web 走 `platformApi.skills.run`；本地保存/文件夹拼接已禁用并提示 |
 | 日报 | `ActivityReportPanel` | `web.daily.report` | 临时（`WebDailyReportPanel`） | 生成报告 → `platformApi` |
 | 设置 | `FullSettingsPanel` / `ModelDevPanel` | `/api/settings/ai` | 临时（`WebSettingsPanel`） | 查看 / 测试 LLM |
 
@@ -55,6 +55,26 @@
 - `image` → `ImageWorkspace`  
 - `paper` + `daily-report` → 临时 `WebDailyReportPanel`；`paper` + `document` → `DocumentEngineHost`  
 - `model` → 临时 `WebSettingsPanel`（`ModelDevPanel` 仍依赖 Electron 时）
+
+### Web 工作台路由调试（DEV）
+
+开发环境下 `console.debug` 前缀 `[web-workbench:*]`：
+
+| 前缀 | 位置 | 内容 |
+|---|---|---|
+| `entry` | `WorkWorkspace` / `LifeWorkspace` / `StudyWorkspace` | 点击功能名、`enterXXXMode` |
+| `mode` | `WorkspaceModeContext` | `enterFreeMode` / `enterDataMode` / `enterImageGenerationMode` 后的 mode / generationMode |
+| `viewport` | `WorkspaceViewportHost` | `activePanel`、`renderComponent` |
+
+**期望路由：**
+
+| 入口 | mode | generationMode | activePanel | 组件 |
+|---|---|---|---|---|
+| 文稿编辑 | `free` | （不变） | `freewrite` | `DocumentEngineHost` |
+| 数据分析 | `generation` | `data` | `data` | `ExcelAnalysisWorkbench` |
+| 图片生成 | `generation` | `image` | `image` | `ImageWorkspace` |
+
+Web 文稿：`EditorPanel` 进入 `freewrite` 且无标签时自动 `openTab` 内存文档（`webDocumentSession.ts`），不调用 `createBlankDocument`。
 
 ### 执行层接入（第一批：文稿 / 邮件 / PPT）
 

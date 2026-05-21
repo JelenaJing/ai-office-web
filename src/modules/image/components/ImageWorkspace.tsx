@@ -5,6 +5,8 @@ import { useGenerationWorkbench } from '../../../contexts/GenerationWorkbenchCon
 import { useKnowledge } from '../../../contexts/KnowledgeContext'
 import { useWorkspace } from '../../../contexts/WorkspaceContext'
 import { useDocumentEngineRuntime } from '../../../engines/documentEngine/runtime'
+import { isWebShim } from '../../../platform/detect'
+import { webMigrationLabel } from '../../../platform/webMigration'
 import { getPrimaryStyleReferenceId } from '../services/imageGenerationPrompt'
 import {
   orderSelectedKnowledgeDocuments,
@@ -164,6 +166,8 @@ const ImageWorkspace: React.FC<{ initialPrompt?: string }> = ({ initialPrompt })
   const effectivePreviewUrl = previewUrl || imageSession.resultPreviewUrl || ''
   const effectivePreviewFilename = previewFilename || imageSession.resultTitle || 'generated.png'
   const effectivePrompt = String(prompt || imageSession.generationPrompt || initialPrompt || '').trim()
+  const webMode = isWebShim()
+  const webLocalOnlyHint = webMigrationLabel('本地导入/保存图片')
 
   const freezeInsertTarget = React.useCallback(() => {
     const runtimeSelection = runtime?.getSelection() || null
@@ -227,8 +231,12 @@ const ImageWorkspace: React.FC<{ initialPrompt?: string }> = ({ initialPrompt })
 
   React.useEffect(() => {
     if (!activeWorkspacePath) { setIsProjectWs(false); return }
+    if (webMode) {
+      setIsProjectWs(false)
+      return
+    }
     window.electronAPI.detectProjectStructure(activeWorkspacePath).then((s) => setIsProjectWs(!!s.hasFigures)).catch(() => setIsProjectWs(false))
-  }, [activeWorkspacePath])
+  }, [activeWorkspacePath, webMode])
 
   const visibleStyleDocuments = React.useMemo(
     () => imageSessionDocuments.slice(0, 4),
@@ -275,6 +283,7 @@ const ImageWorkspace: React.FC<{ initialPrompt?: string }> = ({ initialPrompt })
 
       const { result, references, roleSummary } = await runSharedImageGeneration({
         prompt: normalizedPrompt,
+        workspacePath: activeWorkspacePath || undefined,
         knowledgeRootPath: info?.rootPath,
         documents: imageSessionDocuments,
         imageReferences: imageSession.imageReferences,
@@ -363,6 +372,10 @@ const ImageWorkspace: React.FC<{ initialPrompt?: string }> = ({ initialPrompt })
   }
 
   const handleSaveToWorkspace = async () => {
+    if (webMode) {
+      setStatusMessage(webLocalOnlyHint)
+      return
+    }
     if (!effectivePreviewUrl || !activeWorkspacePath) return
     setSaving(true)
     try {
@@ -381,6 +394,10 @@ const ImageWorkspace: React.FC<{ initialPrompt?: string }> = ({ initialPrompt })
 
   const handleInsertToEditor = async () => {
     if (!effectivePreviewUrl) return
+    if (webMode) {
+      setStatusMessage('Web 版：生成结果已保存在资源中心 › 生成记录，暂不支持写入本地工作区后再插入编辑器')
+      return
+    }
     if (!activeWorkspacePath) {
       setStatusMessage('请先打开工作区，图片会先保存到工作区后再插入编辑器')
       return
@@ -416,6 +433,11 @@ const ImageWorkspace: React.FC<{ initialPrompt?: string }> = ({ initialPrompt })
   }
 
   const handlePickFolder = async () => {
+    if (webMode) {
+      setWorkspaceStatus(webLocalOnlyHint)
+      setStatusMessage(webLocalOnlyHint)
+      return
+    }
     const dirPath = await window.electronAPI.openDirectoryDialog()
     if (!dirPath) return
     const images = await window.electronAPI.listDirectoryImages(dirPath)
@@ -528,6 +550,10 @@ const ImageWorkspace: React.FC<{ initialPrompt?: string }> = ({ initialPrompt })
   }
 
   const saveStitchedImage = async (insertToEditor = false) => {
+    if (webMode) {
+      setStatusMessage(webLocalOnlyHint)
+      return
+    }
     if (!stitchPreviewUrl || !activeWorkspacePath) return
     const filename = stitchFileName.trim() || `collage_${Date.now()}.png`
     setStitchSaving(true)
@@ -601,8 +627,8 @@ const ImageWorkspace: React.FC<{ initialPrompt?: string }> = ({ initialPrompt })
             <>
               <PreviewBox><img src={effectivePreviewUrl} alt="generated" /></PreviewBox>
               <Row>
-                <Btn onClick={handleInsertToEditor}>📝 插入编辑器</Btn>
-                <Btn $primary onClick={handleSaveToWorkspace} disabled={saving || !activeWorkspacePath}>{saving ? '保存中...' : isProjectWs ? '💾 保存到 Final_Figures/' : '💾 保存到 pic/'}</Btn>
+                <Btn onClick={handleInsertToEditor} disabled={webMode} title={webMode ? webLocalOnlyHint : undefined}>📝 插入编辑器</Btn>
+                <Btn $primary onClick={handleSaveToWorkspace} disabled={webMode || saving || !activeWorkspacePath} title={webMode ? webLocalOnlyHint : undefined}>{saving ? '保存中...' : isProjectWs ? '💾 保存到 Final_Figures/' : '💾 保存到 pic/'}</Btn>
               </Row>
             </>
           )}
@@ -617,7 +643,7 @@ const ImageWorkspace: React.FC<{ initialPrompt?: string }> = ({ initialPrompt })
         <>
           <Label>图片文件夹</Label>
           <FileBox>{folderPath || '请选择包含图片的文件夹'}</FileBox>
-          <Btn onClick={() => void handlePickFolder()}>📂 选择图片文件夹</Btn>
+          <Btn onClick={() => void handlePickFolder()} disabled={webMode} title={webMode ? webLocalOnlyHint : undefined}>📂 选择图片文件夹</Btn>
 
           <FieldGrid>
             <div>

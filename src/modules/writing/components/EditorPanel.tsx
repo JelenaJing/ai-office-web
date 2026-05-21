@@ -100,6 +100,8 @@ import {
 } from '../../../shared/url/fileUrlHelper'
 import { isWebShim } from '../../../platform/detect'
 import { webMigrationLabel } from '../../../platform/webMigration'
+import { openWebBlankDocumentTab } from '../webDocumentSession'
+import { webMigrationLabel } from '../../../platform/webMigration'
 import type { KnowledgeTaskConstraints, PreviewKnowledgeTaskContextResult } from '../../../types/knowledge'
 import { buildKnowledgeTaskConstraints, resolveKnowledgeTaskPreview } from '../../../shared/knowledge/knowledgeTaskHelper'
 import { normalizeContinueDeltaAtStart, normalizeContinueLeadingText } from '../../../utils/continueStreamText'
@@ -1647,11 +1649,30 @@ const EditorPanel: React.FC<EditorPanelProps> = ({
 
   const createAndOpenBlankWorkspaceDocument = useCallback(async (workspacePath: string, preferredName?: string) => {
     const normalizedName = String(preferredName || '').trim().replace(/\.[^.]+$/, '').replace(/[\\/:*?"<>|]/g, '_') || '未命名文档'
+    if (isWebShim()) {
+      return openWebBlankDocumentTab(openTab, workspacePath, normalizedName)
+    }
     const result = await window.electronAPI.createBlankDocument(workspacePath, `${normalizedName}.aidoc.json`)
     await openDocumentPath(result.path, { isInternalOpen: true })
     void refreshTree().catch(() => undefined)
     return result.path
-  }, [openDocumentPath, refreshTree])
+  }, [openDocumentPath, openTab, refreshTree])
+
+  const webFreewriteBootstrappedRef = useRef(false)
+  useEffect(() => {
+    webFreewriteBootstrappedRef.current = false
+  }, [activeWorkspacePath])
+
+  useEffect(() => {
+    if (!isWebShim() || !active || manuscriptProfile !== 'freewrite') return
+    if (!activeWorkspacePath || tabs.length > 0) return
+    if (webFreewriteBootstrappedRef.current) return
+    webFreewriteBootstrappedRef.current = true
+    void openWebBlankDocumentTab(openTab, activeWorkspacePath).catch((error: unknown) => {
+      webFreewriteBootstrappedRef.current = false
+      setStatusMessage(`打开编辑器失败: ${error instanceof Error ? error.message : String(error)}`)
+    })
+  }, [active, activeWorkspacePath, manuscriptProfile, openTab, setStatusMessage, tabs.length])
 
   const handleCreateArticle = useCallback(async () => {
     const articleName = window.prompt('输入新文章名称')?.trim()
@@ -4730,6 +4751,10 @@ const EditorPanel: React.FC<EditorPanelProps> = ({
   }, [dispatchLegacySelectionAction, executeRoutedManuscriptCommand, manuscriptProfile, routeAndExecuteManuscriptCommand, setStatusMessage])
 
   const handleInsertLocalImage = useCallback(async () => {
+    if (isWebShim()) {
+      setStatusMessage(webMigrationLabel('本地导入图片'))
+      return
+    }
     const importedImage = await window.electronAPI.importImageFile()
     if (!importedImage) return
 
@@ -5555,7 +5580,15 @@ ${bodyHtml}
           <WelcomeScreen>
             <WelcomeInner>
               <WelcomeTitle>📄 AI-Office</WelcomeTitle>
-              <WelcomeDesc>{activeWorkspacePath ? '新建一个文档，开始当前工作区的写作。' : '请在左侧创建工作区或打开已有工作区，开始写作。'}</WelcomeDesc>
+              <WelcomeDesc>
+                {isWebShim()
+                  ? (activeWorkspacePath
+                    ? '正在打开编辑器…也可点击下方按钮新建文档。'
+                    : '正在准备工作区…')
+                  : (activeWorkspacePath
+                    ? '新建一个文档，开始当前工作区的写作。'
+                    : '请在左侧创建工作区或打开已有工作区，开始写作。')}
+              </WelcomeDesc>
               {activeWorkspacePath && (
                 <WelcomeActionRow>
                   <WelcomeBtn onClick={() => void handleCreateWorkspaceDocument()}>+ 新建文档</WelcomeBtn>

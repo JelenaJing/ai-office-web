@@ -1,12 +1,13 @@
 import React, { useRef, useState } from 'react'
 import styled from 'styled-components'
-import { FileText, Mail, BarChart2, Presentation, CalendarClock, FolderOpen, Upload } from 'lucide-react'
+import { FileText, Mail, BarChart2, Presentation, CalendarClock, FolderOpen, Upload, Palette } from 'lucide-react'
 import { useWorkspaceMode } from '../contexts/WorkspaceModeContext'
 import { SceneFeatureRow } from '../components/scene/SceneFeatureRow'
 import type { PrimarySection } from '../components/nav/PrimaryNav'
 import MyFilesPanel from './MyFilesPanel'
 import { platformApi } from '../platform'
 import { runWebFeatureAction, sceneStatusForWebFeature } from '../platform/useWebFeatureAction'
+import { logWebWorkbenchEntry } from '../platform/webWorkbenchDebug'
 
 interface WorkWorkspaceProps {
   onGoToWorkspace: () => void
@@ -54,6 +55,7 @@ export default function WorkWorkspace({ onGoToWorkspace, onNavigate }: WorkWorks
     enterEmailMode,
     enterDataMode,
     enterPptGenerationMode,
+    enterImageGenerationMode,
   } = useWorkspaceMode()
 
   const [showFiles, setShowFiles] = useState(false)
@@ -62,6 +64,11 @@ export default function WorkWorkspace({ onGoToWorkspace, onNavigate }: WorkWorks
   const uploadRef = useRef<HTMLInputElement>(null)
 
   const go = (fn: () => void) => { fn(); onGoToWorkspace() }
+
+  const enterFeature = (feature: string, method: string, fn: () => void) => {
+    logWebWorkbenchEntry(feature, { method, scene: 'work' })
+    go(fn)
+  }
 
   const blockMsg = (text: string) => {
     setUploadMessage({ type: 'err', text })
@@ -124,7 +131,7 @@ export default function WorkWorkspace({ onGoToWorkspace, onNavigate }: WorkWorks
             accent="blue"
             status={sceneStatusForWebFeature('docx.generate')}
             actionLabel="进入"
-            onClick={() => runWebFeatureAction('docx.generate', () => go(enterFreeMode), blockMsg)}
+            onClick={() => runWebFeatureAction('docx.generate', () => enterFeature('文稿编辑', 'enterFreeMode', enterFreeMode), blockMsg)}
           />
           <SceneFeatureRow
             icon={<Mail size={24} />}
@@ -133,7 +140,7 @@ export default function WorkWorkspace({ onGoToWorkspace, onNavigate }: WorkWorks
             accent="purple"
             status={sceneStatusForWebFeature('email')}
             actionLabel="进入"
-            onClick={() => runWebFeatureAction('email', () => go(enterEmailMode), blockMsg)}
+            onClick={() => runWebFeatureAction('email', () => enterFeature('邮件收发', 'enterEmailMode', enterEmailMode), blockMsg)}
           />
           <SceneFeatureRow
             icon={<CalendarClock size={24} />}
@@ -151,7 +158,7 @@ export default function WorkWorkspace({ onGoToWorkspace, onNavigate }: WorkWorks
             accent="teal"
             status={sceneStatusForWebFeature('excel.analysis')}
             actionLabel="进入"
-            onClick={() => runWebFeatureAction('excel.analysis', () => go(enterDataMode), blockMsg)}
+            onClick={() => runWebFeatureAction('excel.analysis', () => enterFeature('数据分析', 'enterDataMode', enterDataMode), blockMsg)}
           />
           <SceneFeatureRow
             icon={<Presentation size={24} />}
@@ -160,7 +167,16 @@ export default function WorkWorkspace({ onGoToWorkspace, onNavigate }: WorkWorks
             accent="orange"
             status={sceneStatusForWebFeature('ppt.generate')}
             actionLabel="进入"
-            onClick={() => runWebFeatureAction('ppt.generate', () => go(enterPptGenerationMode), blockMsg)}
+            onClick={() => runWebFeatureAction('ppt.generate', () => enterFeature('PPT 生成', 'enterPptGenerationMode', enterPptGenerationMode), blockMsg)}
+          />
+          <SceneFeatureRow
+            icon={<Palette size={24} />}
+            title="图片生成"
+            description="根据描述生成配图，结果保存到生成记录"
+            accent="purple"
+            status={sceneStatusForWebFeature('image.generate')}
+            actionLabel="进入"
+            onClick={() => runWebFeatureAction('image.generate', () => enterFeature('图片生成', 'enterImageGenerationMode', enterImageGenerationMode), blockMsg)}
           />
           <SceneFeatureRow
             icon={<FolderOpen size={24} />}

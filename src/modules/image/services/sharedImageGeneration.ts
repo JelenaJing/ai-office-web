@@ -23,6 +23,7 @@ const IMAGE_INTENT_PATTERNS = [
 
 export interface RunSharedImageGenerationParams {
   prompt: string
+  workspacePath?: string
   knowledgeRootPath?: string
   documents: KnowledgeDocumentMeta[]
   imageReferences: ImageReferenceSelection[]
@@ -169,9 +170,10 @@ export async function runSharedImageGeneration(params: RunSharedImageGenerationP
     params.knowledgeTextContext ? `\n\nKnowledge base reference: ${params.knowledgeTextContext}` : '',
   ].join('')
 
-  const payload: GenerateImagePayload & { aspectRatio: string } = {
+  const payload: GenerateImagePayload & { aspectRatio: string; workspacePath?: string } = {
     prompt: normalizedPrompt + contextSuffix,
     aspectRatio: params.aspectRatio || '16:9',
+    workspacePath: params.workspacePath,
     references,
     styleOptions: params.styleOptions,
     generationMode: params.generationMode,

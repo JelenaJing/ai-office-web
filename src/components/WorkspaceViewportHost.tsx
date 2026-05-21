@@ -17,6 +17,7 @@ import WebFeatureComingSoon from './WebFeatureComingSoon'
 import { useWorkspaceMode } from '../contexts/WorkspaceModeContext'
 import { isWebShim } from '../platform/detect'
 import { isWebFeatureEnabled } from '../platform/featureGate'
+import { logWebWorkbenchViewport, WEB_WORKBENCH_PANEL_COMPONENT } from '../platform/webWorkbenchDebug'
 import type { WebFeatureKey } from '../platform/featureGate'
 
 const GenerationShell = styled.div`
@@ -160,6 +161,15 @@ interface WorkspaceViewportHostProps {
 export default function WorkspaceViewportHost({ ghostTextEnabled }: WorkspaceViewportHostProps) {
   const { mode, generationMode, setGenerationMode } = useWorkspaceMode()
   const activePanel = resolvePanelKey(mode, generationMode)
+
+  useEffect(() => {
+    logWebWorkbenchViewport({
+      mode,
+      generationMode,
+      activePanel,
+      renderComponent: WEB_WORKBENCH_PANEL_COMPONENT[activePanel] ?? activePanel,
+    })
+  }, [activePanel, generationMode, mode])
 
   useEffect(() => {
     const handler = () => setGenerationMode('email')
