@@ -2,6 +2,8 @@ import React from 'react'
 import styled from 'styled-components'
 import { listSkills } from '../skills'
 import { useWorkspace } from '../contexts/WorkspaceContext'
+import { platformApi } from '../platform'
+import type { Artifact } from '../platform'
 
 // ── Layout shells ─────────────────────────────────────────────────────────────
 
@@ -724,26 +726,13 @@ type StoreStatus = 'idle' | 'loading' | 'ready' | 'error'
 
 // ── WebDocxCreatePanel ────────────────────────────────────────────────────────
 
-interface DocxArtifactExport {
-  format: string
-  filename: string
-  url: string
-}
-
-interface DocxArtifact {
-  id: string
-  title: string
-  createdAt: string
-  exports: DocxArtifactExport[]
-}
-
 function WebDocxCreatePanel() {
   const { activeWorkspacePath } = useWorkspace()
   const [prompt, setPrompt] = React.useState('')
   const [title, setTitle] = React.useState('')
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
-  const [artifact, setArtifact] = React.useState<DocxArtifact | null>(null)
+  const [artifact, setArtifact] = React.useState<Artifact | null>(null)
 
   async function handleGenerate() {
     if (!activeWorkspacePath) {
@@ -754,37 +743,30 @@ function WebDocxCreatePanel() {
       setError('请输入提示词')
       return
     }
+    if (!platformApi.system.isFeatureAvailable('web.docx.create')) {
+      setError('Web 版即将开放：正式文稿生成')
+      return
+    }
     setLoading(true)
     setError(null)
     setArtifact(null)
     try {
-      const token = localStorage.getItem('aios_itoken') ?? localStorage.getItem('ai_office_internal_token') ?? ''
-      const res = await fetch('/api/skills/web.docx.create/run', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({
-          prompt,
-          workspacePath: activeWorkspacePath,
-          params: { title: title || undefined },
-        }),
+      const result = await platformApi.skills.run('web.docx.create', {
+        prompt: prompt.trim(),
+        workspacePath: activeWorkspacePath,
+        params: { title: title.trim() || undefined },
       })
-      const data = await res.json() as { success: boolean; artifact?: DocxArtifact; error?: string }
-      if (!res.ok || !data.success) {
-        setError(data.error ?? `请求失败 (${res.status})`)
+      if (!result.success || !result.artifact) {
+        setError(result.error ?? '生成失败')
         return
       }
-      setArtifact(data.artifact ?? null)
+      setArtifact(result.artifact)
     } catch (e) {
       setError(e instanceof Error ? e.message : '生成失败，请检查服务器是否在线')
     } finally {
       setLoading(false)
     }
   }
-
-  const docxUrl = artifact?.exports.find(e => e.format === 'docx')?.url
 
   return (
     <div style={{ maxWidth: 640, padding: '32px 24px' }}>
@@ -841,7 +823,7 @@ function WebDocxCreatePanel() {
         </div>
       )}
 
-      {artifact && docxUrl && (
+      {artifact && (
         <div style={{ marginTop: 20, padding: '16px 18px', background: '#f0f7ff', border: '1px solid #c0d8f0', borderRadius: 10 }}>
           <div style={{ fontSize: 15, fontWeight: 700, color: '#1f3142', marginBottom: 6 }}>
             ✅ {artifact.title}
@@ -849,17 +831,17 @@ function WebDocxCreatePanel() {
           <div style={{ fontSize: 12, color: '#7a8fa3', marginBottom: 12 }}>
             生成时间：{new Date(artifact.createdAt).toLocaleString('zh-CN')}
           </div>
-          <a
-            href={docxUrl}
-            download
+          <button
+            type="button"
+            onClick={() => void platformApi.artifacts.download(artifact.id, `${artifact.title}.docx`)}
             style={{
               display: 'inline-block', padding: '8px 20px',
               background: '#1a5fb4', color: '#fff', borderRadius: 7,
-              fontSize: 13, fontWeight: 600, textDecoration: 'none',
+              fontSize: 13, fontWeight: 600, border: 'none', cursor: 'pointer',
             }}
           >
             ⬇ 下载 DOCX
-          </a>
+          </button>
         </div>
       )}
     </div>

@@ -1,4 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { isWebShim } from '../platform/detect'
+import { platformApi } from '../platform'
 
 export interface FileTreeNode {
   name: string
@@ -166,20 +168,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!initialized) return
     if (activeWorkspacePath) return
-    if (!(window.electronAPI as Record<string, unknown>)?.__isWebShim) return
+    if (!isWebShim()) return
 
-    const token =
-      localStorage.getItem('aios_itoken') ??
-      localStorage.getItem('ai_office_internal_token') ??
-      ''
-    fetch('/api/workspaces/default', {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    })
-      .then((r) => r.json() as Promise<{ success: boolean; workspace?: { path: string } }>)
-      .then((data) => {
-        if (data.success && data.workspace?.path) {
-          void openWorkspace(data.workspace.path)
-        }
+    void platformApi.workspaces
+      .getDefault()
+      .then(ws => {
+        if (ws.path) void openWorkspace(ws.path)
       })
       .catch(() => {
         // Non-critical — WorkspaceGate will appear as fallback

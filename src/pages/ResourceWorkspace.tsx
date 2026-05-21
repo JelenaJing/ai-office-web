@@ -2,8 +2,8 @@
  * ResourceWorkspace — 资源中心
  *
  * Tabs:
- *   1. 我的文件 — uploaded files (GET/POST/DELETE /api/files)
- *   2. 生成记录 — AI-generated artifacts  (GET /api/artifacts)
+ *   1. 我的文件 — uploaded files via platformApi.files
+ *   2. 生成记录 — AI-generated artifacts via platformApi.artifacts
  *   3. 知识库资料 — placeholder for future KB integration
  *
  * Internal workspace paths are never shown to the user.
@@ -12,25 +12,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import styled from 'styled-components'
 import { FolderOpen, Sparkles, BookOpen, Download } from 'lucide-react'
-import MyFilesView, { authHeaders, downloadWithAuth } from '../components/resource/MyFilesView'
+import MyFilesView from '../components/resource/MyFilesView'
+import { platformApi } from '../platform'
+import type { Artifact } from '../platform'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type ResourceTab = 'files' | 'artifacts' | 'kb'
-
-interface ArtifactExport {
-  format: string
-  filename: string
-  url: string
-}
-
-interface Artifact {
-  id: string
-  type: string
-  title: string
-  createdAt: string
-  exports: ArtifactExport[]
-}
 
 // ── Styled components ─────────────────────────────────────────────────────────
 
@@ -130,9 +118,8 @@ function ArtifactsTab() {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch('/api/artifacts', { headers: authHeaders() })
-      const data = await res.json() as { artifacts: Artifact[] }
-      setArtifacts(data.artifacts ?? [])
+      const list = await platformApi.artifacts.list()
+      setArtifacts(list)
     } catch {
       setError('加载生成记录失败')
     } finally {
@@ -143,7 +130,7 @@ function ArtifactsTab() {
   useEffect(() => { void fetchArtifacts() }, [fetchArtifacts])
 
   const handleDownload = (artifact: Artifact) => {
-    void downloadWithAuth(`/api/artifacts/${artifact.id}/download`, artifact.title)
+    void platformApi.artifacts.download(artifact.id, `${artifact.title}.docx`)
   }
 
   if (loading) {

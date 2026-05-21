@@ -11,6 +11,7 @@ import ExcelAnalysisWorkbench from '../modules/excel-analysis/components/ExcelAn
 import DailyFeedWorkbench from '../modules/feed/components/DailyFeedWorkbench'
 import ModelDevPanel from './ModelDevPanel'
 import { useWorkspaceMode } from '../contexts/WorkspaceModeContext'
+import { isWebShim } from '../platform/detect'
 
 const ComingSoonShell = styled.div`
   flex: 1;
@@ -103,9 +104,7 @@ export default function WorkspaceViewportHost({ ghostTextEnabled }: WorkspaceVie
   const { mode, generationMode, setGenerationMode } = useWorkspaceMode()
   const activePanel = resolvePanelKey(mode, generationMode)
 
-  // Detect web shim mode once (stable across renders)
-  const isWebMode = typeof window !== 'undefined' &&
-    (window.electronAPI as { __isWebShim?: boolean } | undefined)?.__isWebShim === true
+  const isWebMode = isWebShim()
 
   // Listen for "open-communication-workbench" events dispatched by any component
   // that wants to programmatically navigate to the email/communication mode.

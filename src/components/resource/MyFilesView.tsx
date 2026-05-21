@@ -2,39 +2,35 @@
  * MyFilesView — inline (non-modal) file management panel.
  *
  * Used by both ResourceWorkspace (embedded tab) and MyFilesPanel (modal).
- * Calls /api/files with the user's auth token.
+ * All API calls go through platformApi.files.* — no direct fetch() here.
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { Upload, Download, Trash2, File as FileIcon } from 'lucide-react'
+import { platformApi } from '../../platform'
+import type { FileEntry } from '../../platform'
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+export type { FileEntry }
 
-export interface FileEntry {
-  id: string
-  name: string
-  ext: string
-  mimeType: string
-  size: number
-  uploadedAt: string
-}
+// ── Backwards-compatible helpers (still used by DocumentFilePanel) ────────────
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
+/** Returns the current auth token, checking all known storage keys. */
 export function getToken(): string {
-  return (
-    localStorage.getItem('aios_itoken') ??
-    localStorage.getItem('ai_office_internal_token') ??
-    ''
-  )
+  return platformApi.auth.getToken() ?? ''
 }
 
+/** Returns Authorization header object if a token is present. */
 export function authHeaders(): Record<string, string> {
   const t = getToken()
   return t ? { Authorization: `Bearer ${t}` } : {}
 }
 
-/** Fetch a protected URL with Bearer token, then trigger a browser download. */
+/**
+ * Fetch a protected URL with Bearer token, then trigger a browser download.
+ * Legacy helper kept for callers that haven't migrated to platformApi yet
+ * (e.g. DocumentFilePanel). New code should use platformApi.files.download()
+ * or platformApi.artifacts.download() instead.
+ */
 export async function downloadWithAuth(url: string, filename: string): Promise<void> {
   const res = await fetch(url, { headers: authHeaders() })
   if (!res.ok) throw new Error(`下载失败 (${res.status})`)
@@ -48,6 +44,8 @@ export async function downloadWithAuth(url: string, filename: string): Promise<v
   document.body.removeChild(a)
   URL.revokeObjectURL(objectUrl)
 }
+
+// ── Formatters ─────────────────────────────────────────────────────────────────
 
 function fmtSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -84,9 +82,8 @@ export default function MyFilesView({ fullHeight }: MyFilesViewProps) {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch('/api/files', { headers: authHeaders() })
-      const data = await res.json() as { files: FileEntry[] }
-      setFiles(data.files ?? [])
+      const list = await platformApi.files.list()
+      setFiles(list)
     } catch {
       setError('加载文件列表失败')
     } finally {
@@ -102,18 +99,7 @@ export default function MyFilesView({ fullHeight }: MyFilesViewProps) {
     setUploading(true)
     setError(null)
     try {
-      const form = new FormData()
-      form.append('file', file)
-      const res = await fetch('/api/files/upload', {
-        method: 'POST',
-        headers: authHeaders(),
-        body: form,
-      })
-      const data = await res.json() as { success: boolean; error?: string }
-      if (!res.ok || !data.success) {
-        setError(data.error ?? `上传失败 (${res.status})`)
-        return
-      }
+      await platformApi.files.upload(file)
       await fetchFiles()
     } catch (err) {
       setError(err instanceof Error ? err.message : '上传失败')
@@ -126,18 +112,15 @@ export default function MyFilesView({ fullHeight }: MyFilesViewProps) {
   const handleDelete = async (fileId: string) => {
     if (!window.confirm('确认删除该文件？')) return
     try {
-      const res = await fetch(`/api/files/${fileId}`, {
-        method: 'DELETE',
-        headers: authHeaders(),
-      })
-      if (res.ok) await fetchFiles()
+      await platformApi.files.delete(fileId)
+      await fetchFiles()
     } catch {
       setError('删除失败，请重试')
     }
   }
 
   const handleDownload = (f: FileEntry) => {
-    void downloadWithAuth(`/api/files/${f.id}/download`, f.name)
+    void platformApi.files.download(f.id, f.name)
   }
 
   return (

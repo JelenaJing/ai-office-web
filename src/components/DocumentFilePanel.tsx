@@ -18,7 +18,9 @@ import {
 import { useWorkspace, type FileTreeNode } from '../contexts/WorkspaceContext'
 import { useDocument } from '../contexts/DocumentContext'
 import { useDocumentEngineHostCommands } from '../engines/documentEngine/hostCommands'
-import { downloadWithAuth } from './resource/MyFilesView'
+import { platformApi } from '../platform'
+import type { Artifact } from '../platform'
+import { isWebShim as detectWebShim } from '../platform/detect'
 
 // ─── Document-file filter ─────────────────────────────────────────────────
 
@@ -303,21 +305,10 @@ function TreeNode({ node, depth, expandedFolders, toggleFolder, onFileOpen }: Tr
 // ─── Web mode detection ───────────────────────────────────────────────────
 
 function isWebShim(): boolean {
-  return (window.electronAPI as { __isWebShim?: boolean } | undefined)?.__isWebShim === true
-}
-
-function getAuthToken(): string {
-  return (
-    localStorage.getItem('aios_itoken') ??
-    localStorage.getItem('ai_office_internal_token') ??
-    ''
-  )
+  return detectWebShim()
 }
 
 // ─── Web: Generate Word doc modal ─────────────────────────────────────────
-
-interface ArtifactExport { format: string; filename: string; url: string }
-interface DocxArtifact { id: string; title: string; exports: ArtifactExport[] }
 
 interface WebDocxCreateModalProps {
   activeWorkspacePath: string
@@ -329,32 +320,27 @@ function WebDocxCreateModal({ activeWorkspacePath, onClose }: WebDocxCreateModal
   const [prompt, setPrompt] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [result, setResult] = useState<DocxArtifact | null>(null)
+  const [result, setResult] = useState<Artifact | null>(null)
 
   const handleGenerate = async () => {
     if (!prompt.trim()) { setError('请输入生成提示词'); return }
+    if (!platformApi.system.isFeatureAvailable('web.docx.create')) {
+      setError('Web 版即将开放：生成 Word 文稿')
+      return
+    }
     setBusy(true)
     setError(null)
     try {
-      const token = getAuthToken()
-      const res = await fetch('/api/skills/web.docx.create/run', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({
-          prompt: prompt.trim(),
-          workspacePath: activeWorkspacePath,
-          params: { title: title.trim() || 'AI Office 文稿' },
-        }),
+      const data = await platformApi.skills.run('web.docx.create', {
+        prompt: prompt.trim(),
+        workspacePath: activeWorkspacePath,
+        params: { title: title.trim() || 'AI Office 文稿' },
       })
-      const data = await res.json() as { success?: boolean; artifact?: DocxArtifact; error?: string }
-      if (!res.ok || !data.success) {
-        setError(data.error ?? `生成失败 (${res.status})`)
+      if (!data.success || !data.artifact) {
+        setError(data.error ?? '生成失败')
         return
       }
-      setResult(data.artifact ?? null)
+      setResult(data.artifact)
     } catch (err) {
       setError(err instanceof Error ? err.message : '生成失败，请重试')
     } finally {
@@ -413,7 +399,7 @@ function WebDocxCreateModal({ activeWorkspacePath, onClose }: WebDocxCreateModal
             </div>
             <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
               <button
-                onClick={() => void downloadWithAuth(`/api/artifacts/${result.id}/download`, result.title + '.docx')}
+                onClick={() => void platformApi.artifacts.download(result.id, `${result.title}.docx`)}
                 style={{
                   display: 'inline-flex', alignItems: 'center', gap: 7,
                   padding: '10px 20px', background: '#1a5fb4', color: '#fff',

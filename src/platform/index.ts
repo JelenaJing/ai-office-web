@@ -1,5 +1,16 @@
-export { detectPlatform } from './detect'
-export type { PlatformApi, UserInfo, AuthResult } from './types'
+export { detectPlatform, isWebShim } from './detect'
+export type {
+  PlatformApi,
+  UserInfo,
+  AuthResult,
+  WorkspaceInfo,
+  FileEntry,
+  Artifact,
+  ArtifactExport,
+  SkillInfo,
+  SkillInput,
+  SkillResult,
+} from './types'
 
 import { detectPlatform } from './detect'
 import { electronPlatformApi } from './electronPlatformApi'

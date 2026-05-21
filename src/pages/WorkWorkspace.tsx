@@ -5,6 +5,7 @@ import { useWorkspaceMode } from '../contexts/WorkspaceModeContext'
 import { SceneFeatureRow } from '../components/scene/SceneFeatureRow'
 import type { PrimarySection } from '../components/nav/PrimaryNav'
 import MyFilesPanel from './MyFilesPanel'
+import { platformApi } from '../platform'
 
 interface WorkWorkspaceProps {
   onGoToWorkspace: () => void
@@ -55,6 +56,8 @@ export default function WorkWorkspace({ onGoToWorkspace, onNavigate }: WorkWorks
   } = useWorkspaceMode()
 
   const [showFiles, setShowFiles] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [uploadMessage, setUploadMessage] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
   const uploadRef = useRef<HTMLInputElement>(null)
 
   const go = (fn: () => void) => { fn(); onGoToWorkspace() }
@@ -62,19 +65,23 @@ export default function WorkWorkspace({ onGoToWorkspace, onNavigate }: WorkWorks
   const handleQuickUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-    const token = localStorage.getItem('aios_itoken') ?? localStorage.getItem('ai_office_internal_token') ?? ''
-    const form = new FormData()
-    form.append('file', file)
+    if (!platformApi.system.isFeatureAvailable('file.upload')) {
+      setUploadMessage({ type: 'err', text: 'Web 版即将开放：文件上传' })
+      return
+    }
+    setUploading(true)
+    setUploadMessage(null)
     try {
-      await fetch('/api/files/upload', {
-        method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        body: form,
-      })
+      await platformApi.files.upload(file)
+      setUploadMessage({ type: 'ok', text: `已上传：${file.name}` })
       setShowFiles(true)
-    } catch {
-      // ignore — user can retry via "我的文件" panel
+    } catch (err) {
+      setUploadMessage({
+        type: 'err',
+        text: err instanceof Error ? err.message : '上传失败，请重试',
+      })
     } finally {
+      setUploading(false)
       if (uploadRef.current) uploadRef.current.value = ''
     }
   }
@@ -93,6 +100,15 @@ export default function WorkWorkspace({ onGoToWorkspace, onNavigate }: WorkWorks
         <PageHeader>
           <PageTitle>工作场景</PageTitle>
           <PageSubtitle>文稿编辑、邮件收发、日程管理、数据分析与 PPT 生成</PageSubtitle>
+          {uploadMessage && (
+            <p style={{
+              margin: '10px 0 0',
+              fontSize: 13,
+              color: uploadMessage.type === 'ok' ? '#1a7f4b' : '#c0392b',
+            }}>
+              {uploadMessage.text}
+            </p>
+          )}
         </PageHeader>
 
         <FeatureList>
@@ -149,8 +165,11 @@ export default function WorkWorkspace({ onGoToWorkspace, onNavigate }: WorkWorks
             title="上传文件"
             description="将 docx、pdf、pptx、xlsx、csv、txt、图片等文件上传到工作区"
             accent="teal"
-            actionLabel="选择文件"
-            onClick={() => uploadRef.current?.click()}
+            actionLabel={uploading ? '上传中…' : '选择文件'}
+            onClick={() => {
+              if (uploading) return
+              uploadRef.current?.click()
+            }}
           />
         </FeatureList>
       </Page>

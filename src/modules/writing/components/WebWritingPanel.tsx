@@ -2,30 +2,16 @@
  * WebWritingPanel — Web-mode document generation panel.
  *
  * Replaces the Electron Tiptap EditorPanel in web mode.
- * Calls POST /api/skills/web.docx.create/run and saves the result to
- * the artifact system (accessible in 资源中心 › 生成记录).
+ * Calls platformApi.skills.run('web.docx.create', ...) and saves the result
+ * to the artifact system (accessible in 资源中心 › 生成记录).
  */
 
 import { useState } from 'react'
 import styled from 'styled-components'
 import { Sparkles, Download, FileText, ArrowRight } from 'lucide-react'
 import { useWorkspace } from '../../../contexts/WorkspaceContext'
-import { downloadWithAuth } from '../../../components/resource/MyFilesView'
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function getToken(): string {
-  return (
-    localStorage.getItem('aios_itoken') ??
-    localStorage.getItem('ai_office_internal_token') ??
-    ''
-  )
-}
-
-// ── Types ─────────────────────────────────────────────────────────────────────
-
-interface ArtifactExport { format: string; filename: string; url: string }
-interface DocxArtifact { id: string; title: string; exports: ArtifactExport[] }
+import { platformApi } from '../../../platform'
+import type { Artifact } from '../../../platform'
 
 // ── Styled components ─────────────────────────────────────────────────────────
 
@@ -206,7 +192,7 @@ export default function WebWritingPanel() {
   const [prompt, setPrompt] = useState('')
   const [generating, setGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [artifact, setArtifact] = useState<DocxArtifact | null>(null)
+  const [artifact, setArtifact] = useState<Artifact | null>(null)
 
   const handleGenerate = async () => {
     if (!activeWorkspacePath) {
@@ -220,25 +206,16 @@ export default function WebWritingPanel() {
     setGenerating(true)
     setError(null)
     try {
-      const token = getToken()
-      const res = await fetch('/api/skills/web.docx.create/run', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({
-          prompt: prompt.trim(),
-          workspacePath: activeWorkspacePath,
-          params: { title: title.trim() || 'AI Office 文稿' },
-        }),
+      const result = await platformApi.skills.run('web.docx.create', {
+        prompt: prompt.trim(),
+        workspacePath: activeWorkspacePath,
+        params: { title: title.trim() || 'AI Office 文稿' },
       })
-      const data = await res.json() as { success?: boolean; artifact?: DocxArtifact; error?: string; message?: string }
-      if (!res.ok || !data.success) {
-        setError(data.error ?? data.message ?? `生成失败 (${res.status})`)
+      if (!result.success) {
+        setError(result.error ?? '生成失败，请重试')
         return
       }
-      setArtifact(data.artifact ?? null)
+      setArtifact(result.artifact ?? null)
     } catch (err) {
       setError(err instanceof Error ? err.message : '网络错误，请重试')
     } finally {
@@ -276,8 +253,8 @@ export default function WebWritingPanel() {
               </SuccessHint>
               <SuccessBtns>
                 <PrimaryBtn
-                  onClick={() => void downloadWithAuth(
-                    `/api/artifacts/${artifact.id}/download`,
+                   onClick={() => void platformApi.artifacts.download(
+                    artifact.id,
                     `${artifact.title}.docx`,
                   )}
                 >
