@@ -1,7 +1,6 @@
 import { useEffect, useRef } from 'react'
 import styled from 'styled-components'
 import DocumentEngineHost from '../modules/writing/components/DocumentEngineHost'
-import WebWritingPanel from '../modules/writing/components/WebWritingPanel'
 import GenerationWorkbenchPanel from '../modules/generation/components/GenerationWorkbenchPanel'
 import CommunicationWorkbench from '../communication/CommunicationWorkbench'
 import HomeworkWorkbench from '../modules/homework/components/HomeworkWorkbench'
@@ -10,10 +9,9 @@ import AiForumWorkbench from '../modules/homework/components/AiForumWorkbench'
 import ExcelAnalysisWorkbench from '../modules/excel-analysis/components/ExcelAnalysisWorkbench'
 import DailyFeedWorkbench from '../modules/feed/components/DailyFeedWorkbench'
 import ModelDevPanel from './ModelDevPanel'
-import WebImageGenerationPanel from '../modules/image/components/WebImageGenerationPanel'
-import WebPptGenerationPanel from '../modules/ppt/components/WebPptGenerationPanel'
-import WebEmailPanel from '../modules/email/components/WebEmailPanel'
+import ImageWorkspace from '../modules/image/components/ImageWorkspace'
 import WebDailyReportPanel from '../modules/report/components/WebDailyReportPanel'
+/** Web 临时 MVP：模型/AI 设置；待 FullSettingsPanel / ModelDevPanel Web 执行层就绪后替换 */
 import WebSettingsPanel from '../modules/settings/components/WebSettingsPanel'
 import WebFeatureComingSoon from './WebFeatureComingSoon'
 import { useWorkspaceMode } from '../contexts/WorkspaceModeContext'
@@ -85,6 +83,7 @@ function renderPanelContent(
   key: PanelKey,
   ghostTextEnabled: boolean,
   activePanel: PanelKey,
+  generationMode: string,
 ): React.ReactNode {
   if (isWebShim()) {
     const featureKey = PANEL_WEB_FEATURE[key]
@@ -99,25 +98,30 @@ function renderPanelContent(
 
   switch (key) {
     case 'freewrite':
-      return isWebShim() ? (
-        <WebWritingPanel />
-      ) : (
+      return (
         <EditorViewportShell>
-          <DocumentEngineHost ghostTextEnabled={ghostTextEnabled} manuscriptProfile="freewrite" active={activePanel === 'freewrite'} />
+          <DocumentEngineHost
+            ghostTextEnabled={ghostTextEnabled}
+            manuscriptProfile="freewrite"
+            active={activePanel === 'freewrite'}
+          />
         </EditorViewportShell>
       )
     case 'paper':
-      return isWebShim() ? (
-        <WebDailyReportPanel />
-      ) : (
+      if (isWebShim() && generationMode === 'daily-report') {
+        return <WebDailyReportPanel />
+      }
+      return (
         <EditorViewportShell>
-          <DocumentEngineHost ghostTextEnabled={ghostTextEnabled} manuscriptProfile="paper" active={activePanel === 'paper'} />
+          <DocumentEngineHost
+            ghostTextEnabled={ghostTextEnabled}
+            manuscriptProfile="paper"
+            active={activePanel === 'paper'}
+          />
         </EditorViewportShell>
       )
     case 'workbench':
-      return isWebShim() ? (
-        <WebPptGenerationPanel />
-      ) : (
+      return (
         <GenerationShell>
           <ViewportBody>
             <GenerationWorkbenchPanel />
@@ -125,7 +129,7 @@ function renderPanelContent(
         </GenerationShell>
       )
     case 'email':
-      return isWebShim() ? <WebEmailPanel /> : <CommunicationWorkbench />
+      return <CommunicationWorkbench />
     case 'homework':
       return (
         <GenerationShell>
@@ -143,7 +147,7 @@ function renderPanelContent(
     case 'daily-feed':
       return <DailyFeedWorkbench />
     case 'image':
-      return <WebImageGenerationPanel />
+      return <ImageWorkspace />
     default:
       return null
   }
@@ -176,7 +180,7 @@ export default function WorkspaceViewportHost({ ghostTextEnabled }: WorkspaceVie
     <>
       {panelKeys.map(key => (
         <ViewportSlot key={key} $active={activePanel === key}>
-          {mounted(key) && renderPanelContent(key, ghostTextEnabled, activePanel)}
+          {mounted(key) && renderPanelContent(key, ghostTextEnabled, activePanel, generationMode)}
         </ViewportSlot>
       ))}
     </>

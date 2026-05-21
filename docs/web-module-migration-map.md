@@ -20,8 +20,41 @@
 ### Web 保留的 UI 壳（不重写）
 
 1. **资源中心** — `ResourceWorkspace`、`MyFilesView`、Artifacts、`RemoteKnowledgePanel`  
-2. **工作场景** — 文稿（`WebWritingPanel`）、Excel / PPT / 图片 / 邮件 / 日报（入口保留，执行层迁移）  
+2. **工作场景** — 文稿（`DocumentEngineHost` / `EditorPanel`）、邮件（`CommunicationWorkbench`）、PPT（`GenerationWorkbenchPanel`）、Excel（`ExcelAnalysisWorkbench`）等**原工作台壳**；执行层逐步接 `platformApi`  
 3. **设置 / Skill** — 设置页、Skill 文稿 Tab；Store 后续 server 签发 embed  
+
+---
+
+## UI Restoration First
+
+**Web 化不是重写 UI。** 当前阶段（`feat/web-all-mvp-services` 及后续）优先在浏览器中挂载与 Electron 相同的**原 UI 壳**，已落地的 server 模块、`platformApi`、Web skill **保留不删**；`Web*Panel` 卡片页仅作**临时 fallback**，不得长期替代主入口。
+
+| 原则 | 说明 |
+|---|---|
+| 先恢复壳 | `WorkspaceViewportHost` 等入口渲染 `DocumentEngineHost`、`CommunicationWorkbench`、`GenerationWorkbenchPanel` 等 |
+| 再接执行 | 按钮、生成、保存、收件箱等逐步改为 `platformApi` → `/api/*`，在壳内禁用或替换 Electron-only 操作 |
+| 不恢复 | 本地文件树、`DocumentFilePanel`、`.aidoc.json` 树、绝对路径对话框 |
+| 不删除 | `server/src/modules/*`、`web.*` skill、`Web*Panel` 源文件（可闲置） |
+
+| 模块 | 原 UI 壳 | 当前 Web 服务 | 主入口是否恢复原 UI | 后续要接的执行动作 |
+|---|---|---|---|---|
+| 文稿 | `DocumentEngineHost` / `EditorPanel` | `web.docx.create` | 是 | 生成 / 保存 / 导出 → `platformApi` |
+| 邮件 | `CommunicationWorkbench` / `EmailContext` | `/api/email` | 是 | 收件箱 / 发送 / 账号 → `platformApi.email` |
+| PPT | `GenerationWorkbenchPanel` / `PptWorkbenchPanel` | `web.pptx.create` | 是 | 生成 / 模板 / 下载 → `platformApi.skills.run` |
+| Excel | `ExcelAnalysisWorkbench` | `web.xlsx.analyze` | 是 | 分析 / 下载（已双轨，继续收敛 IPC） |
+| 图片 | `ImageWorkspace` | `web.image.generate` | 是（原 `ImageWorkspace` 壳） | 生成 / 参考图 → `platformApi` |
+| 日报 | `ActivityReportPanel` | `web.daily.report` | 临时（`WebDailyReportPanel`） | 生成报告 → `platformApi` |
+| 设置 | `FullSettingsPanel` / `ModelDevPanel` | `/api/settings/ai` | 临时（`WebSettingsPanel`） | 查看 / 测试 LLM |
+
+**`WorkspaceViewportHost`（Web）当前挂载：**
+
+- `freewrite` → `DocumentEngineHost`（`manuscriptProfile="freewrite"`）  
+- `email` → `CommunicationWorkbench`  
+- `workbench`（PPT）→ `GenerationWorkbenchPanel`  
+- `data` → `ExcelAnalysisWorkbench`  
+- `image` → `ImageWorkspace`  
+- `paper` + `daily-report` → 临时 `WebDailyReportPanel`；`paper` + `document` → `DocumentEngineHost`  
+- `model` → 临时 `WebSettingsPanel`（`ModelDevPanel` 仍依赖 Electron 时）
 
 ---
 
@@ -82,7 +115,7 @@
 | 默认工作区 token | WorkspaceContext（Web） | `workspaces.getDefault` | `/api/workspaces/default` | `workspaceStore` | **无 fileTree；不走 getWorkspaceTree** |
 | 我的文件 | ResourceWorkspace / MyFilesView | `files.*` | `/api/files/*` | `routes/files` | `fileId`，非绝对路径 |
 | 生成记录 | ResourceWorkspace | `artifacts.*` | `/api/artifacts/*` | `routes/artifacts` | 下载走 artifactId |
-| 文稿生成 Word | WebWritingPanel / Skill 页 | `skills.run('web.docx.create')` | `/api/skills/:id/run` | `ai-gateway` + `createDocxSkill` | **必须进 Artifact** |
+| 文稿生成 Word | `DocumentEngineHost` / EditorPanel / Skill 页 | `skills.run('web.docx.create')` | `/api/skills/:id/run` | `ai-gateway` + `createDocxSkill` | **必须进 Artifact**；UI 壳已恢复，执行层在 Editor 内接入 |
 | 远程知识库（读） | RemoteKnowledgePanel | `departments.*` `knowledge.getBaseInfo/listDocuments/deleteDocument` | `/api/departments` `/api/knowledge/:id/*` | `modules/knowledge/remoteKnowledgeClient` | AC 鉴权；**上传待 multipart** |
 
 ---
