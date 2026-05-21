@@ -10,6 +10,7 @@ import {
   artifactHasExport,
 } from '../utils/artifactDisplay'
 import WebFeatureComingSoon from '../components/WebFeatureComingSoon'
+import { ApiFetchError } from '../platform/webPlatformApi'
 import { getWebFeatureStatus } from '../platform/featureGate'
 
 // ── Layout shells ─────────────────────────────────────────────────────────────
@@ -899,12 +900,27 @@ export default function SkillManagementView() {
   }
 
   async function handleOpenStore() {
+    setTab('store')
+    setWebGateHint(null)
     if (isWebShim()) {
-      setTab('store')
-      setWebGateHint(null)
+      if (storeStatus === 'ready' && embedUrl) return
+      setStoreStatus('loading')
+      setStoreError(null)
+      try {
+        const { url } = await platformApi.store.getEmbedUrl()
+        setEmbedUrl(url)
+        setStoreStatus('ready')
+      } catch (e) {
+        setStoreStatus('error')
+        const msg = e instanceof ApiFetchError
+          ? e.message
+          : e instanceof Error
+            ? e.message
+            : 'Skill Store 未配置'
+        setStoreError(msg)
+      }
       return
     }
-    setTab('store')
     if (storeStatus === 'ready' && embedUrl) return
     setStoreStatus('loading')
     setStoreError(null)
@@ -960,7 +976,11 @@ export default function SkillManagementView() {
         {/* Manage tab */}
         <PageSlot $active={tab === 'manage'}>
           {isWebShim() ? (
-            <WebFeatureComingSoon featureKey="settings.ai" />
+            <ManageScrollArea>
+              <p style={{ fontSize: 14, color: '#627385' }}>
+                Web 版 Skill 包安装与管理后续接入。可使用「生成文稿」或 Skill 商店（若已配置）。
+              </p>
+            </ManageScrollArea>
           ) : (
             <ManageScrollArea>
               <div style={{ marginBottom: 20 }}>
@@ -1006,9 +1026,28 @@ export default function SkillManagementView() {
 
         {/* Store tab — keep iframe mounted once loaded to avoid page reload */}
         <PageSlot $active={tab === 'store'}>
-          {isWebShim() ? (
-            <WebFeatureComingSoon title="Skill 商店" />
-          ) : storeStatus === 'loading' && (
+          {isWebShim() && storeStatus === 'loading' && (
+            <StoreStateArea>
+              <div>正在加载 Skill Store…</div>
+            </StoreStateArea>
+          )}
+          {isWebShim() && storeStatus === 'error' && (
+            <StoreStateArea>
+              <div style={{ color: '#c0392b', textAlign: 'center', maxWidth: 480 }}>
+                {storeError ?? 'Skill Store 未配置'}
+              </div>
+              <RetryBtn onClick={() => void handleOpenStore()}>重试</RetryBtn>
+            </StoreStateArea>
+          )}
+          {isWebShim() && storeStatus === 'idle' && (
+            <StoreStateArea>
+              <div style={{ color: '#8a9ab0' }}>点击「Skill 商店」标签载入</div>
+            </StoreStateArea>
+          )}
+          {isWebShim() && embedUrl && (
+            <StoreFrame src={embedUrl} title="Skill 商店" style={{ display: storeStatus === 'ready' ? 'block' : 'none' }} />
+          )}
+          {!isWebShim() && storeStatus === 'loading' && (
             <StoreStateArea>
               <div>正在连接 Skill Store...</div>
             </StoreStateArea>

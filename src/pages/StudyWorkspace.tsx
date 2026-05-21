@@ -6,6 +6,7 @@ import {
 import { useWorkspaceMode } from '../contexts/WorkspaceModeContext'
 import { SceneFeatureRow } from '../components/scene/SceneFeatureRow'
 import { runWebFeatureAction, sceneStatusForWebFeature } from '../platform/useWebFeatureAction'
+import { isWebShim } from '../platform/detect'
 
 interface StudyWorkspaceProps {
   onGoToWorkspace: () => void
@@ -51,6 +52,7 @@ export default function StudyWorkspace({ onGoToWorkspace }: StudyWorkspaceProps)
     enterHomeworkMode,
     enterAiClassMode,
     enterDocumentGenerationMode,
+    enterDailyReportMode,
     enterImageGenerationMode,
   } = useWorkspaceMode()
 
@@ -91,7 +93,11 @@ export default function StudyWorkspace({ onGoToWorkspace }: StudyWorkspaceProps)
           accent="blue"
           status={sceneStatusForWebFeature('daily.report')}
           actionLabel="论文写作"
-          onClick={() => runWebFeatureAction('daily.report', () => go(enterDocumentGenerationMode), block)}
+          onClick={() => runWebFeatureAction(
+            'daily.report',
+            () => go(isWebShim() ? enterDailyReportMode : enterDocumentGenerationMode),
+            block,
+          )}
         />
         <SceneFeatureRow
           icon={<BarChart2 size={24} />}

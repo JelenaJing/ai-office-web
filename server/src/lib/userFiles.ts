@@ -23,7 +23,7 @@ function filesDir(userId: string, wsId: string): string {
   return path.join(workspaceDir(userId, wsId), 'files')
 }
 
-function readFilesIndex(userId: string, wsId: string): FilesIndex {
+export function readFilesIndex(userId: string, wsId: string): FilesIndex {
   const dir = filesDir(userId, wsId)
   fs.mkdirSync(dir, { recursive: true })
   const p = path.join(dir, 'files.json')

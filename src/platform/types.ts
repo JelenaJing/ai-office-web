@@ -69,6 +69,62 @@ export interface SkillResult {
   error?: string
 }
 
+export interface CalendarEvent {
+  id: string
+  title: string
+  startAt: string
+  endAt: string
+  notes?: string
+}
+
+export interface EmailAccountInput {
+  user: string
+  password: string
+  displayName?: string
+  imapHost: string
+  imapPort: number
+  imapSecure: boolean
+  smtpHost: string
+  smtpPort: number
+  smtpSecure: boolean
+}
+
+export interface EmailAccountState {
+  configured: boolean
+  user?: string
+  displayName?: string
+  imapHost?: string
+  smtpHost?: string
+}
+
+export interface EmailMessageSummary {
+  id: string
+  from: string
+  subject: string
+  timestamp: string
+  unread: boolean
+  preview: string
+}
+
+export interface EmailMessageDetail extends EmailMessageSummary {
+  body: string
+  to: string
+}
+
+export interface EmailSendInput {
+  to: string
+  subject: string
+  body: string
+}
+
+export interface AiSettingsView {
+  provider: string
+  model: string
+  baseUrl: string
+  hasApiKey: boolean
+  imageConfigured: boolean
+}
+
 export type { Department, KnowledgeLibraryInfo, KnowledgeDocumentMeta, KnowledgeImportResult }
 
 /**
@@ -154,8 +210,33 @@ export interface PlatformApi {
   knowledge: {
     getBaseInfo(departmentId: string): Promise<KnowledgeLibraryInfo>
     listDocuments(departmentId: string): Promise<KnowledgeDocumentMeta[]>
-    importDocuments(departmentId: string): Promise<KnowledgeImportResult>
+    importDocuments(departmentId: string, files?: File[]): Promise<KnowledgeImportResult>
     deleteDocument(departmentId: string, documentId: string): Promise<void>
+  }
+
+  calendar: {
+    listEvents(): Promise<CalendarEvent[]>
+    createEvent(input: Omit<CalendarEvent, 'id'>): Promise<CalendarEvent>
+    updateEvent(id: string, patch: Partial<CalendarEvent>): Promise<CalendarEvent>
+    deleteEvent(id: string): Promise<void>
+  }
+
+  email: {
+    getAccount(): Promise<EmailAccountState>
+    saveAccount(config: EmailAccountInput): Promise<EmailAccountState>
+    testConnection(): Promise<{ ok: boolean; message: string }>
+    listMessages(folder?: string): Promise<EmailMessageSummary[]>
+    getMessage(id: string): Promise<EmailMessageDetail>
+    sendMessage(input: EmailSendInput): Promise<{ ok: boolean; message?: string }>
+  }
+
+  settings: {
+    getAi(): Promise<AiSettingsView>
+    testAi(): Promise<{ ok: boolean; message: string }>
+  }
+
+  store: {
+    getEmbedUrl(): Promise<{ url: string }>
   }
 
   system: {

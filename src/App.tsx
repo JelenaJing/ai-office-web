@@ -35,6 +35,7 @@ import SettingsView from './pages/SettingsView'
 import AccountView from './pages/AccountView'
 import SkillManagementView from './pages/SkillManagementView'
 import CalendarWorkspace from './pages/CalendarWorkspace'
+import WebCalendarPanel from './modules/calendar/components/WebCalendarPanel'
 import WebFeatureComingSoon from './components/WebFeatureComingSoon'
 import { isWebShim } from './platform/detect'
 import { isWebFeatureEnabled } from './platform/featureGate'
@@ -836,6 +837,8 @@ function WriterWorkspaceRuntime({
             <ScenarioArea>
               {isWebShim() && !isWebFeatureEnabled('calendar') ? (
                 <WebFeatureComingSoon featureKey="calendar" />
+              ) : isWebShim() ? (
+                <WebCalendarPanel />
               ) : (
                 <CalendarWorkspace />
               )}

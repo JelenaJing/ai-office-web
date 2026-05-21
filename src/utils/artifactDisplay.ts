@@ -13,7 +13,10 @@ export function artifactTypeLabel(type: string): string {
     case 'image':
       return '图片'
     case 'report':
+    case 'daily_report':
       return '报告'
+    case 'email_draft':
+      return '邮件草稿'
     default:
       return type || '未知'
   }

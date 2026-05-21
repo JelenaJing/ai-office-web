@@ -52,8 +52,8 @@ const WEB_FEATURE_DEFS: Record<WebFeatureKey, FeatureDef> = {
   },
   'ppt.generate': {
     label: 'PPT 生成',
-    enabled: false,
-    message: 'Web 版即将开放',
+    enabled: true,
+    message: '',
   },
   'pdf.process': {
     label: 'PDF 处理',
@@ -62,28 +62,28 @@ const WEB_FEATURE_DEFS: Record<WebFeatureKey, FeatureDef> = {
   },
   email: {
     label: '邮件收发',
-    enabled: false,
-    message: 'Web 版即将开放',
+    enabled: true,
+    message: '',
   },
   calendar: {
     label: '日程管理',
-    enabled: false,
-    message: 'Web 版即将开放',
+    enabled: true,
+    message: '',
   },
   'daily.report': {
     label: '日报 / 审计文稿',
-    enabled: false,
-    message: 'Web 版即将开放',
+    enabled: true,
+    message: '',
   },
   'image.generate': {
     label: '图片生成',
-    enabled: false,
-    message: 'Web 版即将开放',
+    enabled: true,
+    message: '',
   },
   'settings.ai': {
     label: 'AI 设置',
-    enabled: false,
-    message: 'Web 版即将开放',
+    enabled: true,
+    message: '',
   },
 }
 

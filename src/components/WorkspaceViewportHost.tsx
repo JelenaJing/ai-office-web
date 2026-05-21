@@ -10,6 +10,11 @@ import AiForumWorkbench from '../modules/homework/components/AiForumWorkbench'
 import ExcelAnalysisWorkbench from '../modules/excel-analysis/components/ExcelAnalysisWorkbench'
 import DailyFeedWorkbench from '../modules/feed/components/DailyFeedWorkbench'
 import ModelDevPanel from './ModelDevPanel'
+import WebImageGenerationPanel from '../modules/image/components/WebImageGenerationPanel'
+import WebPptGenerationPanel from '../modules/ppt/components/WebPptGenerationPanel'
+import WebEmailPanel from '../modules/email/components/WebEmailPanel'
+import WebDailyReportPanel from '../modules/report/components/WebDailyReportPanel'
+import WebSettingsPanel from '../modules/settings/components/WebSettingsPanel'
 import WebFeatureComingSoon from './WebFeatureComingSoon'
 import { useWorkspaceMode } from '../contexts/WorkspaceModeContext'
 import { isWebShim } from '../platform/detect'
@@ -102,13 +107,17 @@ function renderPanelContent(
         </EditorViewportShell>
       )
     case 'paper':
-      return (
+      return isWebShim() ? (
+        <WebDailyReportPanel />
+      ) : (
         <EditorViewportShell>
           <DocumentEngineHost ghostTextEnabled={ghostTextEnabled} manuscriptProfile="paper" active={activePanel === 'paper'} />
         </EditorViewportShell>
       )
     case 'workbench':
-      return (
+      return isWebShim() ? (
+        <WebPptGenerationPanel />
+      ) : (
         <GenerationShell>
           <ViewportBody>
             <GenerationWorkbenchPanel />
@@ -116,7 +125,7 @@ function renderPanelContent(
         </GenerationShell>
       )
     case 'email':
-      return <CommunicationWorkbench />
+      return isWebShim() ? <WebEmailPanel /> : <CommunicationWorkbench />
     case 'homework':
       return (
         <GenerationShell>
@@ -130,9 +139,11 @@ function renderPanelContent(
     case 'data':
       return <ExcelAnalysisWorkbench />
     case 'model':
-      return <ModelDevPanel />
+      return isWebShim() ? <WebSettingsPanel /> : <ModelDevPanel />
     case 'daily-feed':
       return <DailyFeedWorkbench />
+    case 'image':
+      return <WebImageGenerationPanel />
     default:
       return null
   }

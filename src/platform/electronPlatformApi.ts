@@ -271,6 +271,57 @@ export const electronPlatformApi: PlatformApi = {
     },
   },
 
+  calendar: {
+    async listEvents() {
+      notSupported('calendar.listEvents')
+    },
+    async createEvent() {
+      notSupported('calendar.createEvent')
+    },
+    async updateEvent() {
+      notSupported('calendar.updateEvent')
+    },
+    async deleteEvent() {
+      notSupported('calendar.deleteEvent')
+    },
+  },
+
+  email: {
+    async getAccount() {
+      notSupported('email.getAccount')
+    },
+    async saveAccount() {
+      notSupported('email.saveAccount')
+    },
+    async testConnection() {
+      notSupported('email.testConnection')
+    },
+    async listMessages() {
+      notSupported('email.listMessages')
+    },
+    async getMessage() {
+      notSupported('email.getMessage')
+    },
+    async sendMessage() {
+      notSupported('email.sendMessage')
+    },
+  },
+
+  settings: {
+    async getAi() {
+      notSupported('settings.getAi')
+    },
+    async testAi() {
+      notSupported('settings.testAi')
+    },
+  },
+
+  store: {
+    async getEmbedUrl() {
+      notSupported('store.getEmbedUrl')
+    },
+  },
+
   // ── system ──────────────────────────────────────────────────────────────────
 
   system: {
