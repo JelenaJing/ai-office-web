@@ -35,6 +35,9 @@ import SettingsView from './pages/SettingsView'
 import AccountView from './pages/AccountView'
 import SkillManagementView from './pages/SkillManagementView'
 import CalendarWorkspace from './pages/CalendarWorkspace'
+import WebFeatureComingSoon from './components/WebFeatureComingSoon'
+import { isWebShim } from './platform/detect'
+import { isWebFeatureEnabled } from './platform/featureGate'
 import { DISABLE_FORCE_PASSWORD_CHANGE } from './config'
 import { DEFAULT_APP_ROUTE } from './config/productFeatures'
 
@@ -831,7 +834,11 @@ function WriterWorkspaceRuntime({
           )}
           {primarySection === 'calendar' && (
             <ScenarioArea>
-              <CalendarWorkspace />
+              {isWebShim() && !isWebFeatureEnabled('calendar') ? (
+                <WebFeatureComingSoon featureKey="calendar" />
+              ) : (
+                <CalendarWorkspace />
+              )}
             </ScenarioArea>
           )}
           {primarySection === 'study' && (
