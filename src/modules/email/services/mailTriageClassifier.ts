@@ -1201,6 +1201,12 @@ export async function classifyMailsBatch(
 ): Promise<AiMailTriageResult[]> {
   if (mails.length === 0) return []
 
+  // Web mode: writingAssistant IPC is Electron-only; triage is not available.
+  if (!window.electronAPI?.writingAssistant) {
+    console.info('[mail-triage] AI triage requires Electron; skipping batch classify in web mode')
+    return []
+  }
+
   const prompt = buildBatchPrompt(mails)
 
   // Use writingAssistant IPC directly for a synchronous JSON response.
@@ -1210,7 +1216,7 @@ export async function classifyMailsBatch(
       reject(new DOMException('Aborted', 'AbortError'))
       return
     }
-    const ipc = window.electronAPI.writingAssistant({
+    const ipc = window.electronAPI!.writingAssistant({
       instruction: prompt,
       language: 'zh',
     } as Record<string, unknown>)
