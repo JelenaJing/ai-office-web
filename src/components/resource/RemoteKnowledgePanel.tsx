@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import styled from 'styled-components'
-import { BookOpen, Cloud, RefreshCw, Upload } from 'lucide-react'
-import { useKnowledge } from '../../contexts/KnowledgeContext'
+import { BookOpen, RefreshCw, Upload } from 'lucide-react'
 import { useDepartment } from '../../contexts/DepartmentContext'
 import { DepartmentSelector } from '../DepartmentSelector'
 import { isWebShim } from '../../platform/detect'
@@ -41,7 +40,7 @@ const HeaderTitle = styled.div`
   gap: 7px;
 `
 
-const Badge = styled.span<{ $ok?: boolean }>`
+const Badge = styled.span<{ $ok?: boolean; $warn?: boolean }>`
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -49,17 +48,17 @@ const Badge = styled.span<{ $ok?: boolean }>`
   border-radius: 10px;
   font-size: var(--font-size-xs);
   font-weight: 600;
-  background: ${p => p.$ok ? '#e6f4ea' : '#fff3cd'};
-  color: ${p => p.$ok ? '#1a7a4a' : '#856404'};
+  background: ${p => (p.$ok ? '#e6f4ea' : p.$warn ? '#fff3cd' : '#fdecea')};
+  color: ${p => (p.$ok ? '#1a7a4a' : p.$warn ? '#856404' : '#a94442')};
   flex-shrink: 0;
 `
 
-const StatusDot = styled.span<{ $ok?: boolean }>`
+const StatusDot = styled.span<{ $ok?: boolean; $warn?: boolean }>`
   display: inline-block;
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: ${p => p.$ok ? '#2d9e6b' : '#e8a020'};
+  background: ${p => (p.$ok ? '#2d9e6b' : p.$warn ? '#e8a020' : '#d9534f')};
   flex-shrink: 0;
 `
 
@@ -94,10 +93,8 @@ const UploadButton = styled.button`
   color: #1a56db;
   font-size: var(--font-size-xs);
   font-weight: 500;
-  cursor: pointer;
-
-  &:hover:not(:disabled) { background: #d4e4fd; }
-  &:disabled { opacity: 0.45; cursor: not-allowed; }
+  cursor: not-allowed;
+  opacity: 0.55;
 `
 
 const UploadNote = styled.div`
@@ -105,9 +102,10 @@ const UploadNote = styled.div`
   font-size: var(--font-size-xs);
   color: #8094a8;
   text-align: center;
+  line-height: 1.5;
 `
 
-const UnconfiguredWrap = styled.div`
+const StateWrap = styled.div`
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -118,23 +116,23 @@ const UnconfiguredWrap = styled.div`
   text-align: center;
 `
 
-const UnconfiguredIcon = styled.div`
+const StateIcon = styled.div`
   font-size: 36px;
   opacity: 0.4;
 `
 
-const UnconfiguredTitle = styled.div`
+const StateTitle = styled.div`
   font-size: 14px;
   font-weight: 600;
   color: #304255;
 `
 
-const UnconfiguredDesc = styled.p`
+const StateDesc = styled.p`
   margin: 0;
   font-size: var(--font-size-xs);
   color: #7a91a8;
   line-height: 1.6;
-  max-width: 260px;
+  max-width: 300px;
 `
 
 const RetryButton = styled.button`
@@ -150,16 +148,15 @@ const RetryButton = styled.button`
   font-weight: 600;
   cursor: pointer;
   &:hover { background: #f0f6ff; }
+  &:disabled { opacity: 0.6; cursor: not-allowed; }
 `
 
 // ---------------------------------------------------------------------------
 
 export default function RemoteKnowledgePanel() {
-  const { importing, importDocuments } = useKnowledge()
-  const { departments, selectedDepartmentId, loading, refresh } = useDepartment()
+  const { departments, selectedDepartmentId, loading, error, errorKind, refresh } = useDepartment()
   const [retrying, setRetrying] = useState(false)
-  const [importError, setImportError] = useState<string | null>(null)
-  const webUploadPending = isWebShim()
+  const webMode = isWebShim()
 
   const handleRetry = async () => {
     setRetrying(true)
@@ -170,7 +167,27 @@ export default function RemoteKnowledgePanel() {
     }
   }
 
-  const isAvailable = !loading && departments.length > 0
+  const connected = !loading && !error && departments.length > 0
+  const emptyDepartments = !loading && !error && departments.length === 0 && errorKind === 'empty'
+
+  let badgeLabel = '检测中…'
+  let badgeOk = false
+  let badgeWarn = false
+  if (!loading) {
+    if (errorKind === 'auth') {
+      badgeLabel = '登录异常'
+    } else if (errorKind === 'connection') {
+      badgeLabel = '连接失败'
+    } else if (emptyDepartments) {
+      badgeLabel = '暂无部门'
+      badgeWarn = true
+    } else if (connected) {
+      badgeLabel = '已连接'
+      badgeOk = true
+    }
+  }
+
+  const showBrowse = connected || emptyDepartments
 
   return (
     <Wrap>
@@ -180,68 +197,69 @@ export default function RemoteKnowledgePanel() {
             <BookOpen size={15} />
             远程知识库
           </HeaderTitle>
-          {loading ? (
-            <Badge>
-              <StatusDot />
-              检测中…
-            </Badge>
-          ) : isAvailable ? (
-            <Badge $ok>
-              <StatusDot $ok />
-              已连接
-            </Badge>
-          ) : (
-            <Badge>
-              <StatusDot />
-              未配置
-            </Badge>
-          )}
+          <Badge $ok={badgeOk} $warn={badgeWarn}>
+            <StatusDot $ok={badgeOk} $warn={badgeWarn} />
+            {badgeLabel}
+          </Badge>
         </HeaderTop>
-        <SubTitle>来自服务器的部门共享知识库，可供团队协作使用。</SubTitle>
+        <SubTitle>
+          {webMode
+            ? 'Web 版知识库上传将在后续接入，目前可浏览远程知识库资料。'
+            : '来自服务器的部门共享知识库，可供团队协作使用。'}
+        </SubTitle>
       </Header>
 
-      {!loading && !isAvailable ? (
-        <UnconfiguredWrap>
-          <UnconfiguredIcon>☁️</UnconfiguredIcon>
-          <UnconfiguredTitle>远程知识库未配置</UnconfiguredTitle>
-          <UnconfiguredDesc>
-            当前未连接到远程知识库服务器。如需使用部门共享知识库，请联系管理员配置服务地址。
-          </UnconfiguredDesc>
+      {loading && (
+        <StateWrap>
+          <StateDesc>正在连接远程知识库…</StateDesc>
+        </StateWrap>
+      )}
+
+      {!loading && errorKind === 'auth' && (
+        <StateWrap>
+          <StateIcon>🔐</StateIcon>
+          <StateTitle>登录状态异常</StateTitle>
+          <StateDesc>{error ?? '请退出后重新登录，再打开知识库资料。'}</StateDesc>
+        </StateWrap>
+      )}
+
+      {!loading && errorKind === 'connection' && (
+        <StateWrap>
+          <StateIcon>☁️</StateIcon>
+          <StateTitle>连接失败</StateTitle>
+          <StateDesc>
+            {error ?? '无法连接远程知识库服务，请检查网络或联系管理员。'}
+          </StateDesc>
           <RetryButton onClick={() => void handleRetry()} disabled={retrying}>
             <RefreshCw size={13} />
-            {retrying ? '重试中...' : '重新连接'}
+            {retrying ? '重试中…' : '重新连接'}
           </RetryButton>
-        </UnconfiguredWrap>
-      ) : (
+        </StateWrap>
+      )}
+
+      {showBrowse && (
         <>
           <Body>
+            {emptyDepartments && (
+              <StateDesc style={{ marginBottom: 12, textAlign: 'left' }}>
+                远程知识库已连接，但当前暂无部门分区。请联系管理员创建知识库分区。
+              </StateDesc>
+            )}
             <DepartmentSelector />
           </Body>
 
           <Footer>
             <UploadButton
               type="button"
-              disabled={importing || !selectedDepartmentId || !isAvailable || webUploadPending}
-              onClick={() => {
-                setImportError(null)
-                void importDocuments().catch((err: unknown) => {
-                  const msg = err instanceof Error ? err.message : String(err)
-                  setImportError(msg)
-                })
-              }}
+              disabled
+              title="Web 版知识库上传将在后续接入，目前可浏览远程知识库资料。"
             >
               <Upload size={13} />
-              <Cloud size={11} />
-              {importing ? '上传中...' : '上传文件'}
+              上传功能暂未开放
             </UploadButton>
-            <UploadNote>
-              {webUploadPending
-                ? 'Web 版知识库上传需要使用浏览器文件上传，将在下一步接入'
-                : '文件将上传到远程知识库（如不可用则导入本地）'}
+            <UploadNote title="Web 版知识库上传将在后续接入，目前可浏览远程知识库资料。">
+              Web 版知识库上传将在后续接入，目前可浏览远程知识库资料。
             </UploadNote>
-            {importError && (
-              <UploadNote style={{ color: '#c0392b' }}>{importError}</UploadNote>
-            )}
           </Footer>
         </>
       )}

@@ -1,12 +1,17 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { Department } from '../types/knowledge'
 import { platformApi } from '../platform'
+import { ApiFetchError } from '../platform/webPlatformApi'
+
+export type DepartmentErrorKind = 'none' | 'auth' | 'connection' | 'empty'
 
 interface DepartmentState {
   departments: Department[]
   selectedDepartmentId: string
   loading: boolean
   error: string | null
+  /** Distinguishes empty list vs auth vs remote connection failure */
+  errorKind: DepartmentErrorKind
   selectDepartment: (id: string) => void
   /** @deprecated Server-managed — kept for backward compat */
   createDepartment: (name: string, nameEn: string) => Promise<Department>
@@ -32,10 +37,12 @@ export function DepartmentProvider({ children }: { children: ReactNode }) {
   const [selectedDepartmentId, setSelectedDepartmentId] = useState<string>('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [errorKind, setErrorKind] = useState<DepartmentErrorKind>('none')
 
   const refresh = useCallback(async () => {
     setLoading(true)
     setError(null)
+    setErrorKind('none')
     try {
       const list: Department[] = await platformApi.departments.list()
       setDepartments(list)
@@ -45,10 +52,32 @@ export function DepartmentProvider({ children }: { children: ReactNode }) {
       const validId = list.find((d) => d.id === stored)?.id ?? list[0]?.id ?? ''
       setSelectedDepartmentId(validId)
       if (validId) localStorage.setItem(STORAGE_KEY, validId)
+      if (list.length === 0) {
+        setErrorKind('empty')
+      }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      setError(msg.includes('timeout') || msg.includes('abort') ? '连接超时' : '连接失败')
       setDepartments([])
+      if (err instanceof ApiFetchError) {
+        if (err.status === 401) {
+          setError('登录状态异常，请重新登录')
+          setErrorKind('auth')
+        } else if (err.status === 502 || err.status === 503) {
+          setError('连接失败：远程知识库服务不可用')
+          setErrorKind('connection')
+        } else {
+          setError(err.message || '连接失败')
+          setErrorKind('connection')
+        }
+      } else if (err instanceof TypeError) {
+        setError('连接失败：网络异常')
+        setErrorKind('connection')
+      } else {
+        const msg = err instanceof Error ? err.message : String(err)
+        setError(
+          msg.includes('timeout') || msg.includes('abort') ? '连接失败：请求超时' : msg || '连接失败',
+        )
+        setErrorKind('connection')
+      }
     } finally {
       setLoading(false)
     }
@@ -79,12 +108,13 @@ export function DepartmentProvider({ children }: { children: ReactNode }) {
     selectedDepartmentId,
     loading,
     error,
+    errorKind,
     selectDepartment,
     createDepartment: createDept,
     renameDepartment: renameDept,
     deleteDepartment: deleteDept,
     refresh,
-  }), [departments, selectedDepartmentId, loading, error, selectDepartment, createDept, renameDept, deleteDept, refresh])
+  }), [departments, selectedDepartmentId, loading, error, errorKind, selectDepartment, createDept, renameDept, deleteDept, refresh])
 
   return <DepartmentContext.Provider value={value}>{children}</DepartmentContext.Provider>
 }

@@ -11,11 +11,16 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import styled from 'styled-components'
-import { FolderOpen, Sparkles, BookOpen, Download } from 'lucide-react'
+import { FolderOpen, Sparkles, BookOpen, Download, Trash2, RefreshCw } from 'lucide-react'
 import MyFilesView from '../components/resource/MyFilesView'
 import RemoteKnowledgePanel from '../components/resource/RemoteKnowledgePanel'
 import { platformApi } from '../platform'
 import type { Artifact } from '../platform'
+import {
+  artifactDownloadFilename,
+  artifactHasExport,
+  artifactTypeLabel,
+} from '../utils/artifactDisplay'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -114,15 +119,21 @@ function ArtifactsTab() {
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [downloadError, setDownloadError] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [actionBusy, setActionBusy] = useState(false)
 
   const fetchArtifacts = useCallback(async () => {
     setLoading(true)
     setError(null)
+    setDownloadError(null)
     try {
       const list = await platformApi.artifacts.list()
       setArtifacts(list)
-    } catch {
-      setError('加载生成记录失败')
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '加载失败'
+      setError(`加载生成记录失败：${msg}`)
+      setArtifacts([])
     } finally {
       setLoading(false)
     }
@@ -130,8 +141,37 @@ function ArtifactsTab() {
 
   useEffect(() => { void fetchArtifacts() }, [fetchArtifacts])
 
-  const handleDownload = (artifact: Artifact) => {
-    void platformApi.artifacts.download(artifact.id, `${artifact.title}.docx`)
+  const handleDownload = async (artifact: Artifact) => {
+    const filename = artifactDownloadFilename(artifact)
+    if (!filename) {
+      setDownloadError('暂无可下载文件')
+      return
+    }
+    setDownloadError(null)
+    setActionBusy(true)
+    try {
+      await platformApi.artifacts.download(artifact.id, filename)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '下载失败'
+      setDownloadError(`下载失败：${msg}`)
+    } finally {
+      setActionBusy(false)
+    }
+  }
+
+  const handleDelete = async (artifact: Artifact) => {
+    if (!window.confirm(`确定删除「${artifact.title}」？`)) return
+    setDeletingId(artifact.id)
+    setDownloadError(null)
+    try {
+      await platformApi.artifacts.delete(artifact.id)
+      await fetchArtifacts()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '删除失败'
+      setDownloadError(`删除失败：${msg}`)
+    } finally {
+      setDeletingId(null)
+    }
   }
 
   if (loading) {
@@ -145,7 +185,18 @@ function ArtifactsTab() {
   if (error) {
     return (
       <PlaceholderWrap>
-        <div style={{ fontSize: 14, color: '#c0392b' }}>{error}</div>
+        <div style={{ fontSize: 14, color: '#c0392b', maxWidth: 320 }}>{error}</div>
+        <button
+          type="button"
+          onClick={() => void fetchArtifacts()}
+          style={{
+            marginTop: 8, padding: '8px 16px', borderRadius: 8,
+            border: '1px solid #c8d8e8', background: '#fff', cursor: 'pointer',
+            fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 6,
+          }}
+        >
+          <RefreshCw size={14} /> 重试
+        </button>
       </PlaceholderWrap>
     )
   }
@@ -163,53 +214,89 @@ function ArtifactsTab() {
   }
 
   return (
-    <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <thead>
-          <tr style={{ background: '#f7fafd', position: 'sticky', top: 0 }}>
-            {(['标题', '类型', '生成时间', '操作'] as const).map((h) => (
-              <th key={h} style={{
-                textAlign: 'left', padding: '8px 20px',
-                fontSize: 11, fontWeight: 700, color: '#8094a8',
-                textTransform: 'uppercase', letterSpacing: '0.06em',
-                borderBottom: '1px solid #e8eef5',
-              }}>{h}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {artifacts.map((a) => (
-            <tr key={a.id} style={{ borderBottom: '1px solid #f0f4f8' }}>
-              <td style={{ padding: '10px 20px' }}>
-                <div style={{ fontSize: 13, color: '#1a2f47', fontWeight: 500 }}>
-                  {a.title}
-                </div>
-              </td>
-              <td style={{ padding: '10px 20px', fontSize: 12, color: '#627385', whiteSpace: 'nowrap' }}>
-                {a.type === 'document' ? '文稿' : a.type}
-              </td>
-              <td style={{ padding: '10px 20px', fontSize: 12, color: '#627385', whiteSpace: 'nowrap' }}>
-                {fmtDate(a.createdAt)}
-              </td>
-              <td style={{ padding: '10px 20px' }}>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button
-                    onClick={() => handleDownload(a)}
-                    title="下载"
-                    style={{
-                      width: 30, height: 30, border: '1px solid #c8d8e8',
-                      borderRadius: 6, background: '#fff', cursor: 'pointer',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    }}
-                  >
-                    <Download size={13} color="#4a7fb5" />
-                  </button>
-                </div>
-              </td>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      {downloadError && (
+        <div style={{
+          flexShrink: 0, padding: '10px 20px', fontSize: 13, color: '#c0392b',
+          background: '#fff5f5', borderBottom: '1px solid #f5c6c6',
+        }}>
+          {downloadError}
+        </div>
+      )}
+      <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr style={{ background: '#f7fafd', position: 'sticky', top: 0 }}>
+              {(['标题', '类型', '生成时间', '操作'] as const).map((h) => (
+                <th key={h} style={{
+                  textAlign: 'left', padding: '8px 20px',
+                  fontSize: 11, fontWeight: 700, color: '#8094a8',
+                  textTransform: 'uppercase', letterSpacing: '0.06em',
+                  borderBottom: '1px solid #e8eef5',
+                }}>{h}</th>
+              ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {artifacts.map((a) => {
+              const canDownload = artifactHasExport(a)
+              return (
+                <tr key={a.id} style={{ borderBottom: '1px solid #f0f4f8' }}>
+                  <td style={{ padding: '10px 20px' }}>
+                    <div style={{ fontSize: 13, color: '#1a2f47', fontWeight: 500 }}>
+                      {a.title}
+                    </div>
+                  </td>
+                  <td style={{ padding: '10px 20px', fontSize: 12, color: '#627385', whiteSpace: 'nowrap' }}>
+                    {artifactTypeLabel(a.type)}
+                  </td>
+                  <td style={{ padding: '10px 20px', fontSize: 12, color: '#627385', whiteSpace: 'nowrap' }}>
+                    {fmtDate(a.createdAt)}
+                  </td>
+                  <td style={{ padding: '10px 20px' }}>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      {canDownload ? (
+                        <button
+                          type="button"
+                          onClick={() => void handleDownload(a)}
+                          disabled={actionBusy}
+                          title="下载"
+                          style={{
+                            width: 30, height: 30, border: '1px solid #c8d8e8',
+                            borderRadius: 6, background: '#fff',
+                            cursor: actionBusy ? 'not-allowed' : 'pointer',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            opacity: actionBusy ? 0.6 : 1,
+                          }}
+                        >
+                          <Download size={13} color="#4a7fb5" />
+                        </button>
+                      ) : (
+                        <span style={{ fontSize: 11, color: '#9aabb8' }}>暂无可下载文件</span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => void handleDelete(a)}
+                        disabled={deletingId === a.id}
+                        title="删除"
+                        style={{
+                          width: 30, height: 30, border: '1px solid #e8c8c8',
+                          borderRadius: 6, background: '#fff',
+                          cursor: deletingId === a.id ? 'not-allowed' : 'pointer',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          opacity: deletingId === a.id ? 0.6 : 1,
+                        }}
+                      >
+                        <Trash2 size={13} color="#c0392b" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

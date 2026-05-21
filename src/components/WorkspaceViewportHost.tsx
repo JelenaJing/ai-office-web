@@ -48,7 +48,9 @@ const ViewportSlot = styled.div<{ $active: boolean }>`
     : 'display: none;'}
 `
 
-type PanelKey = 'freewrite' | 'paper' | 'workbench' | 'email' | 'homework' | 'ai-class' | 'ai-forum' | 'data' | 'model' | 'daily-feed'
+type PanelKey =
+  | 'freewrite' | 'paper' | 'workbench' | 'email' | 'homework' | 'ai-class' | 'ai-forum'
+  | 'data' | 'model' | 'daily-feed' | 'image'
 
 const PANEL_WEB_FEATURE: Partial<Record<PanelKey, WebFeatureKey>> = {
   freewrite: 'docx.generate',
@@ -57,11 +59,13 @@ const PANEL_WEB_FEATURE: Partial<Record<PanelKey, WebFeatureKey>> = {
   email: 'email',
   data: 'excel.analysis',
   model: 'settings.ai',
+  image: 'image.generate',
 }
 
 function resolvePanelKey(mode: string, generationMode: string): PanelKey {
   if (mode === 'free') return 'freewrite'
   if (generationMode === 'document' || generationMode === 'daily-report') return 'paper'
+  if (generationMode === 'image') return 'image'
   if (generationMode === 'email') return 'email'
   if (generationMode === 'homework') return 'homework'
   if (generationMode === 'ai-class') return 'ai-class'
@@ -154,7 +158,7 @@ export default function WorkspaceViewportHost({ ghostTextEnabled }: WorkspaceVie
 
   const panelKeys: PanelKey[] = [
     'freewrite', 'paper', 'workbench', 'email', 'homework',
-    'ai-class', 'ai-forum', 'data', 'model', 'daily-feed',
+    'ai-class', 'ai-forum', 'data', 'model', 'daily-feed', 'image',
   ]
 
   return (

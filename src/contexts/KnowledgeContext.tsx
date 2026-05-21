@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import type { KnowledgeDocumentDetail, KnowledgeDocumentMeta, KnowledgeImportResult, KnowledgeLibraryInfo } from '../types/knowledge'
 import { useDepartment } from './DepartmentContext'
 import { platformApi } from '../platform'
+import { isWebShim } from '../platform/detect'
 
 interface KnowledgeState {
   info: KnowledgeLibraryInfo | null
@@ -64,6 +65,9 @@ export function KnowledgeProvider({ children }: { children: ReactNode }) {
   useEffect(() => { void refresh() }, [refresh])
 
   const importDocuments = useCallback(async (): Promise<KnowledgeImportResult> => {
+    if (isWebShim()) {
+      throw new Error('Web 版知识库上传暂未开放')
+    }
     setImporting(true)
     try {
       const result = await platformApi.knowledge.importDocuments(selectedDepartmentId)

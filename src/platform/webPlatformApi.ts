@@ -38,6 +38,17 @@ function authHeaders(): Record<string, string> {
 
 // ── HTTP helpers ──────────────────────────────────────────────────────────────
 
+/** Thrown by apiFetch when the server returns a non-2xx status. */
+export class ApiFetchError extends Error {
+  readonly status: number
+
+  constructor(status: number, message: string) {
+    super(message)
+    this.name = 'ApiFetchError'
+    this.status = status
+  }
+}
+
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
@@ -48,11 +59,11 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   })
   if (!res.ok) {
     const payload = await res.json().catch(() => ({ message: res.statusText }))
-    throw new Error(
+    const message =
       (payload as { message?: string; error?: string }).message ??
-        (payload as { error?: string }).error ??
-        res.statusText,
-    )
+      (payload as { error?: string }).error ??
+      res.statusText
+    throw new ApiFetchError(res.status, message)
   }
   return res.json() as Promise<T>
 }

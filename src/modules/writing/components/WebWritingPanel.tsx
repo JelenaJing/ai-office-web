@@ -12,6 +12,10 @@ import { Sparkles, Download, FileText, ArrowRight } from 'lucide-react'
 import { useWorkspace } from '../../../contexts/WorkspaceContext'
 import { platformApi } from '../../../platform'
 import type { Artifact } from '../../../platform'
+import {
+  artifactDownloadFilename,
+  artifactHasExport,
+} from '../../../utils/artifactDisplay'
 
 // ── Styled components ─────────────────────────────────────────────────────────
 
@@ -183,6 +187,17 @@ const SuccessBtns = styled.div`
   justify-content: center;
 `
 
+function fmtDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString('zh-CN', {
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit',
+    })
+  } catch {
+    return iso
+  }
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function WebWritingPanel() {
@@ -192,7 +207,11 @@ export default function WebWritingPanel() {
   const [prompt, setPrompt] = useState('')
   const [generating, setGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [downloadError, setDownloadError] = useState<string | null>(null)
   const [artifact, setArtifact] = useState<Artifact | null>(null)
+
+  const effectiveTitle = title.trim() || 'AI Office 文稿'
+  const promptEmpty = !prompt.trim()
 
   const handleGenerate = async () => {
     if (!activeWorkspacePath) {
@@ -205,11 +224,12 @@ export default function WebWritingPanel() {
     }
     setGenerating(true)
     setError(null)
+    setDownloadError(null)
     try {
       const result = await platformApi.skills.run('web.docx.create', {
         prompt: prompt.trim(),
         workspacePath: activeWorkspacePath,
-        params: { title: title.trim() || 'AI Office 文稿' },
+        params: { title: effectiveTitle },
       })
       if (!result.success) {
         setError(result.error ?? '生成失败，请重试')
@@ -217,6 +237,10 @@ export default function WebWritingPanel() {
       }
       if (!result.artifact) {
         setError('生成完成但未返回文稿记录，请稍后到资源中心查看')
+        return
+      }
+      if (!artifactHasExport(result.artifact)) {
+        setError('生成完成但暂无可下载文件，请到资源中心 › 生成记录查看或联系管理员')
         return
       }
       setArtifact(result.artifact)
@@ -231,8 +255,24 @@ export default function WebWritingPanel() {
   const handleReset = () => {
     setArtifact(null)
     setError(null)
+    setDownloadError(null)
     setPrompt('')
     setTitle('AI Office 文稿')
+  }
+
+  const handleDownload = async () => {
+    if (!artifact) return
+    const filename = artifactDownloadFilename(artifact)
+    if (!filename) {
+      setDownloadError('暂无可下载文件')
+      return
+    }
+    setDownloadError(null)
+    try {
+      await platformApi.artifacts.download(artifact.id, filename)
+    } catch (err) {
+      setDownloadError(err instanceof Error ? err.message : '下载失败')
+    }
   }
 
   return (
@@ -252,19 +292,22 @@ export default function WebWritingPanel() {
           {artifact ? (
             <SuccessCard>
               <SuccessEmoji>✅</SuccessEmoji>
-              <SuccessTitle>{artifact.title}</SuccessTitle>
+              <SuccessTitle>{artifact.title || effectiveTitle}</SuccessTitle>
               <SuccessHint>
-                已保存到 资源中心 › 生成记录，刷新后仍可查看和下载。
+                生成时间：{fmtDate(artifact.createdAt)}
               </SuccessHint>
+              <SuccessHint>
+                可在 <strong>资源中心 › 生成记录</strong> 查看和下载。
+              </SuccessHint>
+              {downloadError && <ErrorBox>{downloadError}</ErrorBox>}
               <SuccessBtns>
-                <PrimaryBtn
-                   onClick={() => void platformApi.artifacts.download(
-                    artifact.id,
-                    `${artifact.title}.docx`,
-                  )}
-                >
-                  <Download size={15} /> 下载 DOCX
-                </PrimaryBtn>
+                {artifactHasExport(artifact) ? (
+                  <PrimaryBtn onClick={() => void handleDownload()}>
+                    <Download size={15} /> 下载 DOCX
+                  </PrimaryBtn>
+                ) : (
+                  <ErrorBox>暂无可下载文件</ErrorBox>
+                )}
                 <SecondaryBtn onClick={handleReset}>
                   <Sparkles size={13} /> 再生成一篇
                 </SecondaryBtn>
@@ -309,8 +352,8 @@ export default function WebWritingPanel() {
                 <span style={{ fontSize: 11, color: '#aab8c8' }}>Ctrl+Enter 快速生成</span>
                 <PrimaryBtn
                   onClick={() => void handleGenerate()}
-                  disabled={generating || !prompt.trim()}
-                  $disabled={generating || !prompt.trim()}
+                  disabled={generating || promptEmpty}
+                  $disabled={generating || promptEmpty}
                 >
                   <Sparkles size={14} />
                   {generating ? 'AI 正在生成文稿，约需 10–60 秒…' : '生成 Word 文稿'}
