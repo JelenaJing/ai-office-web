@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import styled from 'styled-components'
 import { BookOpen, RefreshCw, Upload } from 'lucide-react'
 import { useDepartment } from '../../contexts/DepartmentContext'
+import { useKnowledge } from '../../contexts/KnowledgeContext'
 import { DepartmentSelector } from '../DepartmentSelector'
 import { isWebShim } from '../../platform/detect'
 
@@ -93,8 +94,9 @@ const UploadButton = styled.button`
   color: #1a56db;
   font-size: var(--font-size-xs);
   font-weight: 500;
-  cursor: not-allowed;
-  opacity: 0.55;
+  cursor: pointer;
+  &:hover:not(:disabled) { background: #d4e4fd; }
+  &:disabled { opacity: 0.45; cursor: not-allowed; }
 `
 
 const UploadNote = styled.div`
@@ -155,8 +157,23 @@ const RetryButton = styled.button`
 
 export default function RemoteKnowledgePanel() {
   const { departments, selectedDepartmentId, loading, error, errorKind, refresh } = useDepartment()
+  const { importing, importDocuments } = useKnowledge()
   const [retrying, setRetrying] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const webMode = isWebShim()
+
+  const handleFilesSelected = async (fileList: FileList | null) => {
+    if (!fileList?.length || !selectedDepartmentId) return
+    setUploadError(null)
+    try {
+      await importDocuments(Array.from(fileList))
+    } catch (e) {
+      setUploadError(e instanceof Error ? e.message : '上传失败')
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
 
   const handleRetry = async () => {
     setRetrying(true)
@@ -204,7 +221,7 @@ export default function RemoteKnowledgePanel() {
         </HeaderTop>
         <SubTitle>
           {webMode
-            ? 'Web 版知识库上传将在后续接入，目前可浏览远程知识库资料。'
+            ? '可浏览并上传文件到远程知识库（multipart 经服务器转发）。'
             : '来自服务器的部门共享知识库，可供团队协作使用。'}
         </SubTitle>
       </Header>
@@ -249,16 +266,29 @@ export default function RemoteKnowledgePanel() {
           </Body>
 
           <Footer>
+            {uploadError && (
+              <UploadNote style={{ color: '#c0392b', marginBottom: 8 }}>{uploadError}</UploadNote>
+            )}
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              style={{ display: 'none' }}
+              onChange={(e) => void handleFilesSelected(e.target.files)}
+            />
             <UploadButton
               type="button"
-              disabled
-              title="Web 版知识库上传将在后续接入，目前可浏览远程知识库资料。"
+              disabled={importing || !selectedDepartmentId}
+              onClick={() => {
+                if (webMode) fileInputRef.current?.click()
+                else void importDocuments()
+              }}
             >
               <Upload size={13} />
-              上传功能暂未开放
+              {importing ? '上传中…' : '上传文件到知识库'}
             </UploadButton>
-            <UploadNote title="Web 版知识库上传将在后续接入，目前可浏览远程知识库资料。">
-              Web 版知识库上传将在后续接入，目前可浏览远程知识库资料。
+            <UploadNote>
+              {webMode ? '支持多文件选择，上传后自动刷新列表' : '文件将上传到服务器知识库'}
             </UploadNote>
           </Footer>
         </>

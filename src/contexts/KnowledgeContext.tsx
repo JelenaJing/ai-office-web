@@ -18,7 +18,7 @@ interface KnowledgeState {
   departmentId: string
   setQuery: (value: string) => void
   refresh: () => Promise<void>
-  importDocuments: () => Promise<KnowledgeImportResult>
+  importDocuments: (files?: File[]) => Promise<KnowledgeImportResult>
   openDocument: (documentId: string | null) => Promise<void>
   toggleReferenceDocument: (documentId: string) => void
   selectReferenceDocuments: (documentIds: string[]) => void
@@ -64,13 +64,16 @@ export function KnowledgeProvider({ children }: { children: ReactNode }) {
   // Refresh when department changes
   useEffect(() => { void refresh() }, [refresh])
 
-  const importDocuments = useCallback(async (): Promise<KnowledgeImportResult> => {
-    if (isWebShim()) {
-      throw new Error('Web 版知识库上传暂未开放')
+  const importDocuments = useCallback(async (files?: File[]): Promise<KnowledgeImportResult> => {
+    if (isWebShim() && (!files || files.length === 0)) {
+      throw new Error('请选择要上传的文件')
     }
     setImporting(true)
     try {
-      const result = await platformApi.knowledge.importDocuments(selectedDepartmentId)
+      const result = await platformApi.knowledge.importDocuments(
+        selectedDepartmentId,
+        files,
+      )
       await refresh()
       return result
     } finally {
