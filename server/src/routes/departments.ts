@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { requireAuth } from '../middleware/authMiddleware'
+import { resolveUserId } from '../lib/authUser'
 import {
   applyPresetHierarchy,
   listKnowledgeBases,
@@ -7,10 +7,10 @@ import {
 
 const router = Router()
 
-router.use(requireAuth)
-
 /** GET /api/departments — remote knowledge base partitions as departments */
-router.get('/', async (_req, res) => {
+router.get('/', async (req, res) => {
+  const userId = await resolveUserId(req)
+
   try {
     const list = await listKnowledgeBases()
     const departments = applyPresetHierarchy(
@@ -23,10 +23,13 @@ router.get('/', async (_req, res) => {
         parentId: d.parentId,
       })),
     )
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[departments] list ok user=${userId} count=${departments.length}`)
+    }
     res.json({ departments })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    console.error('[departments] list failed:', msg)
+    console.error(`[departments] list failed user=${userId}:`, msg)
     res.status(502).json({ message: `远程知识库不可用：${msg}` })
   }
 })
