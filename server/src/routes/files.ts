@@ -22,6 +22,7 @@ import {
   getOrCreateDefaultWorkspace,
   workspaceDir,
 } from '../lib/workspaceStore'
+import { uploadRateLimit } from '../middleware/rateLimit'
 
 const router = Router()
 
@@ -118,7 +119,7 @@ function normalizeUploadedFilename(name: string): string {
 
 // ── POST /api/files/upload ────────────────────────────────────────────────────
 
-router.post('/upload', upload.single('file'), async (req, res) => {
+router.post('/upload', uploadRateLimit, upload.single('file'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ success: false, error: '未收到文件（字段名应为 "file"）' })
   }

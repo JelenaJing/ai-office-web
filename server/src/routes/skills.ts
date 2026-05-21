@@ -8,6 +8,7 @@
 
 import { Router } from 'express'
 import { runCreateDocxSkill } from '../skills/docx/createDocxSkill'
+import { skillRunRateLimit } from '../middleware/rateLimit'
 
 const router = Router()
 
@@ -70,7 +71,7 @@ router.get('/:skillId', (req, res) => {
 })
 
 // POST /api/skills/:skillId/run
-router.post('/:skillId/run', async (req, res) => {
+router.post('/:skillId/run', skillRunRateLimit, async (req, res) => {
   const { skillId } = req.params
 
   if (skillId === 'web.docx.create') {

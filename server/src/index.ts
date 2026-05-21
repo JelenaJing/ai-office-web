@@ -1,15 +1,43 @@
-import express from 'express'
+import express, { type Request, type Response, type NextFunction } from 'express'
 import cors from 'cors'
 import authRouter from './routes/auth'
 import skillsRouter from './routes/skills'
 import artifactsRouter from './routes/artifacts'
 import workspacesRouter from './routes/workspaces'
 import filesRouter from './routes/files'
+import {
+  globalRateLimit,
+  authRateLimit,
+} from './middleware/rateLimit'
 
 const app = express()
 const PORT = Number(process.env.PORT ?? 3001)
 
-// Allow requests from Vite dev server and production web origin
+// ── Request timeout ────────────────────────────────────────────────────────────
+// Long-running skill runs (AI generation) may take up to 90 s; everything else
+// should respond within 30 s. Clients should also have their own timeout.
+const REQUEST_TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS ?? 30_000)
+const SKILL_TIMEOUT_MS   = Number(process.env.SKILL_TIMEOUT_MS   ?? 90_000)
+
+function timeoutMiddleware(ms: number) {
+  return (_req: Request, res: Response, next: NextFunction) => {
+    const timer = setTimeout(() => {
+      if (!res.headersSent) {
+        res.status(503).json({ message: '请求超时，请重试。' })
+      }
+    }, ms)
+    res.on('finish', () => clearTimeout(timer))
+    res.on('close',  () => clearTimeout(timer))
+    next()
+  }
+}
+
+// ── Body size limit ────────────────────────────────────────────────────────────
+// Multipart uploads are handled by multer (50 MB limit set there).
+// JSON payloads should be small; cap at 2 MB to prevent abuse.
+app.use(express.json({ limit: '2mb' }))
+
+// ── CORS ───────────────────────────────────────────────────────────────────────
 app.use(
   cors({
     origin: [
@@ -19,10 +47,14 @@ app.use(
     ],
   }),
 )
-app.use(express.json())
 
-app.use('/api/auth', authRouter)
-app.use('/api/skills', skillsRouter)
+// ── Global middleware ──────────────────────────────────────────────────────────
+app.use('/api', globalRateLimit)
+app.use('/api', timeoutMiddleware(REQUEST_TIMEOUT_MS))
+
+app.use('/api/auth', authRateLimit, authRouter)
+// Skill runs can be slow (AI generation) — give them a longer timeout
+app.use('/api/skills', timeoutMiddleware(SKILL_TIMEOUT_MS - REQUEST_TIMEOUT_MS), skillsRouter)
 app.use('/api/artifacts', artifactsRouter)
 app.use('/api/workspaces', workspacesRouter)
 app.use('/api/files', filesRouter)
