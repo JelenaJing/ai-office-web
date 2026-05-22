@@ -1,7 +1,42 @@
 # Web Foundation Acceptance Report
 
 > Branch: `feat/web-module-boundaries`
-> Status: Pre-merge review
+> Latest commit: `d219b30`
+> Status: **Ready for merge review**
+
+## Build & Check Status（本轮验证结果）
+
+| 检查项 | 状态 | 说明 |
+|--------|------|------|
+| `npm run build:web` | ✅ PASS | Vite 构建干净，无错误 |
+| `npm run build:electron` | ✅ PASS | Electron 构建干净 |
+| `cd server && npm run build` | ✅ PASS | Server TSC 零错误 |
+| `npm run check:all` | ✅ PASS | 全链路通过 |
+| `npm run typecheck` | ⚠️ 57 errors | 全部为 pre-existing（源分支已存在），**本次重构未新增** |
+
+**typecheck 已知 pre-existing 问题文件（不影响 Web 部署）：**
+- `electron/main/index.ts` — 依赖外部 `introduction-remake-app` 模块（未 monorepo）
+- `src/modules/homework/`, `paper/`, `formal/` — 使用了 Electron-only API
+- `src/features/ppt/components/GenerationPromptComposer.tsx` — `outlinePlan` 类型不匹配
+- `src/features/email/components/CommunicationWorkbench.tsx` — 两处 prop 类型不匹配
+- `src/modules/feed/components/DailyMagazineDrawer.tsx` — 引用了不存在的文件
+- `src/modules/chat/ChatWindow.tsx` — ChatContact 类型不兼容
+
+---
+
+## Commit History（本分支）
+
+| Commit | 内容 |
+|--------|------|
+| `d219b30` | fix: repair Phase B re-export stubs and broken import paths for typecheck |
+| `f1be7b1` | fix: harden web foundation for production safety |
+| `119bf9c` | docs: audit feature module dependencies |
+| `5ea83d4` | docs: update phase B+C verification results in refactor plan |
+| `3d6a46d` | refactor: organize server features by office module |
+| `152684e` | refactor: organize web frontend features by office module |
+| `06650c6` | docs: define web module boundary refactor plan |
+
+---
 
 This document records the true Web availability status of each top-level feature. "可用" means a user can successfully complete the workflow entirely in the browser. "降级" means the feature works with reduced capability. "禁用" means the feature is not yet accessible from the web UI.
 
@@ -153,10 +188,21 @@ npm run check:all    # check:web + build:electron + check:server
 
 ---
 
+## 已知遗留问题（Pre-existing，非本次重构引入）
+
+| 文件 | 问题 | 优先级 | 说明 |
+|------|------|--------|------|
+| `src/features/ppt/components/GenerationPromptComposer.tsx` | 多处直接调用 `window.electronAPI` 无完整 web guard | P1 | PPT 生成在 Web 中执行 deckBuild 时会报错；需接入 platformApi ppt 路由 |
+| `src/features/document/services/WritingAssistantService.ts` | 直接调用 `window.electronAPI.writingAssistant` 无 guard | P1 | Web 下文档 AI 续写走 server skill 路由，但此服务未完全迁移 |
+| `src/features/ppt/ppt/retemplate/slotBinder.ts` | `bs.adaptation` possibly undefined | P2 | 运行时可能崩溃，与重构无关 |
+
+---
+
 ## 下一步建议
 
 1. **配置 `EMAIL_SECRET`**：生产环境部署时设置强随机值（建议 32 字节 hex）
 2. **Web 鉴权接入**：确保 `ACCOUNT_CENTER_URL` 正确配置，`requireAccountUser` 能正常验证 token
-3. **暂时入口清理**：后续 Sprint 可逐步删除 `WebXXXPanel` temporary 入口，统一使用新 feature module 组件
-4. **本地文件操作替代方案**：资源中心"选择工作区"可改为 Web 上传 + 云存储 workspace 方案
-5. **邮件 AI 增强**：Web 版邮件 AI 分拣可接入 platformApi skill 通道，替代 Electron writingAssistant IPC
+3. **PPT Web 迁移**：`GenerationPromptComposer` 中 `deckBuildFromPrompt`/`deckRender` 接入 `/api/ppt/build` platformApi 路由，替代 `window.electronAPI`
+4. **暂时入口清理**：后续 Sprint 可逐步删除 `WebXXXPanel` temporary 入口，统一使用新 feature module 组件
+5. **本地文件操作替代方案**：资源中心"选择工作区"可改为 Web 上传 + 云存储 workspace 方案
+6. **邮件 AI 增强**：Web 版邮件 AI 分拣可接入 platformApi skill 通道，替代 Electron writingAssistant IPC
