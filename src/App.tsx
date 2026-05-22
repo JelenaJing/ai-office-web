@@ -35,6 +35,7 @@ import SettingsView from './pages/SettingsView'
 import AccountView from './pages/AccountView'
 import SkillManagementView from './pages/SkillManagementView'
 import CalendarWorkspace from './pages/CalendarWorkspace'
+import AIOSHome from './features/aios/components/AIOSHome'
 import WebFeatureComingSoon from './components/WebFeatureComingSoon'
 import { isWebShim } from './platform/detect'
 import { isWebFeatureEnabled } from './platform/featureGate'
@@ -860,6 +861,11 @@ function WriterWorkspaceRuntime({
           {primarySection === 'home' && (
             <ScenarioArea>
               <HomeDashboard onNavigate={navigateTo} />
+            </ScenarioArea>
+          )}
+          {primarySection === 'aios' && (
+            <ScenarioArea>
+              <AIOSHome />
             </ScenarioArea>
           )}
           {primarySection === 'work' && (

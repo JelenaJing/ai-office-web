@@ -1,10 +1,10 @@
 import styled from 'styled-components'
 import React from 'react'
-import { Briefcase, BookOpen, Heart, FolderOpen, Settings, User, Home, MessageCircle, Puzzle } from 'lucide-react'
+import { Briefcase, BookOpen, Heart, FolderOpen, Settings, User, Home, MessageCircle, Puzzle, ClipboardList } from 'lucide-react'
 import { PRODUCT_FEATURES } from '../../config/productFeatures'
 
 // 'workspace' is kept for internal use (tool launch state), but is not a nav item
-export type PrimarySection = 'home' | 'work' | 'study' | 'life' | 'resource' | 'chat' | 'contacts' | 'workspace' | 'settings' | 'account' | 'skill-center' | 'calendar'
+export type PrimarySection = 'home' | 'work' | 'study' | 'life' | 'resource' | 'chat' | 'contacts' | 'workspace' | 'settings' | 'account' | 'skill-center' | 'calendar' | 'aios'
 
 interface PrimaryNavProps {
   section: PrimarySection
@@ -23,6 +23,7 @@ interface NavItemDef {
 /** 主导航项定义 — 通过 PRODUCT_FEATURES 统一控制是否渲染，不要直接删除此数组中的条目 */
 const TOP_NAV_ITEM_DEFS: NavItemDef[] = [
   { section: 'home',        label: '首页', title: '首页',      icon: Home,          featureKey: 'home' },
+  { section: 'aios',        label: '事项', title: 'AIOS 事项', icon: ClipboardList, featureKey: 'aios' },
   { section: 'work',        label: '工作', title: '工作',      icon: Briefcase,     featureKey: 'work' },
   { section: 'study',       label: '学习', title: '学习',      icon: BookOpen,      featureKey: 'learning' },
   { section: 'life',        label: '生活', title: '生活',      icon: Heart,         featureKey: 'life' },
