@@ -435,14 +435,22 @@ grep -R "window.electronAPI" src/features src/pages src/components --include="*.
 
 ## Verification Results
 
-> Updated after each phase
-
-### Phase A
+### Phase A — `06650c6`
 - Directory skeleton created: ✅
 - Docs created: ✅
 
-### Phase B
-_TBD after Phase B completes._
+### Phase B — `152684e`
+- Frontend build (`npm run build`): ✅ passed
+- All frontend source files moved with `git mv`
+- Re-export stubs at all old paths: ✅
+- Moved modules: document, ppt, data-analysis, email, image, calendar, report, resource-center, knowledge, settings, skill-center
 
-### Phase C
-_TBD after Phase C completes._
+### Phase C — `3d6a46d`
+- Server TypeScript (`npx tsc --noEmit`): ✅ passed
+- Frontend build recheck: ✅ passed
+- Moved server modules: document, ppt, data-analysis, email, image, calendar, report, knowledge, settings, skill-center
+- Re-export stubs at all old server paths: ✅
+
+### Boundary Check Results
+- `fetch('/api')` violations in features/pages/components: **none** (only in `src/platform/` and `src/runtime/` — approved)
+- `window.electronAPI` in features/: only in `src/features/ppt/components/GenerationPromptComposer.tsx` — pre-existing Electron code, not introduced by this refactor
