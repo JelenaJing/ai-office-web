@@ -2,7 +2,7 @@ import styled from 'styled-components'
 import { BookOpen, HardDrive, Upload } from 'lucide-react'
 import { useKnowledge } from '../../../contexts/KnowledgeContext'
 import { useDepartment } from '../../../contexts/DepartmentContext'
-import { DepartmentSelector } from '../DepartmentSelector'
+import { DepartmentSelector } from '../../../components/DepartmentSelector'
 
 // ---------------------------------------------------------------------------
 // Styled components

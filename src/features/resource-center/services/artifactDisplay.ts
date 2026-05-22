@@ -1,4 +1,4 @@
-import type { Artifact } from '../platform/types'
+import type { Artifact } from '../../../platform/types'
 
 /** Human-readable label for artifact.type on Web resource center. */
 export function artifactTypeLabel(type: string): string {

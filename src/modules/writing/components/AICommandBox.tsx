@@ -1,2 +1,2 @@
 // Compatibility re-export — moved to src/features/document/components/
-export { default } from '../../../features/document/components/AICommandBox'
+export * from '../../../features/document/components/AICommandBox'

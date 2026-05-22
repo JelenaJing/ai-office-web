@@ -5,7 +5,7 @@
  */
 import React from 'react'
 import styled from 'styled-components'
-import type { WorkflowTask } from '../../services/workflowClient'
+import type { WorkflowTask } from '../../../services/workflowClient'
 
 // ─── Styled components ────────────────────────────────────────────────────────
 

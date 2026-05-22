@@ -126,5 +126,4 @@ export function getDefaultTemplateSkill(): WebDocumentSkillManifest {
   return getBuiltinDocumentSkill('document.template.general')!
 }
 
-/** @deprecated 使用 applyTemplateManifestToSession */
-export const applyTemplateToSession = applyTemplateManifestToSession
+// applyTemplateToSession is re-exported from webDocumentTypes — see that module directly.

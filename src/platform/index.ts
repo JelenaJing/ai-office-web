@@ -21,6 +21,12 @@ export type {
   KnowledgeLibraryInfo,
   KnowledgeDocumentMeta,
   KnowledgeImportResult,
+  CalendarEvent,
+  EmailAccountInput,
+  EmailAccountState,
+  EmailMessageSummary,
+  EmailMessageDetail,
+  AiSettingsView,
 } from './types'
 
 import { detectPlatform } from './detect'

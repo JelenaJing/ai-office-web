@@ -5,10 +5,10 @@ import { isWebShim } from '../../../platform/detect'
 import { platformApi } from '../../../platform'
 import type {
   EmailAccountConfig,
-  EmailAccountInput,
   MailItem,
 } from '../../../types/email'
 import type {
+  EmailAccountInput,
   EmailAccountState,
   EmailMessageDetail,
   EmailMessageSummary,

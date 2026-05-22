@@ -7,7 +7,7 @@
  *
  * No React hooks, no side-effects: this is just type conversion.
  */
-import type { MailItem } from '../../types/email'
+import type { MailItem } from '../../../types/email'
 import type { CommunicationThread, CommunicationMessage } from '../types'
 
 /** Prefix used for all email thread/message IDs. */

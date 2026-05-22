@@ -183,8 +183,8 @@ function filterEvents(events: CalendarEvent[], filter: CalendarFilterKey, weekAn
   const { start, end } = weekRange(weekAnchor)
   return events.filter((event) => {
     const eventStart = safeDate(event.startTime)
-    if (filter === 'today') return Boolean(eventStart) && sameDay(eventStart, now)
-    if (filter === 'week') return Boolean(eventStart) && eventStart >= start && eventStart < end
+    if (filter === 'today') return Boolean(eventStart) && sameDay(eventStart!, now)
+    if (filter === 'week') return Boolean(eventStart) && eventStart! >= start && eventStart! < end
     if (filter === 'pending') return event.status === 'tentative' || event.needsUserConfirmation === true
     if (filter === 'from-email') return event.source === 'email_ai' || event.source === 'email_user_confirmed'
     if (filter === 'conflict') return Boolean(event.conflictEventIds?.length)

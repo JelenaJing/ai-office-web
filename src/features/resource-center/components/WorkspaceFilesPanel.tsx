@@ -2,7 +2,7 @@ import { useState } from 'react'
 import styled from 'styled-components'
 import { Folder, FolderOpen, FolderPlus } from 'lucide-react'
 import { useWorkspace } from '../../../contexts/WorkspaceContext'
-import FileExplorer from '../FileExplorer'
+import FileExplorer from '../../../components/FileExplorer'
 import { isWebShim } from '../../../platform/detect'
 
 // ---------------------------------------------------------------------------

@@ -1693,7 +1693,7 @@ async function retrieveEmailReplyKnowledgeSnippets(
 function buildConflictTarget(
   triage: AiMailTriageResult,
   candidateTime?: NonNullable<NonNullable<AiMailTriageResult['timeIntent']>['candidateTimes']>[number],
-): Pick<import('../calendar/types').CalendarEvent, 'id' | 'startTime' | 'endTime' | 'allDay' | 'eventType'> | null {
+): Pick<import('../../../calendar/types').CalendarEvent, 'id' | 'startTime' | 'endTime' | 'allDay' | 'eventType'> | null {
   const intent = triage.timeIntent
   if (!intent?.hasTimeRequirement) return null
   const startTime = candidateTime?.startTime || (intent.type === 'deadline' ? intent.deadlineTime : intent.startTime)
