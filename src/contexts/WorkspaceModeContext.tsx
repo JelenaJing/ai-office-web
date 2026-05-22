@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { logWebWorkbenchModeChange } from '../platform/webWorkbenchDebug'
 
 export type WorkspaceMode = 'free' | 'generation'
 export type GenerationMode = 'document' | 'image' | 'ppt' | 'email' | 'daily-report' | 'homework' | 'ai-class' | 'ai-forum' | 'paper' | 'data' | 'model' | 'daily-feed'
@@ -76,7 +77,8 @@ export function WorkspaceModeProvider({ children }: { children: ReactNode }) {
   const enterFreeMode = useCallback(() => {
     setModeState('free')
     try { localStorage.setItem('aioffice.workspaceMode', 'free') } catch { /* ignore */ }
-  }, [])
+    logWebWorkbenchModeChange('enterFreeMode', 'free', generationMode)
+  }, [generationMode])
 
   const enterGenerationMode = useCallback((nextMode: GenerationMode) => {
     setGenerationModeState(nextMode)
@@ -103,6 +105,7 @@ export function WorkspaceModeProvider({ children }: { children: ReactNode }) {
     setGenerationModeState('image')
     setModeState('generation')
     try { localStorage.setItem('aioffice.generationMode', 'image'); localStorage.setItem('aioffice.workspaceMode', 'generation') } catch { /* ignore */ }
+    logWebWorkbenchModeChange('enterImageGenerationMode', 'generation', 'image')
   }, [])
 
   const enterPptGenerationMode = useCallback(() => {
@@ -151,6 +154,7 @@ export function WorkspaceModeProvider({ children }: { children: ReactNode }) {
     setGenerationModeState('data')
     setModeState('generation')
     try { localStorage.setItem('aioffice.generationMode', 'data'); localStorage.setItem('aioffice.workspaceMode', 'generation') } catch { /* ignore */ }
+    logWebWorkbenchModeChange('enterDataMode', 'generation', 'data')
   }, [])
 
   const enterModelMode = useCallback(() => {

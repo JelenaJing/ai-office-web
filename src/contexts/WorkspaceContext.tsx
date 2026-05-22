@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { isWebShim } from '../platform/detect'
 import { platformApi } from '../platform'
+import type { WorkspaceInfo as PlatformWorkspaceInfo } from '../platform/types'
 
 export interface FileTreeNode {
   name: string
@@ -24,6 +25,7 @@ interface WorkspaceState {
   activeWorkspacePath: string | null
   activeWorkspaceName: string | null
   initialized: boolean
+  initError: string | null
   fileTree: FileTreeNode[]
   fileTreeData: FileTreeNode[]
   workspaces: WorkspaceInfo[]
@@ -36,6 +38,7 @@ interface WorkspaceState {
   refreshTree: () => Promise<void>
   refreshWorkspaces: () => Promise<void>
   deleteWorkspace: (wsPath: string) => Promise<void>
+  initializeDefaultWorkspace: () => Promise<void>
 }
 
 const WorkspaceContext = createContext<WorkspaceState | null>(null)
@@ -46,23 +49,87 @@ export function useWorkspace(): WorkspaceState {
   return ctx
 }
 
+function workspaceNameFromToken(wsPath: string, fallback?: string): string {
+  if (fallback) return fallback
+  const parts = wsPath.split(':')
+  return parts[parts.length - 1] || wsPath
+}
+
+function toWorkspaceInfo(ws: PlatformWorkspaceInfo): WorkspaceInfo {
+  return {
+    name: ws.name,
+    path: ws.path,
+    hasDocument: true,
+    modifiedAt: new Date().toISOString(),
+  }
+}
+
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [workspaceRoot, setWorkspaceRoot] = useState<string | null>(null)
   const [projectRoot, setProjectRoot] = useState<string | null>(null)
   const [activeWorkspacePath, setActiveWorkspacePath] = useState<string | null>(null)
   const [activeWorkspaceName, setActiveWorkspaceName] = useState<string | null>(null)
   const [initialized, setInitialized] = useState(false)
+  const [initError, setInitError] = useState<string | null>(null)
   const [fileTree, setFileTree] = useState<FileTreeNode[]>([])
   const [workspaces, setWorkspaces] = useState<WorkspaceInfo[]>([])
   const [loading, setLoading] = useState(false)
 
+  const applyWebWorkspace = useCallback((ws: PlatformWorkspaceInfo) => {
+    const name = ws.name || '默认工作区'
+    const wsPath = ws.path
+    setWorkspaceRoot(wsPath)
+    setProjectRoot(wsPath)
+    setActiveWorkspacePath(wsPath)
+    setActiveWorkspaceName(name)
+    setFileTree([])
+    setWorkspaces([toWorkspaceInfo({ ...ws, name, path: wsPath })])
+  }, [])
+
+  const initializeDefaultWorkspace = useCallback(async () => {
+    if (!isWebShim()) return
+    setLoading(true)
+    setInitError(null)
+    try {
+      let ws = await platformApi.workspaces.getDefault()
+      if (!ws?.path) {
+        ws = await platformApi.workspaces.create('默认工作区')
+      }
+      if (!ws?.path) {
+        throw new Error('服务器未返回有效的工作区路径')
+      }
+      applyWebWorkspace(ws)
+      setInitError(null)
+      setInitialized(true)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setInitError(message || '默认工作区初始化失败')
+      setInitialized(true)
+    } finally {
+      setLoading(false)
+    }
+  }, [applyWebWorkspace])
+
   const refreshWorkspaces = useCallback(async () => {
+    if (isWebShim()) {
+      try {
+        const list = await platformApi.workspaces.list()
+        if (list.length > 0) {
+          setWorkspaces(list.map((w) => toWorkspaceInfo(w)))
+        }
+      } catch {
+        // 保留当前列表，避免覆盖已打开的工作区
+      }
+      return
+    }
+
     const list = await window.electronAPI.listWorkspaces()
     setWorkspaces(list as WorkspaceInfo[])
     setInitialized(true)
   }, [])
 
   const refreshTree = useCallback(async () => {
+    if (isWebShim()) return
     if (!activeWorkspacePath) return
     const tree = await window.electronAPI.getWorkspaceTree(activeWorkspacePath)
     setFileTree(tree as FileTreeNode[])
@@ -71,6 +138,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const createWorkspace = useCallback(async (name: string, parentDir?: string) => {
     setLoading(true)
     try {
+      if (isWebShim()) {
+        const result = await platformApi.workspaces.create(name)
+        await refreshWorkspaces()
+        return result.path
+      }
       const result = await window.electronAPI.createWorkspace(name, parentDir)
       await refreshWorkspaces()
       return result.path
@@ -80,6 +152,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, [refreshWorkspaces])
 
   const renameWorkspace = useCallback(async (wsPath: string, nextName: string) => {
+    if (isWebShim()) {
+      throw new Error('Web 版不支持重命名本地工作区目录')
+    }
     setLoading(true)
     try {
       const result = await window.electronAPI.renameWorkspace(wsPath, nextName)
@@ -99,6 +174,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, [activeWorkspacePath, refreshWorkspaces])
 
   const registerWorkspace = useCallback(async (wsPath: string) => {
+    if (isWebShim()) {
+      throw new Error('Web 版不支持注册本地工作区目录')
+    }
     setLoading(true)
     try {
       const result = await window.electronAPI.registerWorkspace(wsPath)
@@ -112,14 +190,24 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const openWorkspace = useCallback(async (wsPath: string) => {
     setLoading(true)
     try {
+      if (isWebShim()) {
+        const known = workspaces.find((w) => w.path === wsPath)
+        const name = known?.name ?? workspaceNameFromToken(wsPath)
+        setWorkspaceRoot(wsPath)
+        setProjectRoot(wsPath)
+        setActiveWorkspacePath(wsPath)
+        setActiveWorkspaceName(name)
+        setFileTree([])
+        setInitError(null)
+        return
+      }
+
       const tree = await window.electronAPI.getWorkspaceTree(wsPath)
       setWorkspaceRoot(wsPath)
       setProjectRoot(wsPath)
       setActiveWorkspacePath(wsPath)
       setActiveWorkspaceName(wsPath.split(/[/\\]/).pop() || wsPath)
       setFileTree(tree as FileTreeNode[])
-      // Fire-and-forget: attempt to load document.json and notify the editor so
-      // it can restore persisted content without blocking the open flow.
       void (async () => {
         try {
           const api = window.electronAPI
@@ -142,7 +230,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [workspaces])
 
   const closeWorkspace = useCallback(() => {
     setWorkspaceRoot(null)
@@ -153,7 +241,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const deleteWorkspace = useCallback(async (wsPath: string) => {
-    await window.electronAPI.deleteWorkspace(wsPath)
+    if (isWebShim()) {
+      await platformApi.workspaces.delete(wsPath)
+    } else {
+      await window.electronAPI.deleteWorkspace(wsPath)
+    }
     if (activeWorkspacePath === wsPath) {
       closeWorkspace()
     }
@@ -161,24 +253,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, [activeWorkspacePath, closeWorkspace, refreshWorkspaces])
 
   useEffect(() => {
+    if (isWebShim()) {
+      void initializeDefaultWorkspace()
+      return
+    }
     void refreshWorkspaces()
-  }, [refreshWorkspaces])
-
-  // Auto-open default workspace in web mode so the user skips WorkspaceGate
-  useEffect(() => {
-    if (!initialized) return
-    if (activeWorkspacePath) return
-    if (!isWebShim()) return
-
-    void platformApi.workspaces
-      .getDefault()
-      .then(ws => {
-        if (ws.path) void openWorkspace(ws.path)
-      })
-      .catch(() => {
-        // Non-critical — WorkspaceGate will appear as fallback
-      })
-  }, [initialized, activeWorkspacePath, openWorkspace])
+  }, [initializeDefaultWorkspace, refreshWorkspaces])
 
   const contextValue = useMemo<WorkspaceState>(() => ({
     workspaceRoot,
@@ -186,6 +266,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     activeWorkspacePath,
     activeWorkspaceName,
     initialized,
+    initError,
     fileTree,
     fileTreeData: fileTree,
     workspaces,
@@ -198,12 +279,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     refreshTree,
     refreshWorkspaces,
     deleteWorkspace,
+    initializeDefaultWorkspace,
   }), [
     workspaceRoot,
     projectRoot,
     activeWorkspacePath,
     activeWorkspaceName,
     initialized,
+    initError,
     fileTree,
     workspaces,
     loading,
@@ -215,6 +298,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     refreshTree,
     refreshWorkspaces,
     deleteWorkspace,
+    initializeDefaultWorkspace,
   ])
 
   return (

@@ -159,11 +159,17 @@ export function SceneFeatureRow({
   actionLabel = '进入',
   onClick,
 }: SceneFeatureRowProps) {
-  const isDisabled = status === 'comingSoon' || status === 'disabled'
+  const isDisabled = status === 'disabled'
+  const isComingSoon = status === 'comingSoon'
   const badge = statusLabel(status)
 
   return (
-    <Row $disabled={isDisabled} $accent={accent} onClick={isDisabled ? undefined : onClick}>
+    <Row
+      $disabled={isDisabled}
+      $accent={accent}
+      onClick={isDisabled ? undefined : onClick}
+      style={isComingSoon ? { opacity: 0.92, cursor: onClick ? 'pointer' : 'default' } : undefined}
+    >
       <IconWrap $accent={accent}>{icon}</IconWrap>
       <Body>
         <TitleRow>

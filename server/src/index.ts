@@ -5,6 +5,14 @@ import skillsRouter from './routes/skills'
 import artifactsRouter from './routes/artifacts'
 import workspacesRouter from './routes/workspaces'
 import filesRouter from './routes/files'
+import departmentsRouter from './routes/departments'
+import knowledgeRouter from './routes/knowledge'
+import emailRouter from './routes/email'
+import calendarRouter from './routes/calendar'
+import settingsRouter from './routes/settings'
+import storeRouter from './routes/store'
+import { aiosRouter } from './features/aios'
+import documentRouter from './features/document/routes'
 import {
   globalRateLimit,
   authRateLimit,
@@ -52,6 +60,7 @@ app.use(
 app.use('/api', globalRateLimit)
 
 // Skill runs first — must not pass through the 30s /api timeout below
+app.use('/api/skills/store', storeRouter)
 app.use('/api/skills', timeoutMiddleware(SKILL_TIMEOUT_MS), skillsRouter)
 
 app.use('/api', timeoutMiddleware(REQUEST_TIMEOUT_MS))
@@ -60,6 +69,13 @@ app.use('/api/auth', authRateLimit, authRouter)
 app.use('/api/artifacts', artifactsRouter)
 app.use('/api/workspaces', workspacesRouter)
 app.use('/api/files', filesRouter)
+app.use('/api/departments', departmentsRouter)
+app.use('/api/knowledge', knowledgeRouter)
+app.use('/api/email', emailRouter)
+app.use('/api/calendar', calendarRouter)
+app.use('/api/settings', settingsRouter)
+app.use('/api/aios', aiosRouter)
+app.use('/api/document', documentRouter)
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() })

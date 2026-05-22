@@ -1,0 +1,13 @@
+// knowledge module — Web feature boundary
+export { default as KnowledgeConversationDock } from './components/KnowledgeConversationDock'
+export { default as KnowledgeSelectionDock } from './components/KnowledgeSelectionDock'
+export { default as PersonalLibrarySidebar } from './components/PersonalLibrarySidebar'
+export { default as KnowledgeTaskSelector } from './components/KnowledgeTaskSelector'
+export { default as RemoteKnowledgePanel } from './components/RemoteKnowledgePanel'
+export { KnowledgeChipBar } from './components/KnowledgeChipBar'
+export type { KnowledgeChipBarProps } from './components/KnowledgeChipBar'
+export { KnowledgeTreePicker } from './components/KnowledgeTreePicker'
+export type { KnowledgeTreePickerProps } from './components/KnowledgeTreePicker'
+export * from './contexts/KnowledgeContext'
+export * from './contexts/DepartmentContext'
+export * from './services/knowledgeWorkspace'

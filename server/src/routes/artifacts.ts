@@ -6,38 +6,16 @@
  *
  * Ownership check: the requesting user must match artifact.userId.
  * userId is resolved from Bearer token via AccountCenter /api/auth/me.
- * Falls back to 'web-demo-user' when no token is present (dev only).
+ * In production: missing/invalid token → 401. In dev: falls back to web-demo-user.
  */
 
 import { Router } from 'express'
-import type { Request } from 'express'
 import path from 'path'
 import fs from 'fs'
 import { getArtifact, getArtifactFilePath, listArtifactsByUser } from '../artifacts/ArtifactStore'
+import { requireAccountUser } from '../lib/authUser'
 
 const router = Router()
-
-const AC_URL = process.env.ACCOUNT_CENTER_URL ?? 'http://10.20.5.61:13100'
-const DEV_FALLBACK_USER = 'web-demo-user'
-
-// ── userId resolution (mirrors workspaces.ts) ─────────────────────────────────
-
-async function resolveUserId(req: Request): Promise<string> {
-  const auth = req.headers['authorization']
-  if (!auth || !auth.startsWith('Bearer ')) return DEV_FALLBACK_USER
-  try {
-    const resp = await fetch(`${AC_URL}/api/auth/me`, {
-      headers: { Authorization: auth },
-      signal: AbortSignal.timeout(5000),
-    })
-    if (!resp.ok) return DEV_FALLBACK_USER
-    const data = await resp.json() as { id?: string; userId?: string; user?: { id?: string } }
-    const uid = data.id ?? data.userId ?? data.user?.id
-    return uid ? String(uid) : DEV_FALLBACK_USER
-  } catch {
-    return DEV_FALLBACK_USER
-  }
-}
 
 // ── Content-Type map ──────────────────────────────────────────────────────────
 
@@ -46,13 +24,16 @@ const CONTENT_TYPES: Record<string, string> = {
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   pdf: 'application/pdf',
+  md: 'text/markdown; charset=utf-8',
+  csv: 'text/csv; charset=utf-8',
 }
 
 // ── GET /api/artifacts ────────────────────────────────────────────────────────
 // Returns the current user's artifacts, sorted newest-first.
 
 router.get('/', async (req, res) => {
-  const userId = await resolveUserId(req)
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
   const artifacts = listArtifactsByUser(userId)
   return res.json({ artifacts })
 })
@@ -65,7 +46,8 @@ router.get('/:artifactId', async (req, res) => {
     return res.status(404).json({ message: 'Artifact not found', artifactId: req.params.artifactId })
   }
   // Ownership check
-  const userId = await resolveUserId(req)
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
   if (artifact.userId && artifact.userId !== userId) {
     return res.status(403).json({ message: 'Access denied' })
   }
@@ -83,26 +65,29 @@ router.get('/:artifactId/download', async (req, res) => {
   }
 
   // Ownership check — reject cross-user downloads
-  const userId = await resolveUserId(req)
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
   if (artifact.userId && artifact.userId !== userId) {
     return res.status(403).json({ message: 'Access denied: artifact belongs to another user' })
   }
 
-  const docxExport = artifact.exports.find((e) => e.format === 'docx')
+  const exportEntry =
+    artifact.exports.find((e) => e.format === 'docx')
+    ?? artifact.exports.find((e) => e.format === 'md')
     ?? artifact.exports[0]
 
-  if (!docxExport) {
+  if (!exportEntry) {
     return res.status(404).json({ message: 'No downloadable export found', artifactId })
   }
 
-  const filePath = getArtifactFilePath(artifactId, docxExport.filename)
+  const filePath = getArtifactFilePath(artifactId, exportEntry.filename)
   if (!filePath || !fs.existsSync(filePath)) {
     return res.status(404).json({ message: 'Artifact file missing on disk', artifactId })
   }
 
-  const ext = path.extname(docxExport.filename).slice(1).toLowerCase()
+  const ext = path.extname(exportEntry.filename).slice(1).toLowerCase()
   const contentType = CONTENT_TYPES[ext] ?? 'application/octet-stream'
-  const encodedName = encodeURIComponent(artifact.title + '.' + ext)
+  const encodedName = encodeURIComponent(exportEntry.filename)
 
   res.setHeader('Content-Type', contentType)
   res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodedName}`)

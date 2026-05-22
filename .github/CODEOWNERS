@@ -1,0 +1,11 @@
+# Replace placeholder owners with real GitHub usernames or teams before enforcing reviews.
+
+/src/features/document/ @document-owner
+/src/features/ppt/ @ppt-owner
+/src/features/email/ @email-owner
+/src/features/aios/ @aios-owner
+/src/bridges/document-to-ppt/ @document-owner @ppt-owner
+/src/core/contracts/ @core-owner
+/server/src/features/document/ @document-owner
+/server/src/features/ppt/ @ppt-owner
+/server/src/features/aios/ @aios-owner

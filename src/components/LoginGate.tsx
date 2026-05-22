@@ -170,6 +170,7 @@ export default function LoginGate() {
   const submitting = state.phase === 'loading'
   const errorMsg = state.phase === 'error' ? state.message : null
   const isExpiredMsg = !!errorMsg?.includes('登录已过期')
+  const isRateLimitMsg = !!errorMsg?.includes('过于频繁')
 
   // Auto-focus username field when shown
   useEffect(() => {
@@ -231,8 +232,16 @@ export default function LoginGate() {
             />
           </Field>
 
-          {errorMsg && !isExpiredMsg && (
+          {errorMsg && !isExpiredMsg && !isRateLimitMsg && (
             <ErrorBox>{errorMsg}</ErrorBox>
+          )}
+
+          {isRateLimitMsg && (
+            <ErrorBox $warn>
+              ⏱ 登录请求过于频繁，请稍后再试。
+              <br />
+              开发环境可在 server/.env.local 中设置 <code style={{ fontSize: '0.9em' }}>RATE_LIMIT_AUTH_SKIP_LOCALHOST=true</code> 或 <code style={{ fontSize: '0.9em' }}>RATE_LIMIT_AUTH_DISABLED=true</code>。
+            </ErrorBox>
           )}
 
           <LoginBtn type="submit" disabled={submitting || !username.trim() || !password}>

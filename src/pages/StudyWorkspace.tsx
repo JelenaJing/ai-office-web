@@ -5,6 +5,9 @@ import {
 } from 'lucide-react'
 import { useWorkspaceMode } from '../contexts/WorkspaceModeContext'
 import { SceneFeatureRow } from '../components/scene/SceneFeatureRow'
+import { runWebFeatureAction, sceneStatusForWebFeature } from '../platform/useWebFeatureAction'
+import { logWebWorkbenchEntry } from '../platform/webWorkbenchDebug'
+import { isWebShim } from '../platform/detect'
 
 interface StudyWorkspaceProps {
   onGoToWorkspace: () => void
@@ -50,10 +53,18 @@ export default function StudyWorkspace({ onGoToWorkspace }: StudyWorkspaceProps)
     enterHomeworkMode,
     enterAiClassMode,
     enterDocumentGenerationMode,
+    enterDailyReportMode,
     enterImageGenerationMode,
   } = useWorkspaceMode()
 
   const go = (fn: () => void) => { fn(); onGoToWorkspace() }
+
+  const block = () => { /* SceneFeatureRow shows comingSoon; no navigation */ }
+
+  const enterFeature = (feature: string, method: string, fn: () => void) => {
+    logWebWorkbenchEntry(feature, { method, scene: 'study' })
+    go(fn)
+  }
 
   return (
     <Page>
@@ -68,33 +79,40 @@ export default function StudyWorkspace({ onGoToWorkspace }: StudyWorkspaceProps)
           title="作业解析"
           description="上传或输入题目，获得解题思路、步骤和答案"
           accent="green"
+          status={sceneStatusForWebFeature('knowledge')}
           actionLabel="作业解析"
-          onClick={() => go(enterHomeworkMode)}
+          onClick={() => runWebFeatureAction('knowledge', () => go(enterHomeworkMode), block)}
         />
         <SceneFeatureRow
           icon={<GraduationCap size={24} />}
           title="AI 课堂"
           description="进入课程学习和 AI 辅助讲解，需要网络连接"
           accent="green"
-          status="requiresNetwork"
+          status={sceneStatusForWebFeature('knowledge')}
           actionLabel="进入课堂"
-          onClick={() => go(enterAiClassMode)}
+          onClick={() => runWebFeatureAction('knowledge', () => go(enterAiClassMode), block)}
         />
         <SceneFeatureRow
           icon={<ScrollText size={24} />}
           title="论文写作"
           description="生成论文初稿、修改论文结构和整理参考文献"
           accent="blue"
+          status={sceneStatusForWebFeature('daily.report')}
           actionLabel="论文写作"
-          onClick={() => go(enterDocumentGenerationMode)}
+          onClick={() => runWebFeatureAction(
+            'daily.report',
+            () => go(isWebShim() ? enterDailyReportMode : enterDocumentGenerationMode),
+            block,
+          )}
         />
         <SceneFeatureRow
           icon={<BarChart2 size={24} />}
           title="数据图表"
           description="生成科研图表和数据可视化，辅助科研汇报"
           accent="blue"
+          status={sceneStatusForWebFeature('image.generate')}
           actionLabel="生成图表"
-          onClick={() => go(enterImageGenerationMode)}
+          onClick={() => runWebFeatureAction('image.generate', () => enterFeature('数据图表', 'enterImageGenerationMode', enterImageGenerationMode), block)}
         />
         <SceneFeatureRow
           icon={<FolderOpen size={24} />}

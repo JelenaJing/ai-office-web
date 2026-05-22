@@ -8,6 +8,17 @@ import type {
   SkillInfo,
   SkillInput,
   SkillResult,
+  Department,
+  KnowledgeLibraryInfo,
+  KnowledgeDocumentMeta,
+  KnowledgeImportResult,
+  CalendarEvent,
+  EmailAccountState,
+  EmailAccountInput,
+  EmailMessageSummary,
+  EmailMessageDetail,
+  EmailSendInput,
+  AiSettingsView,
 } from './types'
 
 // ── Token storage ─────────────────────────────────────────────────────────────
@@ -34,6 +45,17 @@ function authHeaders(): Record<string, string> {
 
 // ── HTTP helpers ──────────────────────────────────────────────────────────────
 
+/** Thrown by apiFetch when the server returns a non-2xx status. */
+export class ApiFetchError extends Error {
+  readonly status: number
+
+  constructor(status: number, message: string) {
+    super(message)
+    this.name = 'ApiFetchError'
+    this.status = status
+  }
+}
+
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
@@ -44,11 +66,11 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   })
   if (!res.ok) {
     const payload = await res.json().catch(() => ({ message: res.statusText }))
-    throw new Error(
+    const message =
       (payload as { message?: string; error?: string }).message ??
-        (payload as { error?: string }).error ??
-        res.statusText,
-    )
+      (payload as { error?: string }).error ??
+      res.statusText
+    throw new ApiFetchError(res.status, message)
   }
   return res.json() as Promise<T>
 }
@@ -141,12 +163,19 @@ export const webPlatformApi: PlatformApi = {
 
   workspaces: {
     async getDefault(): Promise<WorkspaceInfo> {
-      const data = await apiFetch<{
-        success: boolean
-        workspace: { name: string; path: string; isDefault?: boolean }
-      }>('/api/workspaces/default')
-      const w = data.workspace
-      return { id: w.path, name: w.name, path: w.path, isDefault: w.isDefault }
+      try {
+        const data = await apiFetch<{
+          success: boolean
+          workspace: { name: string; path: string; isDefault?: boolean }
+        }>('/api/workspaces/default')
+        const w = data.workspace
+        if (w?.path) {
+          return { id: w.path, name: w.name, path: w.path, isDefault: w.isDefault }
+        }
+      } catch {
+        // fallback to create below
+      }
+      return webPlatformApi.workspaces.create('默认工作区')
     },
 
     async list(): Promise<WorkspaceInfo[]> {
@@ -236,6 +265,50 @@ export const webPlatformApi: PlatformApi = {
     },
   },
 
+  // ── excel ───────────────────────────────────────────────────────────────────
+
+  excel: {
+    async analyze(input: {
+      fileId: string
+      prompt?: string
+      options?: Record<string, unknown>
+      workspacePath?: string
+    }): Promise<{
+      artifactId: string
+      title?: string
+      type?: string
+      artifact?: Artifact
+    }> {
+      let workspacePath = input.workspacePath
+      if (!workspacePath) {
+        const ws = await webPlatformApi.workspaces.getDefault()
+        workspacePath = ws.path
+      }
+      const result = await apiPost<SkillResult & { artifactId?: string }>(
+        `/api/skills/${encodeURIComponent('web.xlsx.analyze')}/run`,
+        {
+          workspacePath,
+          fileId: input.fileId,
+          prompt: input.prompt,
+          options: input.options,
+        },
+      )
+      if (!result.success) {
+        throw new Error(result.error ?? '表格分析失败')
+      }
+      const artifactId = result.artifactId ?? result.artifact?.id
+      if (!artifactId) {
+        throw new Error('分析完成但未返回生成记录')
+      }
+      return {
+        artifactId,
+        title: result.artifact?.title,
+        type: result.artifact?.type,
+        artifact: result.artifact,
+      }
+    },
+  },
+
   // ── skills ──────────────────────────────────────────────────────────────────
 
   skills: {
@@ -252,6 +325,137 @@ export const webPlatformApi: PlatformApi = {
     },
   },
 
+  // ── departments / remote knowledge ─────────────────────────────────────────
+
+  departments: {
+    async list(): Promise<Department[]> {
+      const data = await apiFetch<{ departments: Department[] }>('/api/departments')
+      return data.departments ?? []
+    },
+  },
+
+  knowledge: {
+    async getBaseInfo(departmentId: string): Promise<KnowledgeLibraryInfo> {
+      return apiFetch<KnowledgeLibraryInfo>(
+        `/api/knowledge/${encodeURIComponent(departmentId)}/info`,
+      )
+    },
+
+    async listDocuments(departmentId: string): Promise<KnowledgeDocumentMeta[]> {
+      const data = await apiFetch<{ documents: KnowledgeDocumentMeta[] }>(
+        `/api/knowledge/${encodeURIComponent(departmentId)}/documents`,
+      )
+      return data.documents ?? []
+    },
+
+    async importDocuments(
+      departmentId: string,
+      files?: File[],
+    ): Promise<KnowledgeImportResult> {
+      const form = new FormData()
+      if (files?.length) {
+        for (const file of files) {
+          form.append('files', file)
+        }
+      }
+      const res = await fetch(
+        `/api/knowledge/${encodeURIComponent(departmentId)}/import`,
+        {
+          method: 'POST',
+          headers: authHeaders(),
+          body: form,
+        },
+      )
+      const payload = await res.json().catch(() => ({
+        message: res.statusText,
+      })) as KnowledgeImportResult & { message?: string }
+      if (!res.ok) {
+        throw new Error(
+          payload.message ??
+            (payload as { error?: string }).error ??
+            `导入失败 (${res.status})`,
+        )
+      }
+      return payload
+    },
+
+    async deleteDocument(departmentId: string, documentId: string): Promise<void> {
+      await apiFetch<{ success: boolean }>(
+        `/api/knowledge/${encodeURIComponent(departmentId)}/documents/${encodeURIComponent(documentId)}`,
+        { method: 'DELETE' },
+      )
+    },
+  },
+
+  calendar: {
+    async listEvents(): Promise<CalendarEvent[]> {
+      const data = await apiFetch<{ events: CalendarEvent[] }>('/api/calendar/events')
+      return data.events ?? []
+    },
+    async createEvent(input: Omit<CalendarEvent, 'id'>): Promise<CalendarEvent> {
+      const data = await apiPost<{ event: CalendarEvent }>('/api/calendar/events', input)
+      return data.event
+    },
+    async updateEvent(id: string, patch: Partial<CalendarEvent>): Promise<CalendarEvent> {
+      const data = await apiFetch<{ event: CalendarEvent }>(
+        `/api/calendar/events/${encodeURIComponent(id)}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(patch),
+        },
+      )
+      return data.event
+    },
+    async deleteEvent(id: string): Promise<void> {
+      await apiFetch<{ success: boolean }>(
+        `/api/calendar/events/${encodeURIComponent(id)}`,
+        { method: 'DELETE' },
+      )
+    },
+  },
+
+  email: {
+    async getAccount(): Promise<EmailAccountState> {
+      return apiFetch<EmailAccountState>('/api/email/account')
+    },
+    async saveAccount(config: EmailAccountInput): Promise<EmailAccountState> {
+      return apiPost<EmailAccountState>('/api/email/account', config)
+    },
+    async testConnection(): Promise<{ ok: boolean; message: string }> {
+      return apiPost<{ ok: boolean; message: string }>('/api/email/test', {})
+    },
+    async listMessages(folder = 'inbox'): Promise<EmailMessageSummary[]> {
+      const data = await apiFetch<{ messages: EmailMessageSummary[] }>(
+        `/api/email/messages?folder=${encodeURIComponent(folder)}`,
+      )
+      return data.messages ?? []
+    },
+    async getMessage(id: string): Promise<EmailMessageDetail> {
+      return apiFetch<EmailMessageDetail>(
+        `/api/email/messages/${encodeURIComponent(id)}`,
+      )
+    },
+    async sendMessage(input: EmailSendInput): Promise<{ ok: boolean; message?: string }> {
+      return apiPost<{ ok: boolean; message?: string }>('/api/email/send', input)
+    },
+  },
+
+  settings: {
+    async getAi(): Promise<AiSettingsView> {
+      return apiFetch<AiSettingsView>('/api/settings/ai')
+    },
+    async testAi(): Promise<{ ok: boolean; message: string }> {
+      return apiPost<{ ok: boolean; message: string }>('/api/settings/ai/test', {})
+    },
+  },
+
+  store: {
+    async getEmbedUrl() {
+      return apiFetch<{ url: string }>('/api/skills/store/embed-url')
+    },
+  },
+
   // ── system ──────────────────────────────────────────────────────────────────
 
   system: {
@@ -264,11 +468,31 @@ export const webPlatformApi: PlatformApi = {
         'skills',
         'docx.create',
         'web.docx.create',
+        'web.document.generate',
+        'web.document.edit',
+        'web.knowledge.writing.legacy',
+        'web.template.document.generate.legacy',
+        'web.docx.export',
+        'web.markdown.export',
+        'web.pdf.export',
         'file.upload',
         'file.download',
         'file.delete',
         'artifact.list',
         'artifact.download',
+        'knowledge',
+        'departments',
+        'web.xlsx.analyze',
+        'excel.analyze',
+        'web.image.generate',
+        'image.generate',
+        'web.pptx.create',
+        'ppt.generate',
+        'email',
+        'calendar',
+        'web.daily.report',
+        'daily.report',
+        'settings.ai',
       ])
       return webFeatures.has(featureKey)
     },

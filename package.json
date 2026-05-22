@@ -15,6 +15,9 @@
     "build:web": "vite build --config vite.web.config.ts",
     "build:electron": "npm run sync:builtin-keys && vite build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "check:web": "npm run typecheck && npm run build:web",
+    "check:server": "cd server && npm run build",
+    "check:all": "npm run check:web && npm run build:electron && npm run check:server",
     "prepare:vosk-model": "node build/prepare-vosk-model.mjs",
     "prepare:plot-runtime:win": "powershell -ExecutionPolicy Bypass -File build/prepare-plot-runtime-win.ps1",
     "verify:plot-runtime:win": "node build/package-win.mjs --verify-only --with-plot-runtime",
@@ -99,7 +102,8 @@
     "package:win": "npm run build && node build/package-win.mjs",
     "package:win:with-plot-runtime": "npm run build && node build/package-win.mjs --with-plot-runtime",
     "package:win:full": "npm run package:win:with-plot-runtime",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "check:boundaries": "tsx scripts/check-module-boundaries.ts"
   },
   "dependencies": {
     "@tiptap/core": "^2.27.2",
@@ -151,6 +155,7 @@
     "concurrently": "^8.2.2",
     "electron": "^28.1.0",
     "electron-builder": "^24.9.1",
+    "tsx": "^4.22.3",
     "typescript": "^5.2.2",
     "vite": "^5.0.8",
     "vite-plugin-electron": "^0.15.5"

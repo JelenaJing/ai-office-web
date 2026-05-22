@@ -186,6 +186,78 @@ function parseJsonContent<T>(raw: string): T {
 }
 
 /**
+ * Invoke chat/completions and return plain-text assistant message.
+ */
+export async function invokeLlmText(
+  messages: LlmMessage[],
+  options?: LlmInvokeOptions,
+): Promise<string> {
+  const runtime = resolveRuntime()
+  const { apiKey, baseUrl, model, provider } = runtime
+
+  if (!apiKey || !baseUrl) {
+    throw new Error(
+      `LLM 未配置：请设置 LLM_API_KEY 或 ${provider} 对应的 provider API Key（如 QWEN_API_KEY），` +
+        '并确保 build/ai-config.json 中有 defaultBaseUrl。',
+    )
+  }
+
+  logResolvedConfig(runtime)
+
+  const url = resolveChatCompletionsUrl(baseUrl)
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS)
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        temperature: options?.temperature ?? 0.4,
+        max_tokens: options?.maxTokens ?? 4096,
+      }),
+      signal: controller.signal,
+    })
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      throw new Error(
+        `LLM 请求失败 (${res.status})${body ? `：${body.slice(0, 200)}` : ''}`,
+      )
+    }
+
+    const payload = (await res.json()) as {
+      choices?: Array<{ message?: { content?: string } }>
+      error?: { message?: string }
+    }
+
+    if (payload.error?.message) {
+      throw new Error(`LLM 错误：${payload.error.message}`)
+    }
+
+    const content = payload.choices?.[0]?.message?.content
+    if (!content?.trim()) {
+      throw new Error('LLM 返回为空，请重试。')
+    }
+
+    return content.trim()
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error('LLM 请求超时（60 秒），请稍后重试。')
+    }
+    if (err instanceof Error) throw err
+    throw new Error(`LLM 调用异常：${String(err)}`)
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
  * Invoke chat/completions and parse the assistant message as JSON.
  */
 export async function invokeLlmJson<T>(

@@ -4,6 +4,14 @@ import { listSkills } from '../skills'
 import { useWorkspace } from '../contexts/WorkspaceContext'
 import { platformApi } from '../platform'
 import type { Artifact } from '../platform'
+import { isWebShim } from '../platform/detect'
+import {
+  artifactDownloadFilename,
+  artifactHasExport,
+} from '../utils/artifactDisplay'
+import WebFeatureComingSoon from '../components/WebFeatureComingSoon'
+import { ApiFetchError } from '../platform/webPlatformApi'
+import { getWebFeatureStatus } from '../platform/featureGate'
 
 // ── Layout shells ─────────────────────────────────────────────────────────────
 
@@ -743,6 +751,7 @@ function WebDocxCreatePanel() {
       setError('请输入提示词')
       return
     }
+    const effectiveTitle = title.trim() || 'AI Office 文稿'
     if (!platformApi.system.isFeatureAvailable('web.docx.create')) {
       setError('Web 版即将开放：正式文稿生成')
       return
@@ -754,10 +763,18 @@ function WebDocxCreatePanel() {
       const result = await platformApi.skills.run('web.docx.create', {
         prompt: prompt.trim(),
         workspacePath: activeWorkspacePath,
-        params: { title: title.trim() || undefined },
+        params: { title: effectiveTitle },
       })
-      if (!result.success || !result.artifact) {
+      if (!result.success) {
         setError(result.error ?? '生成失败')
+        return
+      }
+      if (!result.artifact) {
+        setError('生成完成但未返回文稿记录')
+        return
+      }
+      if (!artifactHasExport(result.artifact)) {
+        setError('生成完成但暂无可下载文件')
         return
       }
       setArtifact(result.artifact)
@@ -807,11 +824,11 @@ function WebDocxCreatePanel() {
 
       <button
         onClick={() => void handleGenerate()}
-        disabled={loading}
+        disabled={loading || !prompt.trim()}
         style={{
-          padding: '10px 28px', background: loading ? '#a0b8d0' : '#1a5fb4',
+          padding: '10px 28px', background: loading || !prompt.trim() ? '#a0b8d0' : '#1a5fb4',
           color: '#fff', border: 'none', borderRadius: 8, fontSize: 14,
-          fontWeight: 600, cursor: loading ? 'not-allowed' : 'pointer',
+          fontWeight: 600, cursor: loading || !prompt.trim() ? 'not-allowed' : 'pointer',
         }}
       >
         {loading ? '生成中…' : '生成文稿'}
@@ -828,20 +845,30 @@ function WebDocxCreatePanel() {
           <div style={{ fontSize: 15, fontWeight: 700, color: '#1f3142', marginBottom: 6 }}>
             ✅ {artifact.title}
           </div>
-          <div style={{ fontSize: 12, color: '#7a8fa3', marginBottom: 12 }}>
+          <div style={{ fontSize: 12, color: '#7a8fa3', marginBottom: 8 }}>
             生成时间：{new Date(artifact.createdAt).toLocaleString('zh-CN')}
           </div>
-          <button
-            type="button"
-            onClick={() => void platformApi.artifacts.download(artifact.id, `${artifact.title}.docx`)}
-            style={{
-              display: 'inline-block', padding: '8px 20px',
-              background: '#1a5fb4', color: '#fff', borderRadius: 7,
-              fontSize: 13, fontWeight: 600, border: 'none', cursor: 'pointer',
-            }}
-          >
-            ⬇ 下载 DOCX
-          </button>
+          <div style={{ fontSize: 12, color: '#7a8fa3', marginBottom: 12 }}>
+            可在资源中心 › 生成记录查看
+          </div>
+          {artifactHasExport(artifact) ? (
+            <button
+              type="button"
+              onClick={() => {
+                const fn = artifactDownloadFilename(artifact)
+                if (fn) void platformApi.artifacts.download(artifact.id, fn)
+              }}
+              style={{
+                display: 'inline-block', padding: '8px 20px',
+                background: '#1a5fb4', color: '#fff', borderRadius: 7,
+                fontSize: 13, fontWeight: 600, border: 'none', cursor: 'pointer',
+              }}
+            >
+              ⬇ 下载 DOCX
+            </button>
+          ) : (
+            <div style={{ fontSize: 13, color: '#c0392b' }}>暂无可下载文件</div>
+          )}
         </div>
       )}
     </div>
@@ -852,13 +879,48 @@ function WebDocxCreatePanel() {
 
 export default function SkillManagementView() {
   const registeredSkills = listSkills()
-  const [tab, setTab] = React.useState<'manage' | 'docx' | 'store'>('manage')
+  const [tab, setTab] = React.useState<'manage' | 'docx' | 'store'>(isWebShim() ? 'docx' : 'manage')
+  const [webGateHint, setWebGateHint] = React.useState<string | null>(null)
   const [storeStatus, setStoreStatus] = React.useState<StoreStatus>('idle')
   const [storeError, setStoreError] = React.useState<string | null>(null)
   const [embedUrl, setEmbedUrl] = React.useState<string | null>(null)
 
+  function tryWebTab(next: 'manage' | 'docx' | 'store') {
+    if (!isWebShim()) {
+      setTab(next)
+      setWebGateHint(null)
+      return
+    }
+    if (next === 'docx') {
+      setTab('docx')
+      setWebGateHint(null)
+      return
+    }
+    setWebGateHint(getWebFeatureStatus('settings.ai').message)
+  }
+
   async function handleOpenStore() {
     setTab('store')
+    setWebGateHint(null)
+    if (isWebShim()) {
+      if (storeStatus === 'ready' && embedUrl) return
+      setStoreStatus('loading')
+      setStoreError(null)
+      try {
+        const { url } = await platformApi.store.getEmbedUrl()
+        setEmbedUrl(url)
+        setStoreStatus('ready')
+      } catch (e) {
+        setStoreStatus('error')
+        const msg = e instanceof ApiFetchError
+          ? e.message
+          : e instanceof Error
+            ? e.message
+            : 'Skill Store 未配置'
+        setStoreError(msg)
+      }
+      return
+    }
     if (storeStatus === 'ready' && embedUrl) return
     setStoreStatus('loading')
     setStoreError(null)
@@ -881,10 +943,10 @@ export default function SkillManagementView() {
     <ViewWrapper>
       {/* ── Tab Bar ── */}
       <TabBar>
-        <TabBtn $active={tab === 'manage'} onClick={() => setTab('manage')}>
+        <TabBtn $active={tab === 'manage'} onClick={() => tryWebTab('manage')}>
           🧩 我的 Skill 包
         </TabBtn>
-        <TabBtn $active={tab === 'docx'} onClick={() => setTab('docx')}>
+        <TabBtn $active={tab === 'docx'} onClick={() => tryWebTab('docx')}>
           🗒 生成文稿
         </TabBtn>
         <TabBtn
@@ -900,42 +962,59 @@ export default function SkillManagementView() {
         )}
       </TabBar>
 
+      {webGateHint && (
+        <div style={{
+          padding: '8px 24px', fontSize: 13, color: '#c0392b',
+          background: '#fff5f5', borderBottom: '1px solid #f5c6c6',
+        }}>
+          {webGateHint}
+        </div>
+      )}
+
       {/* ── Tab Content ── */}
       <TabContent>
         {/* Manage tab */}
         <PageSlot $active={tab === 'manage'}>
-          <ManageScrollArea>
-            <div style={{ marginBottom: 20 }}>
-              <h1 style={{ fontSize: 22, fontWeight: 700, color: '#1f3142', margin: '0 0 4px' }}>Skill 中心</h1>
-              <p style={{ fontSize: 14, color: '#627385', margin: '0 0 0' }}>
-                管理已购买和授权的 AI Skill 包，或切换到"Skill 商店"标签浏览购买。
+          {isWebShim() ? (
+            <ManageScrollArea>
+              <p style={{ fontSize: 14, color: '#627385' }}>
+                Web 版 Skill 包安装与管理后续接入。可使用「生成文稿」或 Skill 商店（若已配置）。
               </p>
-            </div>
+            </ManageScrollArea>
+          ) : (
+            <ManageScrollArea>
+              <div style={{ marginBottom: 20 }}>
+                <h1 style={{ fontSize: 22, fontWeight: 700, color: '#1f3142', margin: '0 0 4px' }}>Skill 中心</h1>
+                <p style={{ fontSize: 14, color: '#627385', margin: '0 0 0' }}>
+                  管理已购买和授权的 AI Skill 包，或切换到"Skill 商店"标签浏览购买。
+                </p>
+              </div>
 
-            <SkillManagementPanel />
+              <SkillManagementPanel />
 
-            {registeredSkills.length > 0 && (
-              <>
-                <SectionDivider>本地已注册 Skill</SectionDivider>
-                <SkillList>
-                  {registeredSkills.map(skill => (
-                    <SkillCard key={skill.manifest.id}>
-                      <SkillName>{skill.manifest.name}</SkillName>
-                      <SkillMeta>
-                        类别：{skill.manifest.category}　版本：{skill.manifest.version}
-                      </SkillMeta>
-                      <SkillMeta>
-                        <SkillId>{skill.manifest.id}</SkillId>
-                      </SkillMeta>
-                      {skill.manifest.description && (
-                        <SkillMeta>{skill.manifest.description}</SkillMeta>
-                      )}
-                    </SkillCard>
-                  ))}
-                </SkillList>
-              </>
-            )}
-          </ManageScrollArea>
+              {registeredSkills.length > 0 && (
+                <>
+                  <SectionDivider>本地已注册 Skill</SectionDivider>
+                  <SkillList>
+                    {registeredSkills.map(skill => (
+                      <SkillCard key={skill.manifest.id}>
+                        <SkillName>{skill.manifest.name}</SkillName>
+                        <SkillMeta>
+                          类别：{skill.manifest.category}　版本：{skill.manifest.version}
+                        </SkillMeta>
+                        <SkillMeta>
+                          <SkillId>{skill.manifest.id}</SkillId>
+                        </SkillMeta>
+                        {skill.manifest.description && (
+                          <SkillMeta>{skill.manifest.description}</SkillMeta>
+                        )}
+                      </SkillCard>
+                    ))}
+                  </SkillList>
+                </>
+              )}
+            </ManageScrollArea>
+          )}
         </PageSlot>
 
         {/* Docx generate tab */}
@@ -947,23 +1026,44 @@ export default function SkillManagementView() {
 
         {/* Store tab — keep iframe mounted once loaded to avoid page reload */}
         <PageSlot $active={tab === 'store'}>
-          {storeStatus === 'loading' && (
+          {isWebShim() && storeStatus === 'loading' && (
+            <StoreStateArea>
+              <div>正在加载 Skill Store…</div>
+            </StoreStateArea>
+          )}
+          {isWebShim() && storeStatus === 'error' && (
+            <StoreStateArea>
+              <div style={{ color: '#c0392b', textAlign: 'center', maxWidth: 480 }}>
+                {storeError ?? 'Skill Store 未配置'}
+              </div>
+              <RetryBtn onClick={() => void handleOpenStore()}>重试</RetryBtn>
+            </StoreStateArea>
+          )}
+          {isWebShim() && storeStatus === 'idle' && (
+            <StoreStateArea>
+              <div style={{ color: '#8a9ab0' }}>点击「Skill 商店」标签载入</div>
+            </StoreStateArea>
+          )}
+          {isWebShim() && embedUrl && (
+            <StoreFrame src={embedUrl} title="Skill 商店" style={{ display: storeStatus === 'ready' ? 'block' : 'none' }} />
+          )}
+          {!isWebShim() && storeStatus === 'loading' && (
             <StoreStateArea>
               <div>正在连接 Skill Store...</div>
             </StoreStateArea>
           )}
-          {storeStatus === 'error' && (
+          {!isWebShim() && storeStatus === 'error' && (
             <StoreStateArea>
               <div style={{ color: '#c0392b', textAlign: 'center', maxWidth: 480 }}>⚠ {storeError}</div>
-              <RetryBtn onClick={handleOpenStore}>重试</RetryBtn>
+              <RetryBtn onClick={() => void handleOpenStore()}>重试</RetryBtn>
             </StoreStateArea>
           )}
-          {storeStatus === 'idle' && (
+          {!isWebShim() && storeStatus === 'idle' && (
             <StoreStateArea>
               <div style={{ color: '#8a9ab0' }}>点击"Skill 商店"标签载入商店</div>
             </StoreStateArea>
           )}
-          {embedUrl && (
+          {!isWebShim() && embedUrl && (
             <StoreFrame
               src={embedUrl}
               title="Skill 商店"

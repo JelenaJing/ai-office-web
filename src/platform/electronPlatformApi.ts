@@ -8,6 +8,10 @@ import type {
   SkillInfo,
   SkillInput,
   SkillResult,
+  Department,
+  KnowledgeLibraryInfo,
+  KnowledgeDocumentMeta,
+  KnowledgeImportResult,
 } from './types'
 
 type ElectronApiShape = {
@@ -17,6 +21,17 @@ type ElectronApiShape = {
   getWorkspaces?: () => Promise<Array<{ path: string; name: string }>>
   createWorkspace?: (name: string, parentDir?: string) => Promise<{ path: string; name: string }>
   deleteWorkspace?: (path: string) => Promise<void>
+  listDepartments?: () => Promise<Department[]>
+  getKnowledgeBaseInfo?: (departmentId?: string) => Promise<KnowledgeLibraryInfo>
+  listKnowledgeDocuments?: (
+    departmentId?: string,
+    query?: string,
+  ) => Promise<KnowledgeDocumentMeta[]>
+  importKnowledgeDocuments?: (departmentId?: string) => Promise<KnowledgeImportResult>
+  deleteKnowledgeDocument?: (
+    departmentId: string,
+    documentId: string,
+  ) => Promise<{ success: boolean }>
   [key: string]: unknown
 }
 
@@ -154,6 +169,50 @@ export const electronPlatformApi: PlatformApi = {
     },
   },
 
+  // ── excel ───────────────────────────────────────────────────────────────────
+  // Desktop analysis uses ExcelAnalysisWorkbench + excelAnalysisRun (local paths).
+
+  excel: {
+    async analyze(input: {
+      fileId: string
+      prompt?: string
+      options?: Record<string, unknown>
+      workspacePath?: string
+    }): Promise<{
+      artifactId: string
+      title?: string
+      type?: string
+    }> {
+      const api = getElectronApi()
+      const sourcePath =
+        (input.options?.sourcePath as string | undefined) ??
+        (input.options?.localPath as string | undefined)
+      if (!sourcePath || typeof api.excelAnalysisRun !== 'function') {
+        notSupported(
+          'platformApi.excel.analyze — 桌面版请使用「数据分析」工作台（本地文件路径）',
+        )
+      }
+      const wsPath =
+        input.workspacePath ??
+        (input.options?.workspacePath as string | undefined) ??
+        ''
+      const raw = (await api.excelAnalysisRun({
+        workspacePath: wsPath,
+        sourcePath,
+        userRequirement: input.prompt ?? '',
+        dataModelId: String(input.options?.dataModelId ?? ''),
+      })) as Record<string, unknown>
+      if (!raw?.ok) {
+        throw new Error(String(raw?.error ?? raw?.message ?? 'Excel 分析失败'))
+      }
+      return {
+        artifactId: String(raw.artifactId ?? raw.taskId ?? ''),
+        title: String(raw.title ?? '表格分析'),
+        type: 'excel_analysis',
+      }
+    },
+  },
+
   // ── skills ──────────────────────────────────────────────────────────────────
 
   skills: {
@@ -163,6 +222,103 @@ export const electronPlatformApi: PlatformApi = {
     },
     async run(_skillId: string, _input: SkillInput): Promise<SkillResult> {
       notSupported('platformApi.skills.run')
+    },
+  },
+
+  // ── departments / remote knowledge ─────────────────────────────────────────
+
+  departments: {
+    async list(): Promise<Department[]> {
+      const api = getElectronApi()
+      if (typeof api.listDepartments !== 'function') {
+        notSupported('departments.list')
+      }
+      return api.listDepartments()
+    },
+  },
+
+  knowledge: {
+    async getBaseInfo(departmentId: string): Promise<KnowledgeLibraryInfo> {
+      const api = getElectronApi()
+      if (typeof api.getKnowledgeBaseInfo !== 'function') {
+        notSupported('knowledge.getBaseInfo')
+      }
+      return api.getKnowledgeBaseInfo(departmentId)
+    },
+
+    async listDocuments(departmentId: string): Promise<KnowledgeDocumentMeta[]> {
+      const api = getElectronApi()
+      if (typeof api.listKnowledgeDocuments !== 'function') {
+        notSupported('knowledge.listDocuments')
+      }
+      return api.listKnowledgeDocuments(departmentId)
+    },
+
+    async importDocuments(departmentId: string): Promise<KnowledgeImportResult> {
+      const api = getElectronApi()
+      if (typeof api.importKnowledgeDocuments !== 'function') {
+        notSupported('knowledge.importDocuments')
+      }
+      return api.importKnowledgeDocuments(departmentId)
+    },
+
+    async deleteDocument(departmentId: string, documentId: string): Promise<void> {
+      const api = getElectronApi()
+      if (typeof api.deleteKnowledgeDocument !== 'function') {
+        notSupported('knowledge.deleteDocument')
+      }
+      await api.deleteKnowledgeDocument(departmentId, documentId)
+    },
+  },
+
+  calendar: {
+    async listEvents() {
+      notSupported('calendar.listEvents')
+    },
+    async createEvent() {
+      notSupported('calendar.createEvent')
+    },
+    async updateEvent() {
+      notSupported('calendar.updateEvent')
+    },
+    async deleteEvent() {
+      notSupported('calendar.deleteEvent')
+    },
+  },
+
+  email: {
+    async getAccount() {
+      notSupported('email.getAccount')
+    },
+    async saveAccount() {
+      notSupported('email.saveAccount')
+    },
+    async testConnection() {
+      notSupported('email.testConnection')
+    },
+    async listMessages() {
+      notSupported('email.listMessages')
+    },
+    async getMessage() {
+      notSupported('email.getMessage')
+    },
+    async sendMessage() {
+      notSupported('email.sendMessage')
+    },
+  },
+
+  settings: {
+    async getAi() {
+      notSupported('settings.getAi')
+    },
+    async testAi() {
+      notSupported('settings.testAi')
+    },
+  },
+
+  store: {
+    async getEmbedUrl() {
+      notSupported('store.getEmbedUrl')
     },
   },
 

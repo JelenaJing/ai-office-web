@@ -1,0 +1,1 @@
+// resource-center server types

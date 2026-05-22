@@ -1,3 +1,10 @@
+import type {
+  Department,
+  KnowledgeDocumentMeta,
+  KnowledgeImportResult,
+  KnowledgeLibraryInfo,
+} from '../types/knowledge'
+
 export interface UserInfo {
   id: string
   email: string
@@ -57,10 +64,70 @@ export interface SkillInput {
 export interface SkillResult {
   success: boolean
   artifact?: Artifact
+  /** Server skill 附加数据（如 documentSession / html / markdown） */
+  data?: Record<string, unknown>
   taskId?: string
   status?: string
   error?: string
 }
+
+export interface CalendarEvent {
+  id: string
+  title: string
+  startAt: string
+  endAt: string
+  notes?: string
+}
+
+export interface EmailAccountInput {
+  user: string
+  password: string
+  displayName?: string
+  imapHost: string
+  imapPort: number
+  imapSecure: boolean
+  smtpHost: string
+  smtpPort: number
+  smtpSecure: boolean
+}
+
+export interface EmailAccountState {
+  configured: boolean
+  user?: string
+  displayName?: string
+  imapHost?: string
+  smtpHost?: string
+}
+
+export interface EmailMessageSummary {
+  id: string
+  from: string
+  subject: string
+  timestamp: string
+  unread: boolean
+  preview: string
+}
+
+export interface EmailMessageDetail extends EmailMessageSummary {
+  body: string
+  to: string
+}
+
+export interface EmailSendInput {
+  to: string
+  subject: string
+  body: string
+}
+
+export interface AiSettingsView {
+  provider: string
+  model: string
+  baseUrl: string
+  hasApiKey: boolean
+  imageConfigured: boolean
+}
+
+export type { Department, KnowledgeLibraryInfo, KnowledgeDocumentMeta, KnowledgeImportResult }
 
 /**
  * Unified platform API — business components must use this instead of
@@ -120,6 +187,58 @@ export interface PlatformApi {
     list(): Promise<SkillInfo[]>
     /** Runs a skill; returns the result (may include an Artifact). */
     run(skillId: string, input: SkillInput): Promise<SkillResult>
+  }
+
+  excel: {
+    /** Analyze an uploaded spreadsheet by fileId; produces excel_analysis artifact. */
+    analyze(input: {
+      fileId: string
+      prompt?: string
+      options?: Record<string, unknown>
+      workspacePath?: string
+    }): Promise<{
+      artifactId: string
+      title?: string
+      type?: string
+      artifact?: Artifact
+    }>
+  }
+
+  departments: {
+    /** Lists remote knowledge-base partitions exposed as departments. */
+    list(): Promise<Department[]>
+  }
+
+  knowledge: {
+    getBaseInfo(departmentId: string): Promise<KnowledgeLibraryInfo>
+    listDocuments(departmentId: string): Promise<KnowledgeDocumentMeta[]>
+    importDocuments(departmentId: string, files?: File[]): Promise<KnowledgeImportResult>
+    deleteDocument(departmentId: string, documentId: string): Promise<void>
+  }
+
+  calendar: {
+    listEvents(): Promise<CalendarEvent[]>
+    createEvent(input: Omit<CalendarEvent, 'id'>): Promise<CalendarEvent>
+    updateEvent(id: string, patch: Partial<CalendarEvent>): Promise<CalendarEvent>
+    deleteEvent(id: string): Promise<void>
+  }
+
+  email: {
+    getAccount(): Promise<EmailAccountState>
+    saveAccount(config: EmailAccountInput): Promise<EmailAccountState>
+    testConnection(): Promise<{ ok: boolean; message: string }>
+    listMessages(folder?: string): Promise<EmailMessageSummary[]>
+    getMessage(id: string): Promise<EmailMessageDetail>
+    sendMessage(input: EmailSendInput): Promise<{ ok: boolean; message?: string }>
+  }
+
+  settings: {
+    getAi(): Promise<AiSettingsView>
+    testAi(): Promise<{ ok: boolean; message: string }>
+  }
+
+  store: {
+    getEmbedUrl(): Promise<{ url: string }>
   }
 
   system: {

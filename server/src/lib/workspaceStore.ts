@@ -8,14 +8,13 @@
 import fs from 'fs'
 import path from 'path'
 import { randomUUID } from 'crypto'
-import type { Request } from 'express'
+import { DEV_FALLBACK_USER, resolveUserId } from './authUser'
+
+export { DEV_FALLBACK_USER, resolveUserId }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 export const WORKSPACES_ROOT = path.resolve(__dirname, '../../../data/workspaces')
-const AC_URL = process.env.ACCOUNT_CENTER_URL ?? 'http://10.20.5.61:13100'
-/** Fallback used only in dev when no token is present. */
-export const DEV_FALLBACK_USER = 'web-demo-user'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -31,25 +30,6 @@ export interface WorkspaceEntry {
 
 export interface WorkspaceIndex {
   workspaces: WorkspaceEntry[]
-}
-
-// ── userId resolution ─────────────────────────────────────────────────────────
-
-export async function resolveUserId(req: Request): Promise<string> {
-  const auth = req.headers['authorization']
-  if (!auth || !auth.startsWith('Bearer ')) return DEV_FALLBACK_USER
-  try {
-    const resp = await fetch(`${AC_URL}/api/auth/me`, {
-      headers: { Authorization: auth },
-      signal: AbortSignal.timeout(5000),
-    })
-    if (!resp.ok) return DEV_FALLBACK_USER
-    const data = await resp.json() as { id?: string; userId?: string; user?: { id?: string } }
-    const uid = data.id ?? data.userId ?? data.user?.id
-    return uid ? String(uid) : DEV_FALLBACK_USER
-  } catch {
-    return DEV_FALLBACK_USER
-  }
 }
 
 // ── Path helpers ──────────────────────────────────────────────────────────────

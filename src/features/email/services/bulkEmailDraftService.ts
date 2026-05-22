@@ -1,5 +1,6 @@
 import type { BulkEmailDraft, BulkEmailRecipient } from '../../../types/email'
 import { stripThinkTags } from '../../../utils/StreamThinkFilter'
+import { isWebShim } from '../../../platform/detect'
 
 export interface GenerateBulkEmailDraftsInput {
   objective: string
@@ -102,7 +103,7 @@ async function generateOneDraft(
     status: 'draft',
   }
 
-  if (!window.electronAPI?.writingAssistant) return base
+  if (isWebShim() || !window.electronAPI?.writingAssistant) return base
 
   try {
     const raw = await window.electronAPI.writingAssistant({

@@ -12,6 +12,8 @@ import {
 } from '../../../document/commands/bridges/templateDocumentRewriteBridge'
 import { attachTemplateDocumentArtifact } from '../../../document/profiles/templateDocument/orchestrator/templateDocumentOrchestrator'
 import { runWritingAssistant } from '../../writing/services/WritingAssistantService'
+import { isWebShim } from '../../../platform/detect'
+import { runWebDocxCreate, webDocxSuccessMessage } from '../../writing/services/docxWebGeneration'
 import type { FieldValue, FormalTemplateErrorCode, PreviewRegionCandidate, RenderResult, TemplateProfile } from '../../../types/templateGeneration'
 
 export const FORMAL_TEMPLATE_INITIAL_STATUS_MESSAGE = '请在底部输入框里描述生成要求。中间区域只负责展示结果预览、打开和下载入口。'
@@ -380,6 +382,72 @@ export function useFormalTemplateGeneration() {
       return { success: false, errorMessage: message }
     }
 
+    if (!activeWorkspacePath) {
+      const message = '请先打开一个工作区，用来保存本次生成的文稿。'
+      setPhase('error')
+      setErrorMessage(message)
+      setStatusMessage('还没有打开工作区，暂时无法开始生成。')
+      syncDocumentResultMirror({ instruction: trimmedInstruction, phase: 'error', message, result: null })
+      return { success: false, errorMessage: message }
+    }
+
+    if (isWebShim()) {
+      setPhase('running')
+      setErrorMessage(null)
+      setStatusMessage('正在通过服务器生成文稿...')
+      try {
+        const skillResult = await runWebDocxCreate(trimmedInstruction, activeWorkspacePath)
+        if (!skillResult.success || !skillResult.artifact) {
+          const message = skillResult.error || '文稿生成失败'
+          setPhase('error')
+          setErrorMessage(message)
+          setStatusMessage(message)
+          syncDocumentResultMirror({ instruction: trimmedInstruction, phase: 'error', message, result: null })
+          return { success: false, errorMessage: message }
+        }
+        const message = webDocxSuccessMessage(skillResult.artifact)
+        setPhase('completed')
+        setStatusMessage(message)
+        const outputPath = skillResult.artifact.id
+        const renderResult: RenderResult = {
+          profileId: 'web.docx.create',
+          outputPath,
+          regionResults: [],
+          fieldValues: [],
+          changedIndices: [],
+          allCommitted: true,
+          shellValidation: {
+            passed: true,
+            checkedBlockCount: 0,
+            violatedBlockIndices: [],
+            durationMs: 0,
+          },
+        }
+        syncDocumentResultMirror({
+          instruction: trimmedInstruction,
+          phase: 'completed',
+          message,
+          result: renderResult,
+        })
+        workbench.setModeSession('document', (session) => ({
+          ...session,
+          resultType: 'docx',
+          resultPath: outputPath,
+          resultTitle: skillResult.artifact!.title,
+          generationStatus: { phase: 'completed', message, updatedAt: new Date().toISOString() },
+          lastUpdatedAt: new Date().toISOString(),
+        }))
+        return { success: true, result: renderResult }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : '文稿生成失败'
+        setPhase('error')
+        setErrorMessage(message)
+        setStatusMessage(message)
+        syncDocumentResultMirror({ instruction: trimmedInstruction, phase: 'error', message, result: null })
+        return { success: false, errorMessage: message }
+      }
+    }
+
     if (!templateDocumentId) {
       const message = '请先在左侧资源管理器里选择模板文档。'
       setPhase('error')
@@ -394,15 +462,6 @@ export function useFormalTemplateGeneration() {
       setPhase('error')
       setErrorMessage(message)
       setStatusMessage(message)
-      syncDocumentResultMirror({ instruction: trimmedInstruction, phase: 'error', message, result: null })
-      return { success: false, errorMessage: message }
-    }
-
-    if (!activeWorkspacePath) {
-      const message = '请先打开一个工作区，用来保存本次生成的文稿。'
-      setPhase('error')
-      setErrorMessage(message)
-      setStatusMessage('还没有打开工作区，暂时无法开始生成。')
       syncDocumentResultMirror({ instruction: trimmedInstruction, phase: 'error', message, result: null })
       return { success: false, errorMessage: message }
     }
