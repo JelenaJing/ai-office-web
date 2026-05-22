@@ -75,11 +75,30 @@ export function normalizeTemplateDocument(
 }
 
 export function buildDocumentTypePresetHint(preset?: DocumentTypePreset | null): string {
-  const hint = preset?.promptHint?.trim()
-  if (!hint) return ''
+  if (!preset) return ''
+
+  const parts: string[] = []
+
+  if (preset.label) {
+    parts.push(`文稿类型：${preset.label}`)
+  }
+  if (preset.documentKind) {
+    parts.push(`文档形式：${preset.documentKind}`)
+  }
+  if (preset.promptHint?.trim()) {
+    parts.push(preset.promptHint.trim())
+  }
+  if (preset.outlineSections && preset.outlineSections.length > 0) {
+    parts.push(
+      `推荐文档结构（仅作参考，可根据用户要求调整）：\n${preset.outlineSections.map((s, i) => `${i + 1}. ${s}`).join('\n')}`,
+    )
+  }
+
+  if (parts.length === 0) return ''
+
   return [
     '【写作要求补充（仅作结构参考，不得覆盖用户真实任务）】',
-    hint,
+    parts.join('\n'),
     '注意：若与用户 instruction 冲突，以用户 instruction 为准。',
   ].join('\n')
 }

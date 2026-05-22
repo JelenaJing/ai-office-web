@@ -17,6 +17,12 @@ import type { WebDocumentSkillManifest } from '../webDocumentSkillTypes'
 import type { WebDocumentSession } from '../webDocumentTypes'
 import type { DocumentEditMode } from '../webDocumentPatchTypes'
 import type { UseDocumentPatchActionsReturn } from '../hooks/useDocumentPatchActions'
+import {
+  getWorkflow,
+  getWorkflowQuickActions,
+  type DocumentWorkflowId,
+  type WorkflowQuickAction,
+} from '../workflows/documentWorkflowRegistry'
 
 const Panel = styled.div`
   display: flex;
@@ -250,6 +256,8 @@ export interface AICommandBoxProps {
   templateDocument?: import('../services/documentEditSkills').TemplateDocumentPayload | null
   documentTypePreset?: import('../services/documentEditSkills').DocumentTypePresetPayload | null
   patchActions: UseDocumentPatchActionsReturn
+  /** Current document workflow type; controls which quick actions are shown */
+  workflowId?: DocumentWorkflowId
 }
 
 function buildSessionSnapshot(input: {
@@ -290,6 +298,7 @@ export function AICommandBox({
   templateDocument,
   documentTypePreset,
   patchActions,
+  workflowId = 'general',
 }: AICommandBoxProps) {
   // 生成完成卡片的下载按钮优先使用 onExportRequest，否则降级到 onExportCurrentDocument
   const handleCardExport = useCallback(
@@ -439,6 +448,10 @@ export function AICommandBox({
         generationMode: templateDocument ? 'knowledge-template-document' : 'default',
         templateDocument: templateDocument ?? undefined,
         documentTypePreset: documentTypePreset ?? undefined,
+        workflowId,
+        workflowLabel: getWorkflow(workflowId).label,
+        outlineSections: getWorkflow(workflowId).outlineSections,
+        documentKind: workflowId,
       })
 
       if (!result.success) {
@@ -528,6 +541,7 @@ export function AICommandBox({
     template,
     templateDocument,
     title,
+    workflowId,
     workspacePath,
   ])
 
@@ -643,6 +657,28 @@ export function AICommandBox({
     }
   }, [busy, disabled, editorState.isBodyEmpty, executeEdit, handleGenerateDraft, setInfo])
 
+  const handleWorkflowAction = useCallback(async (qa: WorkflowQuickAction) => {
+    if (busy || disabled) return
+    if (qa.requiresContent && editorState.isBodyEmpty) {
+      setInfo('正文为空，请先生成初稿', 'err')
+      return
+    }
+    if (qa.action === 'generate') {
+      await handleGenerateDraft(qa.prompt)
+    } else {
+      await executeEdit(
+        qa.prompt,
+        qa.mode,
+        qa.successTitle ?? '已完成：AI 修改',
+        qa.successBody ?? '文稿已更新，可继续修改或下载。',
+      )
+    }
+  }, [busy, disabled, editorState.isBodyEmpty, executeEdit, handleGenerateDraft, setInfo])
+
+  // Derive workflow-specific quick actions
+  const workflowActions = useMemo(() => getWorkflowQuickActions(workflowId), [workflowId])
+  const currentWorkflow = useMemo(() => getWorkflow(workflowId), [workflowId])
+
   const handleSend = useCallback(async () => {
     await executeEdit(
       instruction,
@@ -660,6 +696,16 @@ export function AICommandBox({
           <AssistantBadge>{assistantState.badge}</AssistantBadge>
         </AssistantHeader>
         <AssistantHint>{assistantState.hint}</AssistantHint>
+        {workflowId !== 'general' && (
+          <div style={{ fontSize: 12, color: '#6366f1', fontWeight: 600, marginTop: 2 }}>
+            📄 {currentWorkflow.label}
+            {workflowId === 'formal_template' && (
+              <span style={{ fontWeight: 400, color: '#94a3b8', marginLeft: 6 }}>
+                （完整模板 Shell 接入中）
+              </span>
+            )}
+          </div>
+        )}
       </AssistantCard>
 
       <ModeHint>{modeHint}</ModeHint>
@@ -667,24 +713,16 @@ export function AICommandBox({
       <div>
         <SectionTitle>快捷操作</SectionTitle>
         <QuickGrid style={{ marginTop: 8 }}>
-          <QuickBtn type="button" disabled={busy || disabled} onClick={() => void handleQuickAction('formal_notice')}>
-            生成正式通知
-          </QuickBtn>
-          <QuickBtn type="button" disabled={busy || disabled || editorState.isBodyEmpty} onClick={() => void handleQuickAction('continue')}>
-            继续写
-          </QuickBtn>
-          <QuickBtn type="button" disabled={busy || disabled || editorState.isBodyEmpty} onClick={() => void handleQuickAction('polish')}>
-            优化全文
-          </QuickBtn>
-          <QuickBtn type="button" disabled={busy || disabled || editorState.isBodyEmpty} onClick={() => void handleQuickAction('formal_tone')}>
-            改成正式语气
-          </QuickBtn>
-          <QuickBtn type="button" disabled={busy || disabled || editorState.isBodyEmpty} onClick={() => void handleQuickAction('outline')}>
-            提取大纲
-          </QuickBtn>
-          <QuickBtn type="button" disabled={busy || disabled || editorState.isBodyEmpty} onClick={() => void handleQuickAction('summary')}>
-            生成摘要
-          </QuickBtn>
+          {workflowActions.map((qa, idx) => (
+            <QuickBtn
+              key={idx}
+              type="button"
+              disabled={busy || disabled || (!!qa.requiresContent && editorState.isBodyEmpty)}
+              onClick={() => void handleWorkflowAction(qa)}
+            >
+              {qa.label}
+            </QuickBtn>
+          ))}
         </QuickGrid>
       </div>
 

@@ -32,6 +32,10 @@ import { A4RichTextEditor, type A4EditorHandle } from './A4RichTextEditor'
 import { AICommandBox } from './AICommandBox'
 import { DocumentContextMenu } from './DocumentContextMenu'
 import { useDocumentPatchActions } from '../hooks/useDocumentPatchActions'
+import {
+  getWorkflowsByCategory,
+  type DocumentWorkflowId,
+} from '../workflows/documentWorkflowRegistry'
 
 const Shell = styled.div`
   flex: 1;
@@ -359,6 +363,7 @@ export default function WordLikeDocumentEditor() {
   ))
   const [title, setTitle] = useState(session.title)
   const [templateId, setTemplateId] = useState(session.templateSkillId)
+  const [workflowId, setWorkflowId] = useState<DocumentWorkflowId>('general')
   const [status, setStatus] = useState('')
   const [statusTone, setStatusTone] = useState<'ok' | 'err' | undefined>()
   const [exportBusyFormat, setExportBusyFormat] = useState<DocumentExportFormat | null>(null)
@@ -661,6 +666,18 @@ export default function WordLikeDocumentEditor() {
           <TopInput value={title} onChange={(e) => setTitle(e.target.value)} />
         </TopField>
         <TopField>
+          <TopLabel>文稿类型</TopLabel>
+          <TopSelect value={workflowId} onChange={(e) => setWorkflowId(e.target.value as DocumentWorkflowId)}>
+            {getWorkflowsByCategory().map((group) => (
+              <optgroup key={group.category} label={group.label}>
+                {group.workflows.map((w) => (
+                  <option key={w.id} value={w.id}>{w.label}</option>
+                ))}
+              </optgroup>
+            ))}
+          </TopSelect>
+        </TopField>
+        <TopField>
           <TopLabel>模板</TopLabel>
           <TopSelect value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
             {templateOptions.map((s) => (
@@ -773,6 +790,7 @@ export default function WordLikeDocumentEditor() {
             }}
             disabled={Boolean(exportBusyFormat)}
             patchActions={patchActions}
+            workflowId={workflowId}
           />
         </AiSidebar>
       </Body>

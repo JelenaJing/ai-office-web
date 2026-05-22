@@ -13,6 +13,10 @@ export interface DocumentTypePreset {
   id?: string
   label?: string
   promptHint?: string
+  /** Recommended outline/section headings passed from frontend workflow registry */
+  outlineSections?: string[]
+  /** Document kind hint, e.g. 'academic_paper', 'formal_notice' */
+  documentKind?: string
 }
 
 export interface WritingWorkflowInput {

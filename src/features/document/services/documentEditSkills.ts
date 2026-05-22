@@ -34,6 +34,16 @@ export interface DocumentGenerateInput {
   knowledgeBaseIds?: string[]
   fileIds?: string[]
   currentDocumentText?: string
+  /** Workflow type identifier from documentWorkflowRegistry */
+  workflowId?: string
+  /** Human-readable workflow label for prompt enrichment */
+  workflowLabel?: string
+  /** Key-value fields filled in by the user for this workflow */
+  workflowFields?: Record<string, string>
+  /** Recommended outline sections from the workflow registry */
+  outlineSections?: string[]
+  /** Document kind hint (e.g. 'academic_paper', 'formal_notice') */
+  documentKind?: string
 }
 
 export interface DocumentEditInput {
@@ -71,6 +81,30 @@ export type DocumentSkillResult = SkillResult & {
   }
 }
 
+function buildWorkflowDocumentTypePreset(input: DocumentGenerateInput): DocumentTypePresetPayload | null | undefined {
+  // Explicit preset always takes priority
+  if (input.documentTypePreset) return input.documentTypePreset
+
+  // Build a preset from workflow fields if provided
+  const workflowId = input.workflowId
+  if (!workflowId || workflowId === 'general') return undefined
+
+  const parts: string[] = []
+  if (input.workflowFields) {
+    for (const [key, value] of Object.entries(input.workflowFields)) {
+      if (value?.trim()) parts.push(`${key}：${value.trim()}`)
+    }
+  }
+
+  return {
+    id: workflowId,
+    label: input.workflowLabel,
+    promptHint: parts.length > 0 ? parts.join('\n') : undefined,
+    outlineSections: input.outlineSections,
+    documentKind: input.documentKind ?? workflowId,
+  } as DocumentTypePresetPayload & { outlineSections?: string[]; documentKind?: string }
+}
+
 function buildGenerateParams(input: DocumentGenerateInput): Record<string, unknown> {
   return {
     instruction: input.instruction.trim(),
@@ -83,7 +117,7 @@ function buildGenerateParams(input: DocumentGenerateInput): Record<string, unkno
     extraContext: input.extraContext,
     generationMode: input.generationMode,
     templateDocument: input.templateDocument,
-    documentTypePreset: input.documentTypePreset,
+    documentTypePreset: buildWorkflowDocumentTypePreset(input),
     templateSkillId: input.templateSkillId,
     templateManifest: input.templateManifest,
     knowledgeBaseIds: input.knowledgeBaseIds,
