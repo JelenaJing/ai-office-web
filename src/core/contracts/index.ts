@@ -31,3 +31,18 @@ export type {
   FeatureRoute,
   FeatureManifest,
 } from './feature'
+
+export type {
+  MatterSourceType,
+  MatterStatus,
+  MatterPriority,
+  EvidenceType,
+  AuditAction,
+  Matter,
+  MatterEvidence,
+  AuditEvent,
+  DecisionPackage,
+  MatterRef,
+  CreateMatterFromEmailRequest,
+  CreateMatterFromEmailResult,
+} from './matter'

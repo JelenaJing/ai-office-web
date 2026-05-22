@@ -20,6 +20,10 @@ import { documentManifest } from '../features/document/manifest'
 import { pptManifest } from '../features/ppt/manifest'
 import { emailManifest } from '../features/email/manifest'
 import { aiosManifest } from '../features/aios/manifest'
+import { resourceCenterManifest } from '../features/resource-center/manifest'
+import { reportManifest } from '../features/report/manifest'
+import { imageManifest } from '../features/image/manifest'
+import { dataAnalysisManifest } from '../features/data-analysis/manifest'
 
 // ── Registry ──────────────────────────────────────────────────────────────────
 
@@ -28,6 +32,10 @@ const REGISTRY: FeatureManifest[] = [
   pptManifest,
   emailManifest,
   aiosManifest,
+  resourceCenterManifest,
+  reportManifest,
+  imageManifest,
+  dataAnalysisManifest,
 ]
 
 /** Returns all registered feature manifests in registration order. */
