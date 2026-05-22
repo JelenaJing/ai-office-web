@@ -62,6 +62,12 @@ export type DocumentSkillResult = SkillResult & {
     html?: string
     markdown?: string
     text?: string
+    knowledgeContext?: {
+      kbCount: number
+      fileCount: number
+      hasContext: boolean
+      isRagEnabled: boolean
+    }
   }
 }
 

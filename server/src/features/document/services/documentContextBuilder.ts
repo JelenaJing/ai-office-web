@@ -26,10 +26,30 @@ function readFileSnippet(absolutePath: string, name: string, maxChars: number): 
   }
 }
 
-export async function buildDocumentExtraContext(input: DocumentContextInput): Promise<string> {
+export interface DocumentContextStats {
+  /** Number of KB IDs that were queried */
+  kbCount: number
+  /** Total files found across all queried KBs */
+  fileCount: number
+  /** Whether any KB or file context was included in the prompt */
+  hasContext: boolean
+  /** Always false: semantic RAG not yet implemented */
+  isRagEnabled: false
+}
+
+export interface DocumentContextResult {
+  context: string
+  stats: DocumentContextStats
+}
+
+export async function buildDocumentContextWithStats(
+  input: DocumentContextInput,
+): Promise<DocumentContextResult> {
   const parts: string[] = []
   const kbIds = (input.knowledgeBaseIds ?? []).filter(Boolean)
   const fileIds = (input.fileIds ?? []).filter(Boolean)
+
+  let totalFileCount = 0
 
   if (kbIds.length) {
     console.warn(
@@ -47,6 +67,7 @@ export async function buildDocumentExtraContext(input: DocumentContextInput): Pr
           const names = docs.slice(0, 5).map((d) => d.title || d.originalName).filter(Boolean)
           if (names.length) {
             docHint = `（资料：${names.join('、')}${docs.length > 5 ? ' 等' : ''}）`
+            totalFileCount += docs.length
           } else {
             console.warn(`[document-context] 知识库 ${id} (${label}) 无可读文件列表`)
           }
@@ -95,5 +116,18 @@ export async function buildDocumentExtraContext(input: DocumentContextInput): Pr
     parts.push(`【用户指令摘要】\n${input.instruction.trim().slice(0, 500)}`)
   }
 
-  return parts.join('\n\n')
+  const context = parts.join('\n\n')
+  const stats: DocumentContextStats = {
+    kbCount: kbIds.length,
+    fileCount: totalFileCount,
+    hasContext: kbIds.length > 0 || fileIds.length > 0,
+    isRagEnabled: false,
+  }
+
+  return { context, stats }
+}
+
+export async function buildDocumentExtraContext(input: DocumentContextInput): Promise<string> {
+  const result = await buildDocumentContextWithStats(input)
+  return result.context
 }

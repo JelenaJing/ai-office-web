@@ -1,7 +1,10 @@
 /**
  * web.document.generate — 复用 legacy writing assistant 工作流生成初稿
  */
-import { buildDocumentExtraContext } from '../../../modules/document-generation/documentContextBuilder'
+import {
+  buildDocumentContextWithStats,
+  type DocumentContextStats,
+} from '../../../modules/document-generation/documentContextBuilder'
 import type {
   DocumentTypePreset,
   TemplateDocumentInput,
@@ -40,6 +43,7 @@ export type GenerateDocumentResult =
         html: string
         markdown: string
         patch?: { type: 'replace_document'; html: string; markdown: string }
+        knowledgeContext?: DocumentContextStats
       }
     }
   | { success: false; error: string }
@@ -55,7 +59,7 @@ export async function runGenerateDocumentSkill(
     return { success: false, error: '请先选择工作区（缺少 workspacePath）' }
   }
 
-  const builtContext = await buildDocumentExtraContext({
+  const { context: builtContext, stats: knowledgeContext } = await buildDocumentContextWithStats({
     workspacePath: input.workspacePath,
     knowledgeBaseIds: input.knowledgeBaseIds,
     fileIds: input.fileIds,
@@ -121,6 +125,7 @@ export async function runGenerateDocumentSkill(
       html,
       markdown,
       patch: { type: 'replace_document', html, markdown },
+      knowledgeContext,
     },
   }
 }

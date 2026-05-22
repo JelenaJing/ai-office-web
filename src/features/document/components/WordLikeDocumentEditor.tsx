@@ -19,13 +19,13 @@ import { useWebDocumentSkills } from '../useWebDocumentSkills'
 import { getBuiltinDocumentSkill } from '../webDocumentBuiltInSkills'
 import {
   applyTemplateManifestToSession,
-  exportFormatFromManifest,
-  runWebDocumentExport,
-  webDocxSuccessMessage,
+  exportAndDownloadCurrentDocument,
+  importDocxAsContent,
+  type DocumentExportFormat,
 } from '../services/docxWebGeneration'
 import {
   createEmptyWebDocumentSession,
-  recordExportArtifact,
+  normalizeWebDocumentSession,
   type WebDocumentSession,
 } from '../webDocumentTypes'
 import { A4RichTextEditor, type A4EditorHandle } from './A4RichTextEditor'
@@ -106,6 +106,27 @@ const TopBtn = styled.button`
     opacity: 0.45;
     cursor: not-allowed;
   }
+`
+
+const SaveBadge = styled.div<{ $state: 'saved' | 'saving' | 'restored' | 'error' }>`
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: ${(p) => (
+    p.$state === 'error' ? '#fecaca'
+      : p.$state === 'saving' ? '#fde68a'
+        : '#bbf7d0'
+  )};
+  background: ${(p) => (
+    p.$state === 'error' ? '#7f1d1d'
+      : p.$state === 'saving' ? '#78350f'
+        : '#14532d'
+  )};
 `
 
 const FormatBtn = styled.button<{ $active?: boolean }>`
@@ -197,6 +218,24 @@ const ModalCard = styled.div`
   max-width: 420px;
   width: 90%;
 `
+
+type DraftSaveState = 'saved' | 'saving' | 'restored' | 'error'
+
+function draftStorageKey(workspacePath: string | null): string | null {
+  return workspacePath ? `web-document-draft:${workspacePath}` : null
+}
+
+function loadDraftSession(workspacePath: string | null): WebDocumentSession | null {
+  const key = draftStorageKey(workspacePath)
+  if (!key || typeof window === 'undefined') return null
+  const raw = window.localStorage.getItem(key)
+  if (!raw) return null
+  try {
+    return normalizeWebDocumentSession(JSON.parse(raw))
+  } catch {
+    return null
+  }
+}
 
 function DocumentFormatToolbar({
   editor,
@@ -315,12 +354,15 @@ export default function WordLikeDocumentEditor() {
   const { departments, loading: deptLoading } = useDepartment()
   const skills = useWebDocumentSkills()
 
-  const [session, setSession] = useState<WebDocumentSession>(() => createEmptyWebDocumentSession())
+  const [session, setSession] = useState<WebDocumentSession>(() => (
+    loadDraftSession(activeWorkspacePath) ?? createEmptyWebDocumentSession()
+  ))
   const [title, setTitle] = useState(session.title)
   const [templateId, setTemplateId] = useState(session.templateSkillId)
   const [status, setStatus] = useState('')
   const [statusTone, setStatusTone] = useState<'ok' | 'err' | undefined>()
-  const [exportBusy, setExportBusy] = useState(false)
+  const [exportBusyFormat, setExportBusyFormat] = useState<DocumentExportFormat | null>(null)
+  const [saveState, setSaveState] = useState<DraftSaveState>('saved')
   const [kbPickerOpen, setKbPickerOpen] = useState(false)
   const [importModalOpen, setImportModalOpen] = useState(false)
   const [pendingImportFile, setPendingImportFile] = useState<File | null>(null)
@@ -328,6 +370,7 @@ export default function WordLikeDocumentEditor() {
   const [formatTick, setFormatTick] = useState(0)
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; hasSelection: boolean } | null>(null)
   const editorRef = useRef<A4EditorHandle>(null)
+  const lastPersistedDraftRef = useRef<string | null>(null)
 
   const defaultTemplate =
     getBuiltinDocumentSkill('document.template.general')
@@ -360,6 +403,23 @@ export default function WordLikeDocumentEditor() {
   }, [template])
 
   useEffect(() => {
+    const restored = loadDraftSession(activeWorkspacePath)
+    if (!restored) return
+    setSession(restored)
+    setTitle(restored.title)
+    setTemplateId(restored.templateSkillId)
+    setWorkspaceKbIds(restored.knowledgeBaseIds)
+    try {
+      lastPersistedDraftRef.current = JSON.stringify(restored)
+    } catch {
+      lastPersistedDraftRef.current = null
+    }
+    setSaveState('restored')
+    setStatus('草稿已恢复')
+    setStatusTone('ok')
+  }, [activeWorkspacePath, setWorkspaceKbIds])
+
+  useEffect(() => {
     setSession((prev) => (prev.title === title ? prev : { ...prev, title, updatedAt: new Date().toISOString() }))
   }, [title])
 
@@ -374,6 +434,41 @@ export default function WordLikeDocumentEditor() {
       return { ...prev, knowledgeBaseIds: workspaceKbIds, updatedAt: new Date().toISOString() }
     })
   }, [workspaceKbIds])
+
+  useEffect(() => {
+    const key = draftStorageKey(activeWorkspacePath)
+    if (!key || typeof window === 'undefined') return undefined
+
+    let serialized = ''
+    try {
+      serialized = JSON.stringify(session)
+    } catch {
+      setSaveState('error')
+      setStatus('草稿保存失败')
+      setStatusTone('err')
+      return undefined
+    }
+
+    if (serialized === lastPersistedDraftRef.current) {
+      return undefined
+    }
+
+    setSaveState('saving')
+    const timer = window.setTimeout(() => {
+      try {
+        window.localStorage.setItem(key, serialized)
+        lastPersistedDraftRef.current = serialized
+        setSaveState('saved')
+      } catch (error) {
+        setSaveState('error')
+        const msg = error instanceof Error ? error.message : '草稿保存失败'
+        setStatus(msg)
+        setStatusTone('err')
+      }
+    }, 180)
+
+    return () => window.clearTimeout(timer)
+  }, [activeWorkspacePath, session])
 
   const refreshUploadedFiles = useCallback(async () => {
     try {
@@ -431,43 +526,49 @@ export default function WordLikeDocumentEditor() {
     }
   }, [])
 
-  const handleExport = async (exporterId: string) => {
-    if (!activeWorkspacePath || !template) return
-    const exporter = skills.exporterSkills.find((s) => s.id === exporterId)
-      ?? getBuiltinDocumentSkill(exporterId)
-    if (!exporter) return
+  const exportAndDownloadCurrent = useCallback(async (format: DocumentExportFormat) => {
+    if (!activeWorkspacePath || !template) {
+      setStatus('请先打开工作区')
+      setStatusTone('err')
+      return
+    }
 
-    setExportBusy(true)
-    setStatus(`正在导出（${exporter.name}）…`)
+    if (format === 'html' && typeof document === 'undefined') {
+      setStatus('当前环境不支持 HTML 下载')
+      setStatusTone('err')
+      return
+    }
+
+    setExportBusyFormat(format)
+    setStatus(`正在生成${format === 'docx' ? ' Word' : format === 'markdown' ? ' Markdown' : ' HTML'}…`)
     setStatusTone(undefined)
     const html = syncHtmlFromEditor()
     const exportSession = { ...session, title, html }
 
     try {
-      const result = await runWebDocumentExport(exporter, activeWorkspacePath, exportSession, html)
-      if (!result.success) {
-        const err = result.error || '导出失败'
-        setStatus(
-          exporterId === 'document.export.pdf' && /未配置|not configured/i.test(err)
-            ? 'PDF 导出服务未配置，请先下载 Word。'
-            : err,
-        )
-        setStatusTone('err')
-        return
-      }
-      if (result.artifact?.id) {
-        const fmt = exportFormatFromManifest(exporter)
-        setSession((prev) => recordExportArtifact({ ...prev, title, html }, fmt, result.artifact!.id))
-        setStatus(webDocxSuccessMessage(result.artifact))
-        setStatusTone('ok')
-      }
-    } catch (e) {
-      setStatus(e instanceof Error ? e.message : '导出失败')
+      const result = await exportAndDownloadCurrentDocument({
+        format,
+        workspacePath: activeWorkspacePath,
+        session: exportSession,
+        bodyHtml: html,
+        exporters: skills.exporterSkills,
+      })
+      setSession(result.session)
+      setStatus(result.message)
+      setStatusTone('ok')
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : '导出失败'
+      setStatus(msg)
       setStatusTone('err')
     } finally {
-      setExportBusy(false)
+      setExportBusyFormat(null)
     }
-  }
+  }, [activeWorkspacePath, session, skills.exporterSkills, syncHtmlFromEditor, template, title])
+
+  const handlePdfExport = useCallback(() => {
+    setStatus('Web 版 PDF 导出暂未开放，请先下载 Word。')
+    setStatusTone('err')
+  }, [])
 
   const handleDownloadLast = async () => {
     const id =
@@ -509,6 +610,29 @@ export default function WordLikeDocumentEditor() {
       void refreshUploadedFiles()
     } catch (e) {
       setStatus(e instanceof Error ? e.message : '上传失败')
+      setStatusTone('err')
+    }
+  }
+
+  const confirmImportAsDocxContent = async () => {
+    if (!pendingImportFile) return
+    setImportModalOpen(false)
+    setStatus('正在解析 Word 文档…')
+    try {
+      const result = await importDocxAsContent(pendingImportFile)
+      editorRef.current?.replaceDocument(result.html)
+      setSession((prev) => ({
+        ...prev,
+        html: result.html,
+        title: result.title ?? prev.title,
+        updatedAt: new Date().toISOString(),
+      }))
+      if (result.title && !title) setTitle(result.title)
+      setStatus(`已导入正文（约 ${result.wordCount} 字）`)
+      setStatusTone('ok')
+      setPendingImportFile(null)
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : '导入失败，请确认文件是有效的 .docx 格式')
       setStatusTone('err')
     }
   }
@@ -566,18 +690,39 @@ export default function WordLikeDocumentEditor() {
         >
           <FileUp size={14} /> 资料
         </TopBtn>
-        <TopBtn type="button" disabled={exportBusy} onClick={() => void handleExport('document.export.docx')}>
-          <Download size={14} /> Word
+        <TopBtn
+          type="button"
+          disabled={Boolean(exportBusyFormat)}
+          onClick={() => void exportAndDownloadCurrent('docx')}
+        >
+          <Download size={14} />
+          {exportBusyFormat === 'docx' ? '正在生成 Word…' : '下载 Word'}
         </TopBtn>
-        <TopBtn type="button" disabled={exportBusy} onClick={() => void handleExport('document.export.pdf')}>
-          PDF
+        <TopBtn
+          type="button"
+          disabled={Boolean(exportBusyFormat)}
+          onClick={() => void exportAndDownloadCurrent('markdown')}
+        >
+          <Download size={14} />
+          {exportBusyFormat === 'markdown' ? '正在生成 Markdown…' : '下载 Markdown'}
         </TopBtn>
-        <TopBtn type="button" disabled={exportBusy} onClick={() => void handleExport('document.export.markdown')}>
-          MD
+        <TopBtn
+          type="button"
+          disabled={Boolean(exportBusyFormat)}
+          onClick={() => void exportAndDownloadCurrent('html')}
+        >
+          <Download size={14} />
+          {exportBusyFormat === 'html' ? '正在生成 HTML…' : '下载 HTML'}
+        </TopBtn>
+        <TopBtn type="button" disabled={Boolean(exportBusyFormat)} onClick={handlePdfExport}>
+          PDF（暂未开放）
         </TopBtn>
         {hasArtifact ? (
           <TopBtn type="button" onClick={() => void handleDownloadLast()}>下载最近</TopBtn>
         ) : null}
+        <SaveBadge $state={saveState}>
+          {saveState === 'saving' ? '保存中' : saveState === 'restored' ? '草稿已恢复' : saveState === 'error' ? '保存失败' : '已保存'}
+        </SaveBadge>
       </TopBar>
 
       {(uploadedFiles.length > 0 || workspaceKbIds.length > 0) && (
@@ -620,11 +765,13 @@ export default function WordLikeDocumentEditor() {
             fileIds={session.fileIds}
             session={session}
             onSessionUpdate={setSession}
+            onExportCurrentDocument={exportAndDownloadCurrent}
+            exportBusyFormat={exportBusyFormat}
             onStatus={(msg, tone) => {
               setStatus(msg)
               setStatusTone(tone)
             }}
-            disabled={exportBusy}
+            disabled={Boolean(exportBusyFormat)}
             patchActions={patchActions}
           />
         </AiSidebar>
@@ -655,14 +802,35 @@ export default function WordLikeDocumentEditor() {
         <ModalBackdrop onClick={() => setImportModalOpen(false)}>
           <ModalCard onClick={(e) => e.stopPropagation()}>
             <h3 style={{ margin: '0 0 12px', fontSize: 16 }}>导入 {pendingImportFile.name}</h3>
-            <p style={{ fontSize: 13, color: '#64748b', lineHeight: 1.5 }}>
-              第一版仅支持作为参考资料上传，供 AI 生成与编辑引用。<br />
-              Word 作为模板 / 可编辑文稿、PDF 版式背景：后续接入。
-            </p>
-            <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-              <TopBtn type="button" onClick={() => void confirmImportAsReference()}>作为资料</TopBtn>
-              <TopBtn type="button" onClick={() => setImportModalOpen(false)}>取消</TopBtn>
-            </div>
+            {pendingImportFile.name.toLowerCase().endsWith('.docx') ? (
+              <>
+                <p style={{ fontSize: 13, color: '#334155', lineHeight: 1.6, margin: '0 0 4px' }}>
+                  <strong>导入为正文</strong>：将 Word 文档内容提取并填入编辑器，可直接编辑。
+                </p>
+                <p style={{ fontSize: 13, color: '#334155', lineHeight: 1.6, margin: '0 0 16px' }}>
+                  <strong>作为参考资料</strong>：上传供 AI 生成时引用，不填入编辑器。
+                </p>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <TopBtn type="button" onClick={() => void confirmImportAsDocxContent()}>
+                    导入为正文
+                  </TopBtn>
+                  <TopBtn type="button" onClick={() => void confirmImportAsReference()}>
+                    作为参考资料
+                  </TopBtn>
+                  <TopBtn type="button" onClick={() => setImportModalOpen(false)}>取消</TopBtn>
+                </div>
+              </>
+            ) : (
+              <>
+                <p style={{ fontSize: 13, color: '#64748b', lineHeight: 1.5 }}>
+                  当前仅 .docx 文件支持导入为正文。此文件将作为参考资料上传，供 AI 生成时引用。
+                </p>
+                <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+                  <TopBtn type="button" onClick={() => void confirmImportAsReference()}>作为参考资料上传</TopBtn>
+                  <TopBtn type="button" onClick={() => setImportModalOpen(false)}>取消</TopBtn>
+                </div>
+              </>
+            )}
           </ModalCard>
         </ModalBackdrop>
       )}

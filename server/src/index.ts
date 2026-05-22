@@ -12,6 +12,7 @@ import calendarRouter from './routes/calendar'
 import settingsRouter from './routes/settings'
 import storeRouter from './routes/store'
 import { aiosRouter } from './features/aios'
+import documentRouter from './features/document/routes'
 import {
   globalRateLimit,
   authRateLimit,
@@ -74,6 +75,7 @@ app.use('/api/email', emailRouter)
 app.use('/api/calendar', calendarRouter)
 app.use('/api/settings', settingsRouter)
 app.use('/api/aios', aiosRouter)
+app.use('/api/document', documentRouter)
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() })

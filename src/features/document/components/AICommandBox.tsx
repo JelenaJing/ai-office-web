@@ -212,6 +212,16 @@ const ActionBtn = styled.button`
 
 type ResultTone = 'ok' | 'err' | 'info'
 
+const KbContextNote = styled.div<{ $tone: 'ok' | 'warn' }>`
+  font-size: 11px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: ${({ $tone }) => $tone === 'warn' ? '#fef9c3' : '#f0fdf4'};
+  color: ${({ $tone }) => $tone === 'warn' ? '#92400e' : '#166534'};
+  border: 1px solid ${({ $tone }) => $tone === 'warn' ? '#fde68a' : '#bbf7d0'};
+  line-height: 1.5;
+`
+
 interface AssistantState {
   badge: string
   hint: string
@@ -296,6 +306,9 @@ export function AICommandBox({
   const [resultTone, setResultTone] = useState<ResultTone>('info')
   const [resultCard, setResultCard] = useState<{ title: string; body: string } | null>(null)
   const [streaming, setStreaming] = useState(false)
+  const [lastKbContext, setLastKbContext] = useState<{
+    kbCount: number; fileCount: number; hasContext: boolean; isRagEnabled: boolean
+  } | null>(null)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
   const streamControllerRef = useRef<TypewriterController | null>(null)
 
@@ -433,6 +446,11 @@ export function AICommandBox({
         setInfo(msg, 'err')
         onStatus?.(msg, 'err')
         return
+      }
+
+      // Capture knowledge context stats for display
+      if (result.data?.knowledgeContext) {
+        setLastKbContext(result.data.knowledgeContext)
       }
 
       const patch = result.data?.patch
@@ -753,6 +771,21 @@ export function AICommandBox({
             </ActionBtn>
           </ActionButtons>
         </ActionCard>
+      ) : null}
+
+      {lastKbContext && knowledgeBaseIds.length > 0 ? (
+        lastKbContext.hasContext && lastKbContext.kbCount > 0 ? (
+          <KbContextNote $tone="ok">
+            📚 已列入知识库上下文：{lastKbContext.kbCount} 个知识库
+            {lastKbContext.fileCount > 0 ? `，共 ${lastKbContext.fileCount} 个文件` : ''}
+            {!lastKbContext.isRagEnabled ? '（目录引用，非语义检索）' : ''}
+          </KbContextNote>
+        ) : (
+          <KbContextNote $tone="warn">
+            ⚠️ 当前知识库未参与本次生成
+            {lastKbContext.fileCount === 0 ? '（知识库暂无文件）' : ''}
+          </KbContextNote>
+        )
       ) : null}
     </Panel>
   )
