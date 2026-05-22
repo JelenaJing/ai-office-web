@@ -1,3 +1,13 @@
 // email module — Web feature boundary
-// This file is the public API for the email module.
-// Import from here, not from sub-paths.
+// Public API for the email office capability module.
+
+// Components
+export { default as CommunicationWorkbench } from './components/CommunicationWorkbench'
+export { default as WebEmailPanel } from './components/WebEmailPanel' // temporary
+export { default as ComposeModal } from './components/ComposeModal'
+
+// Contexts
+export { EmailProvider, useEmail } from './contexts/EmailContext'
+
+// Services (exported for feature service consumers)
+export * from './services/emailRuntime'

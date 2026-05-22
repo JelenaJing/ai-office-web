@@ -1,3 +1,5 @@
 // resource-center module — Web feature boundary
-// This file is the public API for the resource-center module.
-// Import from here, not from sub-paths.
+export { default as ContextSourceSelector } from './components/ContextSourceSelector'
+export { default as KnowledgePanel } from './components/KnowledgePanel'
+export { default as PersonalFilesPanel } from './components/PersonalFilesPanel'
+export { default as WorkspaceFilesPanel } from './components/WorkspaceFilesPanel'

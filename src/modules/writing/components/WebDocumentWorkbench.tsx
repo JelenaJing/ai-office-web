@@ -1,4 +1,2 @@
-/**
- * WebDocumentWorkbench — 兼容入口，委托 WordLikeDocumentEditor
- */
-export { default } from './WordLikeDocumentEditor'
+// Compatibility re-export — moved to src/features/document/components/
+export { default } from '../../../features/document/components/WebDocumentWorkbench'

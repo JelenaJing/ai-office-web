@@ -1,3 +1,10 @@
 // knowledge module — Web feature boundary
-// This file is the public API for the knowledge module.
-// Import from here, not from sub-paths.
+export { default as KnowledgeConversationDock } from './components/KnowledgeConversationDock'
+export { default as KnowledgeSelectionDock } from './components/KnowledgeSelectionDock'
+export { default as PersonalLibrarySidebar } from './components/PersonalLibrarySidebar'
+export { default as KnowledgeTaskSelector } from './components/KnowledgeTaskSelector'
+export { default as RemoteKnowledgePanel } from './components/RemoteKnowledgePanel'
+export { default as KnowledgeChipBar } from './components/KnowledgeChipBar'
+export { default as KnowledgeTreePicker } from './components/KnowledgeTreePicker'
+export * from './contexts/KnowledgeContext'
+export * from './services/knowledgeWorkspace'
