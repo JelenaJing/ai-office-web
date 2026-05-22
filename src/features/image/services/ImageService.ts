@@ -319,7 +319,7 @@ export async function generateImage(params: GenerateImageParams): Promise<Genera
     styleProfileSummary: params.styleProfile?.summary || null,
     debugEnabled: params.debug?.enabled === true,
     note: isWebShim()
-      ? 'Web: platformApi.skills.run(web.image.generate)'
+      ? 'Web: /api/image/jobs async runtime'
       : 'Structured image payload is forwarded to IPC at this layer without prompt rewriting',
   }))
 
@@ -329,17 +329,61 @@ export async function generateImage(params: GenerateImageParams): Promise<Genera
       const ws = await platformApi.workspaces.getDefault()
       workspacePath = ws.path
     }
-    const skillResult = await platformApi.skills.run('web.image.generate', {
-      prompt: params.prompt,
-      workspacePath,
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    const token = platformApi.auth.getToken()
+    if (token) headers.Authorization = `Bearer ${token}`
+    const startResp = await fetch('/api/image/jobs/start', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ prompt: params.prompt, workspacePath }),
     })
-    if (!skillResult.success || !skillResult.artifact) {
+    const startBody = await startResp.json().catch(() => ({ error: `HTTP ${startResp.status}` })) as {
+      success?: boolean
+      jobId?: string
+      error?: string
+    }
+    if (!startResp.ok || !startBody.success || !startBody.jobId) {
       return {
         status: 'failed',
-        error: skillResult.error || '图片生成失败',
+        error: startBody.error || `图片生成任务启动失败 (${startResp.status})`,
       }
     }
-    const artifact = skillResult.artifact
+
+    let artifact: NonNullable<Awaited<ReturnType<typeof platformApi.skills.run>>['artifact']> | null = null
+    for (let i = 0; i < 120; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 1500))
+      const pollResp = await fetch(`/api/image/jobs/${startBody.jobId}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      const pollBody = await pollResp.json().catch(() => ({ error: `HTTP ${pollResp.status}` })) as {
+        success?: boolean
+        status?: string
+        error?: string
+        message?: string
+        result?: {
+          success?: boolean
+          artifact?: NonNullable<Awaited<ReturnType<typeof platformApi.skills.run>>['artifact']>
+          error?: string
+        }
+      }
+      if (!pollResp.ok || !pollBody.success) {
+        return { status: 'failed', error: pollBody.error || `图片生成任务查询失败 (${pollResp.status})` }
+      }
+      if (pollBody.status === 'failed') {
+        return { status: 'failed', error: pollBody.result?.error || pollBody.error || pollBody.message || '图片生成失败' }
+      }
+      if (pollBody.status === 'cancelled') {
+        return { status: 'failed', error: pollBody.message || '图片生成任务已取消' }
+      }
+      if (pollBody.status === 'completed' && pollBody.result?.success && pollBody.result.artifact) {
+        artifact = pollBody.result.artifact
+        break
+      }
+    }
+
+    if (!artifact) {
+      return { status: 'failed', error: '图片生成任务超时：生成时间过长，请重试。' }
+    }
     if (!artifactHasExport(artifact)) {
       return {
         status: 'failed',

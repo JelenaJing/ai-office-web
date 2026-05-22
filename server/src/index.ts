@@ -14,6 +14,7 @@ import storeRouter from './routes/store'
 import { aiosRouter } from './features/aios'
 import documentRouter from './features/document/routes'
 import pptRouter from './features/ppt/routes'
+import imageRouter from './features/image/routes'
 import {
   globalRateLimit,
   authRateLimit,
@@ -68,6 +69,7 @@ app.use('/api/skills', timeoutMiddleware(SKILL_TIMEOUT_MS), skillsRouter)
 // the same long timeout as skills.  Must be registered BEFORE the 30 s catch-all.
 app.use('/api/document', timeoutMiddleware(SKILL_TIMEOUT_MS), documentRouter)
 app.use('/api/ppt', timeoutMiddleware(SKILL_TIMEOUT_MS), pptRouter)
+app.use('/api/image', timeoutMiddleware(SKILL_TIMEOUT_MS), imageRouter)
 
 app.use('/api', timeoutMiddleware(REQUEST_TIMEOUT_MS))
 
