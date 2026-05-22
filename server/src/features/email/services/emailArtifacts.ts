@@ -70,6 +70,8 @@ export function createEmailDraftArtifact(input: EmailDraftArtifactInput): { arti
     filename: safeFilename(`${subject}.txt`, 'email-draft.txt'),
     format: 'txt',
     content: body,
+    emailId: input.emailId || 'manual',
+    sourceRefs: [{ type: 'email', id: input.emailId || 'manual', label: input.to }],
   })
   return {
     artifact,
@@ -92,6 +94,8 @@ export function createEmailAttachmentArtifact(input: EmailAttachmentArtifactInpu
     filename,
     format: filename.includes('.') ? filename.split('.').pop() || 'bin' : 'bin',
     content: input.content,
+    emailId: input.emailId,
+    sourceRefs: [{ type: 'email', id: input.emailId, label: filename }],
   })
   return {
     artifact,

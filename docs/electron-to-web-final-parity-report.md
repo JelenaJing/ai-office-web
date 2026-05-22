@@ -19,6 +19,7 @@ This report summarizes the overnight Electron/public-review to Web parity migrat
 | Deep email E2E hardening | pending | pass | smoke passed; partial |
 | Knowledge | `448ce46` | pass | partial |
 | Artifact / Resource Center | `bfeb069` | pass | partial |
+| Deep artifact/knowledge E2E hardening | pending | pass | smoke passed with knowledge import partial |
 | Image | `df57dc5` | pass | partial |
 | Data analysis | `f01d6c8` | pass | partial |
 | Daily report | `d8dd304` | pass | partial |
@@ -37,8 +38,8 @@ No module is marked full Electron parity in this pass. The Web runtime now has c
 - Formal template workflow: async task metadata, preview/commit metadata, artifact-style result with `artifactId`/source/export refs, and OOXML gap diagnostics.
 - PPT: DeckDocument task API, download endpoint, zero-token retemplate preview, template manifest inventory, server-bound slot metadata, slide-level content-fit diagnostics, Matter source refs, and artifact relationship metadata.
 - Email: account/IMAP/SMTP baseline, async unread triage task API with safe deterministic classification, triage cache key, reply draft Artifact, attachment Artifact ingestion, dry-run salutations, and email-to-Matter-to-document/PPT handoff.
-- Knowledge: remote-backed info/list/import/delete plus parity status.
-- Artifact: list/detail/download plus preview, rename, and delete.
+- Knowledge: remote-backed info/list/import/delete plus parity status, with remote import failures recorded as partial instead of success.
+- Artifact: create/list/detail/download/preview/rename/delete plus `sourceRefs`, `knowledgeRefs`, matter/email/deck/document ids, and relationship graph endpoint.
 - Image: async text-to-image job API and image Artifact output.
 - Data analysis: async xlsx/csv analysis job API and Markdown Artifact output.
 - Daily report: work-report event/daily/subordinates/summary API and report Artifact output.
@@ -53,8 +54,8 @@ No module is marked full Electron parity in this pass. The Web runtime now has c
 - High-fidelity formal template OOXML block write-back, header/footer fidelity, and schema-first replacement.
 - Durable PPT DeckDocument storage, full RetemplateEngine layout matching, external PPT import, full template registry parity, and high-fidelity slotBinder/contentPaginator rendering.
 - LLM-backed email triage, manual-approved bulk send execution, high-fidelity attachment preview/open workflow, and Calendar-specific email handoff.
-- Verified end-to-end RAG/vector search with citation propagation across all generators.
-- High-fidelity Office artifact preview and complete cross-module relationship graph.
+- Verified end-to-end RAG/vector search with citation propagation across all generators; knowledge import depends on remote-service availability.
+- High-fidelity Office artifact preview and complete relationship graph UI browsing.
 - Reference-image/poster image workflow and generated image insertion into document/PPT.
 - Python execution environment parity, chart Artifact generation, and Electron stdout/result parser parity for data analysis.
 - Supervisor/admin daily report hierarchy and durable activity ingestion.
@@ -87,8 +88,8 @@ No module is marked full Electron parity in this pass. The Web runtime now has c
 | Document | yes | yes |
 | PPT | yes with `relationships.artifactId` | yes |
 | Email | yes for draft and attachment Artifacts | triage yes |
-| Knowledge | no generated Artifact | no |
-| Artifact | manages all Artifacts | no |
+| Knowledge | contributes `knowledgeRefs` to Artifacts | no |
+| Artifact | manages all Artifacts and relationship metadata | no |
 | Image | yes | yes |
 | Data analysis | yes | yes |
 | Report | yes | no |
@@ -106,8 +107,8 @@ Not yet. Web now has clearer module APIs and safer partial parity markers, but i
 - Generate paper and formal template documents and verify partial banners/diagnostics.
 - Generate PPT, download PPTX, test zero-token template switch, and verify Matter/document source refs.
 - Configure email, pull unread messages, start/cancel triage, save a reply draft Artifact, ingest an attachment Artifact, and convert email to Matter/document/PPT.
-- Upload/list/delete knowledge documents and check parity status.
-- Preview, rename, download, and delete Artifacts.
+- Upload/list/delete knowledge documents when remote service permits, and check parity status.
+- Create, preview, rename, download, delete Artifacts, and inspect relationship graph/source refs.
 - Run image, xlsx/csv analysis, and daily report from Web UI.
 - Exercise chat room/message endpoints and directory status.
 - Check Skill Center status and selected built-in job execution.

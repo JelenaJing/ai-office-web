@@ -14,6 +14,7 @@ import path from 'path'
 import fs from 'fs'
 import { deleteArtifact, getArtifact, getArtifactFilePath, listArtifactsByUser, updateArtifact } from '../artifacts/ArtifactStore'
 import { requireAccountUser } from '../lib/authUser'
+import { saveSkillArtifact } from '../lib/skillArtifact'
 
 const router = Router()
 
@@ -42,6 +43,43 @@ router.get('/', async (req, res) => {
   if (!userId) return
   const artifacts = listArtifactsByUser(userId)
   return res.json({ artifacts })
+})
+
+router.post('/', async (req, res) => {
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+  const workspacePath = String(req.body?.workspacePath || '').trim()
+  const title = String(req.body?.title || 'Artifact').trim()
+  const format = String(req.body?.format || 'txt').trim().replace(/^\./, '') || 'txt'
+  const filename = String(req.body?.filename || `${title}.${format}`).trim()
+  if (!workspacePath) {
+    return res.status(400).json({ success: false, error: 'workspacePath 不能为空' })
+  }
+  const content = typeof req.body?.contentBase64 === 'string'
+    ? Buffer.from(req.body.contentBase64, 'base64')
+    : String(req.body?.content || '')
+  try {
+    const artifact = saveSkillArtifact({
+      userId,
+      workspacePath,
+      skillId: typeof req.body?.skillId === 'string' ? req.body.skillId : 'web.artifact.create',
+      type: typeof req.body?.type === 'string' ? req.body.type : 'document',
+      title,
+      filename,
+      format,
+      content,
+      sourceRefs: Array.isArray(req.body?.sourceRefs) ? req.body.sourceRefs : undefined,
+      knowledgeRefs: Array.isArray(req.body?.knowledgeRefs) ? req.body.knowledgeRefs : undefined,
+      matterId: typeof req.body?.matterId === 'string' ? req.body.matterId : undefined,
+      emailId: typeof req.body?.emailId === 'string' ? req.body.emailId : undefined,
+      deckId: typeof req.body?.deckId === 'string' ? req.body.deckId : undefined,
+      documentId: typeof req.body?.documentId === 'string' ? req.body.documentId : undefined,
+    })
+    return res.status(201).json({ success: true, artifact })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return res.status(400).json({ success: false, error: message })
+  }
 })
 
 // ── GET /api/artifacts/:artifactId ────────────────────────────────────────────
@@ -128,6 +166,11 @@ router.get('/:artifactId/preview', async (req, res) => {
       artifact,
       preview: null,
       previewStatus: 'download-only',
+      previewCapabilities: {
+        inline: false,
+        download: true,
+        reason: `.${ext || 'unknown'} preview is not supported inline`,
+      },
       downloadUrl: `/api/artifacts/${artifactId}/download`,
     })
   }
@@ -135,6 +178,39 @@ router.get('/:artifactId/preview', async (req, res) => {
   const contentType = CONTENT_TYPES[ext] ?? 'application/octet-stream'
   res.setHeader('Content-Type', contentType)
   return res.sendFile(filePath)
+})
+
+router.get('/:artifactId/relationships', async (req, res) => {
+  const { artifactId } = req.params
+  const artifact = getArtifact(artifactId)
+  if (!artifact) {
+    return res.status(404).json({ message: 'Artifact not found', artifactId })
+  }
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+  if (artifact.userId && artifact.userId !== userId) {
+    return res.status(403).json({ message: 'Access denied' })
+  }
+  return res.json({
+    artifactId,
+    sourceRefs: artifact.sourceRefs ?? [],
+    knowledgeRefs: artifact.knowledgeRefs ?? [],
+    matterId: artifact.matterId,
+    emailId: artifact.emailId,
+    deckId: artifact.deckId,
+    documentId: artifact.documentId,
+    graph: {
+      nodes: [
+        { id: artifact.id, type: 'artifact', label: artifact.title },
+        ...(artifact.sourceRefs ?? []).map((ref) => ({ id: ref.id, type: ref.type, label: ref.label ?? ref.id })),
+        ...(artifact.knowledgeRefs ?? []).map((ref) => ({ id: ref.documentId, type: 'knowledge', label: ref.title ?? ref.documentId })),
+      ],
+      edges: [
+        ...(artifact.sourceRefs ?? []).map((ref) => ({ from: ref.id, to: artifact.id, relation: 'source' })),
+        ...(artifact.knowledgeRefs ?? []).map((ref) => ({ from: ref.documentId, to: artifact.id, relation: 'knowledge' })),
+      ],
+    },
+  })
 })
 
 router.patch('/:artifactId', async (req, res) => {

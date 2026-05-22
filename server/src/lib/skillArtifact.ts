@@ -6,6 +6,8 @@ import {
   parseWorkspacePath,
   saveArtifactMetadata,
   type Artifact,
+  type ArtifactKnowledgeRef,
+  type ArtifactSourceRef,
 } from '../artifacts/ArtifactStore'
 
 export interface SaveSkillArtifactInput {
@@ -17,6 +19,12 @@ export interface SaveSkillArtifactInput {
   filename: string
   format: string
   content: Buffer | string
+  sourceRefs?: ArtifactSourceRef[]
+  knowledgeRefs?: ArtifactKnowledgeRef[]
+  matterId?: string
+  emailId?: string
+  deckId?: string
+  documentId?: string
 }
 
 export function saveSkillArtifact(input: SaveSkillArtifactInput): Artifact {
@@ -54,6 +62,12 @@ export function saveSkillArtifact(input: SaveSkillArtifactInput): Artifact {
         url: `/api/artifacts/${artifactId}/download`,
       },
     ],
+    sourceRefs: input.sourceRefs,
+    knowledgeRefs: input.knowledgeRefs,
+    matterId: input.matterId,
+    emailId: input.emailId,
+    deckId: input.deckId,
+    documentId: input.documentId,
   }
   saveArtifactMetadata(artifact)
   return artifact

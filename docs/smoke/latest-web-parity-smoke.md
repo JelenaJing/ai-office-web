@@ -1,23 +1,23 @@
 # Latest Web Parity Smoke Report
 
-- Started: 2026-05-22T17:27:21.018Z
-- Finished: 2026-05-22T17:27:54.086Z
+- Started: 2026-05-22T17:30:12.879Z
+- Finished: 2026-05-22T17:30:22.014Z
 - Base URL: http://127.0.0.1:3001
-- Modules: email
-- Totals: passed 13, failed 0, skipped 0
+- Modules: artifact-knowledge
+- Totals: passed 11, failed 0, skipped 2
 
 | Module | Endpoint | Expected | Actual | Status | Error |
 | --- | --- | --- | --- | --- | --- |
 | auth | `POST /api/auth/login` | HTTP 2xx and token | HTTP 200 with token | passed |  |
-| email | `GET /api/workspaces/default` | workspace path | HTTP 200 workspace=web-workspace:7b33dbd9-1a28-48e4-b2a3-226e3b0f6494:32425493-bbc7-481e-8c25-92ff13fbc626 | passed |  |
-| email | `GET /api/email/accounts` | account list endpoint reports configuration status | HTTP 200 configured=true | passed |  |
-| email | `POST /api/email/drafts/dry-run` | dry-run recipient resolver returns salutations without sending | HTTP 200 recipients=2 | passed |  |
-| email | `POST /api/email/drafts/artifact` | reply draft is saved as email_draft Artifact | HTTP 200 artifact=97cfa3fc-f6f7-4473-8089-843b556011ee | passed |  |
-| email | `POST /api/email/attachments/artifacts` | attachment payload is saved as Artifact with email relationship | HTTP 200 artifacts=1 | passed |  |
-| email | `POST /api/aios/matters/from-email` | email converts to Matter | HTTP 201 matterId=4e9d0916-d520-4b66-860e-0fde2caf9185 | passed |  |
-| email | `POST /api/aios/matters/4e9d0916-d520-4b66-860e-0fde2caf9185/generate-document` | mail Matter can generate document Artifact | HTTP 200 artifact=3f341f29-2315-4a3a-94bf-57108bc30e22 | passed |  |
-| email | `POST /api/aios/matters/4e9d0916-d520-4b66-860e-0fde2caf9185/generate-ppt` | mail Matter can generate PPT Artifact | HTTP 200 artifact=67e3b156-b551-4bb4-9a6f-7509018d9899 | passed |  |
-| email | `GET /api/email/messages?folder=inbox` | inbox fetch succeeds when account is configured | HTTP 200 messages=30 | passed |  |
-| email | `POST /api/email/triage/start` | triage task starts for unread-only messages | HTTP 200 taskId=a008317d-395f-4c6c-bc85-07ab5554f782 | passed |  |
-| email | `GET /api/email/triage/tasks/:taskId` | completed triage with categories, summaries, priorities, draft relationships, unread guard, and cache key | status=completed results=10 cacheKey=email-triage:1779470862582 | passed |  |
-| email | `POST /api/email/messages/828/attachments/0/artifact` | real email attachment converts to Artifact | HTTP 200 artifact=4ab8483a-18cc-4b3f-b767-fb53da0e8ace | passed |  |
+| artifact-knowledge | `GET /api/workspaces/default` | workspace path | HTTP 200 workspace=web-workspace:7b33dbd9-1a28-48e4-b2a3-226e3b0f6494:32425493-bbc7-481e-8c25-92ff13fbc626 | passed |  |
+| artifact-knowledge | `POST /api/artifacts` | document artifact created with source/knowledge/matter/email/deck/document refs | HTTP 201 artifact=4d4a4fed-b336-4e90-ab0c-048fa14f1814 | passed |  |
+| artifact-knowledge | `GET /api/artifacts/4d4a4fed-b336-4e90-ab0c-048fa14f1814` | artifact detail includes relationship metadata | HTTP 200 artifact=4d4a4fed-b336-4e90-ab0c-048fa14f1814 | passed |  |
+| artifact-knowledge | `GET /api/artifacts/4d4a4fed-b336-4e90-ab0c-048fa14f1814/relationships` | relationship graph exposes sourceRefs and knowledgeRefs | HTTP 200 nodes=3 | passed |  |
+| artifact-knowledge | `GET /api/artifacts/4d4a4fed-b336-4e90-ab0c-048fa14f1814/preview` | markdown preview is available | HTTP 200 bytes=74 | passed |  |
+| artifact-knowledge | `PATCH /api/artifacts/4d4a4fed-b336-4e90-ab0c-048fa14f1814` | artifact can be renamed | HTTP 200 title=Artifact Knowledge Smoke Renamed | passed |  |
+| artifact-knowledge | `GET /api/artifacts/4d4a4fed-b336-4e90-ab0c-048fa14f1814/download` | artifact download returns file | HTTP 200 bytes=74 | passed |  |
+| artifact-knowledge | `GET /api/knowledge/scientific-papers/parity-status` | knowledge parity status reports partial capability matrix | HTTP 200 status=partial | passed |  |
+| artifact-knowledge | `GET /api/knowledge/scientific-papers/documents` | knowledge document list succeeds or reports remote-service partial | HTTP 200 documents=51 | passed |  |
+| artifact-knowledge | `POST /api/knowledge/scientific-papers/import` | knowledge import succeeds or reports remote-service partial | HTTP 502 | skipped |  |
+| artifact-knowledge | `DELETE /api/knowledge/scientific-papers/documents/:documentId` | delete imported test document when import succeeds | skipped because import did not return documentId | skipped |  |
+| artifact-knowledge | `DELETE /api/artifacts/4d4a4fed-b336-4e90-ab0c-048fa14f1814` | artifact can be deleted | HTTP 200 | passed |  |

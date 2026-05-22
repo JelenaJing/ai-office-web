@@ -147,6 +147,8 @@ export async function createDeckFromPrompt(input: CreateDeckInput): Promise<WebD
     filename: `${safeName}.pptx`,
     format: 'pptx',
     content: fs.readFileSync(tmpPath),
+    deckId,
+    sourceRefs: deck.sourceRefs.map((ref) => ({ type: ref.type, id: ref.id, label: ref.label })),
   })
   deck.artifactRefs = [
     { artifactId: artifact.id, type: artifact.type, relation: 'export' },

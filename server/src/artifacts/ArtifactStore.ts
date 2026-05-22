@@ -26,6 +26,19 @@ export interface ArtifactExport {
   url: string
 }
 
+export interface ArtifactSourceRef {
+  type: 'email' | 'matter' | 'deck' | 'document' | 'knowledge' | 'manual' | string
+  id: string
+  label?: string
+}
+
+export interface ArtifactKnowledgeRef {
+  documentId: string
+  departmentId?: string
+  title?: string
+  citationStatus?: 'verified' | 'partial' | 'unverified'
+}
+
 export interface Artifact {
   id: string
   userId: string
@@ -37,6 +50,12 @@ export interface Artifact {
   createdBySkillId: string
   createdAt: string
   exports: ArtifactExport[]
+  sourceRefs?: ArtifactSourceRef[]
+  knowledgeRefs?: ArtifactKnowledgeRef[]
+  matterId?: string
+  emailId?: string
+  deckId?: string
+  documentId?: string
 }
 
 interface ArtifactIndexEntry {
@@ -136,7 +155,7 @@ export function getArtifact(artifactId: string): Artifact | null {
   }
 }
 
-export function updateArtifact(artifactId: string, patch: Partial<Pick<Artifact, 'title' | 'type' | 'editable'>>): Artifact | null {
+export function updateArtifact(artifactId: string, patch: Partial<Pick<Artifact, 'title' | 'type' | 'editable' | 'sourceRefs' | 'knowledgeRefs' | 'matterId' | 'emailId' | 'deckId' | 'documentId'>>): Artifact | null {
   const current = getArtifact(artifactId)
   if (!current) return null
   const updated: Artifact = {

@@ -1,14 +1,14 @@
 {
-  "startedAt": "2026-05-22T17:27:21.018Z",
-  "finishedAt": "2026-05-22T17:27:54.086Z",
+  "startedAt": "2026-05-22T17:30:12.879Z",
+  "finishedAt": "2026-05-22T17:30:22.014Z",
   "baseUrl": "http://127.0.0.1:3001",
   "modules": [
-    "email"
+    "artifact-knowledge"
   ],
   "totals": {
-    "passed": 13,
+    "passed": 11,
     "failed": 0,
-    "skipped": 0
+    "skipped": 2
   },
   "steps": [
     {
@@ -17,10 +17,10 @@
       "expected": "HTTP 2xx and token",
       "actual": "HTTP 200 with token",
       "status": "passed",
-      "durationMs": 564
+      "durationMs": 464
     },
     {
-      "module": "email",
+      "module": "artifact-knowledge",
       "endpoint": "GET /api/workspaces/default",
       "expected": "workspace path",
       "actual": "HTTP 200 workspace=web-workspace:7b33dbd9-1a28-48e4-b2a3-226e3b0f6494:32425493-bbc7-481e-8c25-92ff13fbc626",
@@ -28,92 +28,92 @@
       "durationMs": 0
     },
     {
-      "module": "email",
-      "endpoint": "GET /api/email/accounts",
-      "expected": "account list endpoint reports configuration status",
-      "actual": "HTTP 200 configured=true",
+      "module": "artifact-knowledge",
+      "endpoint": "POST /api/artifacts",
+      "expected": "document artifact created with source/knowledge/matter/email/deck/document refs",
+      "actual": "HTTP 201 artifact=4d4a4fed-b336-4e90-ab0c-048fa14f1814",
       "status": "passed",
       "durationMs": 0
     },
     {
-      "module": "email",
-      "endpoint": "POST /api/email/drafts/dry-run",
-      "expected": "dry-run recipient resolver returns salutations without sending",
-      "actual": "HTTP 200 recipients=2",
+      "module": "artifact-knowledge",
+      "endpoint": "GET /api/artifacts/4d4a4fed-b336-4e90-ab0c-048fa14f1814",
+      "expected": "artifact detail includes relationship metadata",
+      "actual": "HTTP 200 artifact=4d4a4fed-b336-4e90-ab0c-048fa14f1814",
       "status": "passed",
-      "durationMs": 30
+      "durationMs": 23
     },
     {
-      "module": "email",
-      "endpoint": "POST /api/email/drafts/artifact",
-      "expected": "reply draft is saved as email_draft Artifact",
-      "actual": "HTTP 200 artifact=97cfa3fc-f6f7-4473-8089-843b556011ee",
+      "module": "artifact-knowledge",
+      "endpoint": "GET /api/artifacts/4d4a4fed-b336-4e90-ab0c-048fa14f1814/relationships",
+      "expected": "relationship graph exposes sourceRefs and knowledgeRefs",
+      "actual": "HTTP 200 nodes=3",
       "status": "passed",
-      "durationMs": 33
+      "durationMs": 23
     },
     {
-      "module": "email",
-      "endpoint": "POST /api/email/attachments/artifacts",
-      "expected": "attachment payload is saved as Artifact with email relationship",
-      "actual": "HTTP 200 artifacts=1",
+      "module": "artifact-knowledge",
+      "endpoint": "GET /api/artifacts/4d4a4fed-b336-4e90-ab0c-048fa14f1814/preview",
+      "expected": "markdown preview is available",
+      "actual": "HTTP 200 bytes=74",
       "status": "passed",
-      "durationMs": 27
+      "durationMs": 28
     },
     {
-      "module": "email",
-      "endpoint": "POST /api/aios/matters/from-email",
-      "expected": "email converts to Matter",
-      "actual": "HTTP 201 matterId=4e9d0916-d520-4b66-860e-0fde2caf9185",
+      "module": "artifact-knowledge",
+      "endpoint": "PATCH /api/artifacts/4d4a4fed-b336-4e90-ab0c-048fa14f1814",
+      "expected": "artifact can be renamed",
+      "actual": "HTTP 200 title=Artifact Knowledge Smoke Renamed",
       "status": "passed",
+      "durationMs": 28
+    },
+    {
+      "module": "artifact-knowledge",
+      "endpoint": "GET /api/artifacts/4d4a4fed-b336-4e90-ab0c-048fa14f1814/download",
+      "expected": "artifact download returns file",
+      "actual": "HTTP 200 bytes=74",
+      "status": "passed",
+      "durationMs": 24
+    },
+    {
+      "module": "artifact-knowledge",
+      "endpoint": "GET /api/knowledge/scientific-papers/parity-status",
+      "expected": "knowledge parity status reports partial capability matrix",
+      "actual": "HTTP 200 status=partial",
+      "status": "passed",
+      "durationMs": 84
+    },
+    {
+      "module": "artifact-knowledge",
+      "endpoint": "GET /api/knowledge/scientific-papers/documents",
+      "expected": "knowledge document list succeeds or reports remote-service partial",
+      "actual": "HTTP 200 documents=51",
+      "status": "passed",
+      "durationMs": 289
+    },
+    {
+      "module": "artifact-knowledge",
+      "endpoint": "POST /api/knowledge/scientific-papers/import",
+      "expected": "knowledge import succeeds or reports remote-service partial",
+      "actual": "HTTP 502",
+      "status": "skipped",
       "durationMs": 0
     },
     {
-      "module": "email",
-      "endpoint": "POST /api/aios/matters/4e9d0916-d520-4b66-860e-0fde2caf9185/generate-document",
-      "expected": "mail Matter can generate document Artifact",
-      "actual": "HTTP 200 artifact=3f341f29-2315-4a3a-94bf-57108bc30e22",
-      "status": "passed",
-      "durationMs": 9631
-    },
-    {
-      "module": "email",
-      "endpoint": "POST /api/aios/matters/4e9d0916-d520-4b66-860e-0fde2caf9185/generate-ppt",
-      "expected": "mail Matter can generate PPT Artifact",
-      "actual": "HTTP 200 artifact=67e3b156-b551-4bb4-9a6f-7509018d9899",
-      "status": "passed",
-      "durationMs": 7485
-    },
-    {
-      "module": "email",
-      "endpoint": "GET /api/email/messages?folder=inbox",
-      "expected": "inbox fetch succeeds when account is configured",
-      "actual": "HTTP 200 messages=30",
-      "status": "passed",
+      "module": "artifact-knowledge",
+      "endpoint": "DELETE /api/knowledge/scientific-papers/documents/:documentId",
+      "expected": "delete imported test document when import succeeds",
+      "actual": "skipped because import did not return documentId",
+      "status": "skipped",
       "durationMs": 0
     },
     {
-      "module": "email",
-      "endpoint": "POST /api/email/triage/start",
-      "expected": "triage task starts for unread-only messages",
-      "actual": "HTTP 200 taskId=a008317d-395f-4c6c-bc85-07ab5554f782",
+      "module": "artifact-knowledge",
+      "endpoint": "DELETE /api/artifacts/4d4a4fed-b336-4e90-ab0c-048fa14f1814",
+      "expected": "artifact can be deleted",
+      "actual": "HTTP 200",
       "status": "passed",
-      "durationMs": 0
-    },
-    {
-      "module": "email",
-      "endpoint": "GET /api/email/triage/tasks/:taskId",
-      "expected": "completed triage with categories, summaries, priorities, draft relationships, unread guard, and cache key",
-      "actual": "status=completed results=10 cacheKey=email-triage:1779470862582",
-      "status": "passed",
-      "durationMs": 0
-    },
-    {
-      "module": "email",
-      "endpoint": "POST /api/email/messages/828/attachments/0/artifact",
-      "expected": "real email attachment converts to Artifact",
-      "actual": "HTTP 200 artifact=4ab8483a-18cc-4b3f-b767-fb53da0e8ace",
-      "status": "passed",
-      "durationMs": 721
+      "durationMs": 24
     }
   ]
 }

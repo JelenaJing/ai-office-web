@@ -14,7 +14,7 @@ import {
 } from './smoke-utils'
 
 const ROOT_DIR = path.resolve(__dirname, '..', '..')
-const ALL_MODULES = ['document', 'ppt', 'email', 'aios'] as const
+const ALL_MODULES = ['document', 'ppt', 'email', 'artifact-knowledge', 'aios'] as const
 type SmokeModuleName = typeof ALL_MODULES[number]
 
 async function fallbackSmoke(moduleName: SmokeModuleName, ctx: SmokeContext): Promise<void> {
@@ -31,6 +31,10 @@ async function fallbackSmoke(moduleName: SmokeModuleName, ctx: SmokeContext): Pr
       accept: (res) => res.ok || res.status === 404,
       actual: (res) => `HTTP ${res.status}`,
     })
+    return
+  }
+  if (moduleName === 'artifact-knowledge') {
+    await smokeHttp(ctx, 'artifact-knowledge', 'GET', '/api/artifacts', 'artifact list endpoint exists')
     return
   }
   if (moduleName === 'aios') {
