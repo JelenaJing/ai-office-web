@@ -10,6 +10,7 @@ import {
   getPaperTask,
   updatePaperTask,
 } from '../services/paperTaskStore'
+import { runPaperNFTCORE } from '../services/paperNFTCORERuntime'
 
 const router = Router()
 
@@ -35,21 +36,31 @@ router.post('/start', requireAccountUser, async (req, res) => {
 
   const task = createPaperTask(paperType)
   const label = paperType === 'review' ? '文献综述' : '研究文章'
-  updatePaperTask(task.taskId, { status: 'running', message: `正在启动${label}链路…`, progress: 5 })
+  const mode = typeof req.body?.mode === 'string' ? req.body.mode as PaperWorkflowMode : 'full'
+
+  updatePaperTask(task.taskId, { status: 'running', message: `正在启动${label} NFTCORE 链路…`, progress: 5 })
+
+  const isFullMode = !mode || mode === 'full'
+  const language: 'zh' | 'en' = req.body?.language === 'en' ? 'en' : 'zh'
+  const extraContext = typeof req.body?.extraContext === 'string' ? req.body.extraContext : undefined
+  const yearFrom = typeof req.body?.yearFrom === 'string' ? req.body.yearFrom : undefined
+  const yearTo = typeof req.body?.yearTo === 'string' ? req.body.yearTo : undefined
 
   // Fire-and-forget: run generation in background
-  runPaperWorkflowService({
-    topic,
-    paperType,
-    language: req.body?.language === 'en' ? 'en' : 'zh',
-    extraContext: typeof req.body?.extraContext === 'string' ? req.body.extraContext : undefined,
-    yearFrom: typeof req.body?.yearFrom === 'string' ? req.body.yearFrom : undefined,
-    yearTo: typeof req.body?.yearTo === 'string' ? req.body.yearTo : undefined,
-    mode: typeof req.body?.mode === 'string' ? req.body.mode as PaperWorkflowMode : undefined,
-    onStep: (step, message, progress) => {
-      updatePaperTask(task.taskId, { status: 'running', message, progress })
-    },
-  })
+  ;(isFullMode
+    ? runPaperNFTCORE(
+        { topic, paperType, language, extraContext, yearFrom, yearTo },
+        (_step, message, partial) => {
+          updatePaperTask(task.taskId, { status: 'running', message, partialMarkdown: partial })
+        },
+      )
+    : runPaperWorkflowService({
+        topic, paperType, language, extraContext, yearFrom, yearTo, mode,
+        onStep: (_step, message, progress) => {
+          updatePaperTask(task.taskId, { status: 'running', message, progress })
+        },
+      })
+  )
     .then((result) => {
       updatePaperTask(task.taskId, {
         status: 'completed',
@@ -59,7 +70,7 @@ router.post('/start', requireAccountUser, async (req, res) => {
           title: result.title,
           markdown: result.markdown,
           html: result.html,
-          paperType: result.paperType,
+          paperType: result.paperType as PaperWorkflowPaperType,
           diagnostics: result.diagnostics,
         },
       })

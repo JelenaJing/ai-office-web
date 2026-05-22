@@ -36,7 +36,7 @@ export interface PaperWorkflowGenerateResult {
   paperType: PaperWorkflowPaperType
   artifact?: unknown
   diagnostics: {
-    chain: 'paper-workflow' | 'paper-workflow-web-adapter'
+    chain: 'paper-workflow' | 'paper-workflow-web-adapter' | 'electron-compatible-nftcore' | 'web-paper-runtime' | 'web-paper-compatible-runtime'
     steps: string[]
   }
 }
