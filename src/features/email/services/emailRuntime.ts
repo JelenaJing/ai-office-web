@@ -19,6 +19,15 @@ function getElectronApi() {
   return window.electronAPI
 }
 
+function readAuthToken(): string | null {
+  if (typeof window === 'undefined') return null
+  return (
+    window.localStorage.getItem('aios_auth_token')
+    ?? window.localStorage.getItem('aios_itoken')
+    ?? window.localStorage.getItem('ai_office_internal_token')
+  )
+}
+
 function mapWebAccountToConfig(state: EmailAccountState): EmailAccountConfig | null {
   if (!state.configured || !state.user) return null
   return {
@@ -185,4 +194,46 @@ export async function emailRuntimeSendReply(options: {
 
 export function emailRuntimeSupportsAttachments(): boolean {
   return !isWebShim()
+}
+
+export async function emailRuntimeStartTriage(limit = 20): Promise<{ taskId: string }> {
+  if (!isWebShim()) {
+    throw new Error('Electron 邮件整理继续使用本地 MailTriageContext。')
+  }
+  const token = readAuthToken()
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (token) headers.Authorization = `Bearer ${token}`
+  const response = await fetch('/api/email/triage/start', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ limit }),
+  })
+  const body = await response.json().catch(() => ({ error: `HTTP ${response.status}` })) as { taskId?: string; error?: string }
+  if (!response.ok || !body.taskId) {
+    throw new Error(body.error || `邮件整理任务启动失败 (${response.status})`)
+  }
+  return { taskId: body.taskId }
+}
+
+export async function emailRuntimeGetTriageTask(taskId: string): Promise<Record<string, unknown>> {
+  const token = readAuthToken()
+  const headers: Record<string, string> = {}
+  if (token) headers.Authorization = `Bearer ${token}`
+  const response = await fetch(`/api/email/triage/tasks/${taskId}`, { headers })
+  const body = await response.json().catch(() => ({ error: `HTTP ${response.status}` })) as Record<string, unknown>
+  if (!response.ok) {
+    throw new Error(String(body.error || `邮件整理任务查询失败 (${response.status})`))
+  }
+  return body
+}
+
+export async function emailRuntimeCancelTriageTask(taskId: string): Promise<void> {
+  const token = readAuthToken()
+  const headers: Record<string, string> = {}
+  if (token) headers.Authorization = `Bearer ${token}`
+  const response = await fetch(`/api/email/triage/tasks/${taskId}/cancel`, { method: 'POST', headers })
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({ error: `HTTP ${response.status}` })) as { error?: string }
+    throw new Error(body.error || `邮件整理任务取消失败 (${response.status})`)
+  }
 }

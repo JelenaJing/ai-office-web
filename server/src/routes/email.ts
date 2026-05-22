@@ -10,6 +10,13 @@ import {
   testEmailAccount,
   type StoredEmailAccount,
 } from '../modules/email'
+import {
+  createEmailTriageTask,
+  getEmailTriageTask,
+  requestEmailTriageCancel,
+  updateEmailTriageTask,
+} from '../features/email/services/emailTriageTaskStore'
+import { runEmailUnreadTriage } from '../features/email/services/emailTriageService'
 
 const router = Router()
 
@@ -116,6 +123,82 @@ router.post('/send', async (req, res) => {
     const msg = err instanceof Error ? err.message : String(err)
     res.status(502).json({ ok: false, message: msg })
   }
+})
+
+router.post('/triage/start', async (req, res) => {
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+  const account = getEmailAccount(userId)
+  if (!account) {
+    return res.status(400).json({ success: false, error: '请先配置邮箱账号' })
+  }
+
+  const task = createEmailTriageTask()
+  updateEmailTriageTask(task.taskId, {
+    status: 'running',
+    progress: 5,
+    message: '正在启动未读邮件 AI 整理任务…',
+  })
+
+  void runEmailUnreadTriage({
+    account,
+    limit: Number(req.body?.limit) || 20,
+    isCancelled: () => Boolean(getEmailTriageTask(task.taskId)?.cancelRequested),
+    onStep: (message, progress, results) => updateEmailTriageTask(task.taskId, {
+      status: 'running',
+      message,
+      progress,
+      results,
+    }),
+  })
+    .then((results) => {
+      if (getEmailTriageTask(task.taskId)?.cancelRequested) return
+      updateEmailTriageTask(task.taskId, {
+        status: 'completed',
+        progress: 100,
+        message: '未读邮件整理完成',
+        results,
+      })
+    })
+    .catch((error) => {
+      const message = error instanceof Error ? error.message : String(error)
+      const cancelled = error instanceof Error && error.name === 'EmailTriageCancelledError'
+      updateEmailTriageTask(task.taskId, {
+        status: cancelled ? 'cancelled' : 'failed',
+        message,
+        error: cancelled ? undefined : message,
+      })
+    })
+
+  return res.json({ success: true, taskId: task.taskId, status: 'running' })
+})
+
+router.get('/triage/tasks/:taskId', async (req, res) => {
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+  const task = getEmailTriageTask(req.params.taskId)
+  if (!task) {
+    return res.status(404).json({ success: false, error: '任务不存在或已过期' })
+  }
+  return res.json({
+    success: true,
+    taskId: task.taskId,
+    status: task.status,
+    progress: task.progress,
+    message: task.message,
+    results: task.results,
+    error: task.error,
+  })
+})
+
+router.post('/triage/tasks/:taskId/cancel', async (req, res) => {
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+  const task = requestEmailTriageCancel(req.params.taskId)
+  if (!task) {
+    return res.status(404).json({ success: false, error: '任务不存在或已过期' })
+  }
+  return res.json({ success: true, taskId: task.taskId, status: 'cancelled' })
 })
 
 export default router
