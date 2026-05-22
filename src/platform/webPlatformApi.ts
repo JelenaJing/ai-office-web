@@ -284,8 +284,8 @@ export const webPlatformApi: PlatformApi = {
         const ws = await webPlatformApi.workspaces.getDefault()
         workspacePath = ws.path
       }
-      const result = await apiPost<SkillResult & { artifactId?: string }>(
-        `/api/skills/${encodeURIComponent('web.xlsx.analyze')}/run`,
+      const start = await apiPost<{ success: boolean; jobId?: string; error?: string }>(
+        '/api/data-analysis/jobs/start',
         {
           workspacePath,
           fileId: input.fileId,
@@ -293,8 +293,37 @@ export const webPlatformApi: PlatformApi = {
           options: input.options,
         },
       )
-      if (!result.success) {
-        throw new Error(result.error ?? '表格分析失败')
+      if (!start.success || !start.jobId) {
+        throw new Error(start.error ?? '表格分析任务启动失败')
+      }
+
+      let result: { artifactId?: string; artifact?: Artifact } | null = null
+      for (let i = 0; i < 120; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 1500))
+        const task = await apiFetch<{
+          success: boolean
+          status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
+          message?: string
+          error?: string
+          result?: SkillResult & { artifactId?: string }
+        }>(`/api/data-analysis/jobs/${start.jobId}`)
+        if (task.status === 'failed') {
+          throw new Error(task.result?.error ?? task.error ?? task.message ?? '表格分析失败')
+        }
+        if (task.status === 'cancelled') {
+          throw new Error(task.message ?? '表格分析任务已取消')
+        }
+        if (task.status === 'completed' && task.result?.success) {
+          result = {
+            artifactId: task.result.artifactId ?? task.result.artifact?.id,
+            artifact: task.result.artifact,
+          }
+          break
+        }
+      }
+
+      if (!result) {
+        throw new Error('表格分析任务超时：分析时间过长，请重试。')
       }
       const artifactId = result.artifactId ?? result.artifact?.id
       if (!artifactId) {
