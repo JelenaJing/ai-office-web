@@ -24,6 +24,10 @@ import {
 } from '../workflows/documentWorkflowRegistry'
 import { runWorkflowGenerate } from '../services/documentWorkflowGenerateRouter'
 import type { PaperWorkflowMode } from '../services/paperWorkflowAdapter'
+import {
+  listFormalTemplatePresets,
+  type FormalTemplatePreset,
+} from '../services/formalTemplateAdapter'
 
 const Panel = styled.div`
   display: flex;
@@ -319,7 +323,9 @@ export function AICommandBox({
   const [lastKbContext, setLastKbContext] = useState<{
     kbCount: number; fileCount: number; hasContext: boolean; isRagEnabled: boolean
   } | null>(null)
-  const [formalTemplatePresetId, setFormalTemplatePresetId] = useState<string>('official_notice')
+  const [formalTemplatePresetId, setFormalTemplatePresetId] = useState<string>('visit_letter')
+  const [formalTemplatePresets, setFormalTemplatePresets] = useState<FormalTemplatePreset[]>([])
+  const [formalTemplatePresetError, setFormalTemplatePresetError] = useState<string>('')
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
   const streamControllerRef = useRef<TypewriterController | null>(null)
 
@@ -338,6 +344,29 @@ export function AICommandBox({
       streamControllerRef.current = null
     }
   }, [refreshSelectionState])
+
+  useEffect(() => {
+    if (workflowId !== 'formal_template') return
+    let disposed = false
+    void listFormalTemplatePresets()
+      .then((presets) => {
+        if (disposed) return
+        setFormalTemplatePresets(presets)
+        setFormalTemplatePresetError('')
+        const current = presets.find((preset) => preset.id === formalTemplatePresetId)
+        if (!current || !current.supported) {
+          const firstSupported = presets.find((preset) => preset.supported)
+          if (firstSupported) setFormalTemplatePresetId(firstSupported.id)
+        }
+      })
+      .catch((error) => {
+        if (disposed) return
+        setFormalTemplatePresetError(error instanceof Error ? error.message : '获取正式模板列表失败')
+      })
+    return () => {
+      disposed = true
+    }
+  }, [workflowId])
 
   const editorState = useMemo(() => {
     void selectionTick
@@ -431,7 +460,7 @@ export function AICommandBox({
 
   const handleGenerateDraft = useCallback(async (
     promptOverride?: string,
-    options?: { paperMode?: PaperWorkflowMode },
+    options?: { paperMode?: PaperWorkflowMode; formalTemplatePresetId?: string },
   ) => {
     const ed = readEditor()
     if (!workspacePath) {
@@ -480,7 +509,7 @@ export function AICommandBox({
         outlineSections: getWorkflow(workflowId).outlineSections,
         documentKind: workflowId,
         paperMode: options?.paperMode,
-        formalTemplatePresetId: isFormalTemplate ? formalTemplatePresetId : undefined,
+        formalTemplatePresetId: isFormalTemplate ? (options?.formalTemplatePresetId ?? formalTemplatePresetId) : undefined,
         onStatus: (message) => {
           setInfo(message)
           onStatus?.(message)
@@ -537,8 +566,8 @@ export function AICommandBox({
         })
         if (workflowResult.mode === 'formal_template') {
           successTitle = '正式模板链路已完成'
-          successBody = '正式模板已生成，结果已写入当前编辑器，可继续修改或下载。'
-          successStatus = '当前使用：web-formal-template-runtime'
+          successBody = `${selectedFormalTemplatePreset?.label || '正式模板'}已生成，结果已写入当前编辑器，可继续修改或下载。`
+          successStatus = `当前使用：${workflowResult.diagnostics?.chain || selectedFormalTemplatePreset?.runtimeLabel || '正式模板链路'}`
         } else {
           successTitle = workflowId === 'literature_review' ? '文献综述链路已完成' : '研究文章链路已完成'
           successBody = workflowId === 'literature_review'
@@ -563,6 +592,9 @@ export function AICommandBox({
             ? '正在生成综述正文…'
             : '正在生成论文正文…',
         )
+      } else if (workflowResult.mode === 'formal_template') {
+        setInfo('正在把正式模板结果写入编辑器…')
+        onStatus?.('正在把正式模板结果写入编辑器…')
       } else {
         setInfo('AI 正在构思…')
         onStatus?.('AI 正在构思…')
@@ -630,6 +662,7 @@ export function AICommandBox({
     workflowId,
     workspacePath,
     formalTemplatePresetId,
+    selectedFormalTemplatePreset,
   ])
 
   const executeEdit = useCallback(async (
@@ -751,7 +784,13 @@ export function AICommandBox({
       return
     }
     if (qa.action === 'generate') {
-      await handleGenerateDraft(qa.prompt, { paperMode: qa.paperMode })
+      if (qa.formalTemplatePresetId) {
+        setFormalTemplatePresetId(qa.formalTemplatePresetId)
+      }
+      await handleGenerateDraft(qa.prompt, {
+        paperMode: qa.paperMode,
+        formalTemplatePresetId: qa.formalTemplatePresetId,
+      })
     } else {
       await executeEdit(
         qa.prompt,
@@ -765,6 +804,18 @@ export function AICommandBox({
   // Derive workflow-specific quick actions
   const workflowActions = useMemo(() => getWorkflowQuickActions(workflowId), [workflowId])
   const currentWorkflow = useMemo(() => getWorkflow(workflowId), [workflowId])
+  const selectedFormalTemplatePreset = useMemo(
+    () => formalTemplatePresets.find((preset) => preset.id === formalTemplatePresetId) ?? null,
+    [formalTemplatePresetId, formalTemplatePresets],
+  )
+  const supportedFormalTemplatePresets = useMemo(
+    () => formalTemplatePresets.filter((preset) => preset.supported),
+    [formalTemplatePresets],
+  )
+  const unsupportedFormalTemplatePresets = useMemo(
+    () => formalTemplatePresets.filter((preset) => !preset.supported),
+    [formalTemplatePresets],
+  )
 
   const handleSend = useCallback(async () => {
     await executeEdit(
@@ -790,7 +841,10 @@ export function AICommandBox({
             {workflowId === 'literature_review' ? ' · 当前使用：综述文章链路' : ''}
             {workflowId === 'formal_template' && (
               <span style={{ fontWeight: 600, color: '#6366f1', marginLeft: 6 }}>
-                · 当前使用：正式模板链路
+                · 当前使用：
+                {selectedFormalTemplatePreset?.runtimeKind === 'schema-first'
+                  ? ' schema-first 正式模板链路'
+                  : ' template document rewrite 链路'}
               </span>
             )}
           </div>
@@ -817,16 +871,47 @@ export function AICommandBox({
               outline: 'none',
             }}
           >
-            <option value="official_notice">正式通知</option>
-            <option value="visit_letter">访问函</option>
-            <option value="work_report">工作报告</option>
-            <option value="investigation_report">调查报告</option>
-            <option value="meeting_minutes">会议纪要</option>
-            <option value="custom">自定义模板（粘贴到指令中）</option>
+            {(formalTemplatePresets.length > 0 ? formalTemplatePresets : [
+              {
+                id: 'visit_letter',
+                label: '拜访函',
+                description: '',
+                category: 'letter',
+                templateKind: 'visit-letter',
+                runtimeKind: 'schema-first',
+                runtimeLabel: 'schema-first / visit-letter / base-replace',
+                supported: true,
+              } as FormalTemplatePreset,
+            ]).map((preset) => (
+              <option key={preset.id} value={preset.id} disabled={!preset.supported}>
+                {preset.label}{preset.supported ? '' : '（未接入）'}
+              </option>
+            ))}
           </select>
-          <div style={{ fontSize: 11, color: '#94a3b8' }}>
-            在下方指令框中描述文稿内容要求，将自动填充选中模板的字段。
+          <div style={{ fontSize: 11, color: '#64748b', lineHeight: 1.6 }}>
+            {selectedFormalTemplatePreset
+              ? `当前模板运行时：${selectedFormalTemplatePreset.runtimeLabel}`
+              : '正在加载正式模板列表…'}
           </div>
+          {formalTemplatePresetError && (
+            <div style={{ fontSize: 11, color: '#b91c1c', lineHeight: 1.6 }}>
+              模板列表加载失败：{formalTemplatePresetError}
+            </div>
+          )}
+          {supportedFormalTemplatePresets.length > 0 && (
+            <div style={{ fontSize: 11, color: '#475569', lineHeight: 1.6 }}>
+              可用模板：
+              {supportedFormalTemplatePresets.map((preset) => `${preset.label}（${preset.runtimeLabel}）`).join('、')}
+            </div>
+          )}
+          {unsupportedFormalTemplatePresets.length > 0 && (
+            <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.6 }}>
+              暂不可用：
+              {unsupportedFormalTemplatePresets
+                .map((preset) => `${preset.label}（${preset.unavailableReason || '未接入'}）`)
+                .join('；')}
+            </div>
+          )}
         </div>
       )}
 

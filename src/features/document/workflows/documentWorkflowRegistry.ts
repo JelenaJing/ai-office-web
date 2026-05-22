@@ -42,6 +42,7 @@ export interface WorkflowQuickAction {
   prompt: string
   mode?: DocumentEditMode
   paperMode?: string
+  formalTemplatePresetId?: string
   successTitle?: string
   successBody?: string
   requiresContent?: boolean
@@ -528,24 +529,27 @@ export function getWorkflowQuickActions(id: DocumentWorkflowId): WorkflowQuickAc
     case 'formal_template':
       return [
         {
-          label: '生成正式通知',
+          label: '生成拜访函',
           action: 'generate',
-          prompt: '请生成一份正式通知，包含标题、背景说明、工作要求、时间安排和落款。',
+          prompt: '请生成一份正式拜访函，明确拜访目的、拜访安排、请求事项和礼貌结语。',
+          formalTemplatePresetId: 'visit_letter',
         },
         {
-          label: '生成访问函',
+          label: '生成贺信',
           action: 'generate',
-          prompt: '请生成一份正式访问函，包含访问目的、访问背景、具体请求和礼貌性结语。',
+          prompt: '请生成一封正式贺信，突出祝贺主题、成绩意义与真诚祝愿。',
+          formalTemplatePresetId: 'congratulation_letter',
         },
         {
-          label: '生成工作报告',
+          label: '按通用模板改写',
           action: 'generate',
-          prompt: '请生成一份工作报告，包含主要工作完成情况、存在问题与不足、下阶段工作计划。',
+          prompt: '请按通用正式模板改写成可直接发出的正式文稿，包含标题、正文和落款。',
+          formalTemplatePresetId: 'generic_template_rewrite',
         },
         {
-          label: '生成会议纪要',
+          label: '按当前模板生成',
           action: 'generate',
-          prompt: '请生成一份会议纪要，包含会议议题、讨论情况、会议决议和后续行动。',
+          prompt: '请按当前选中的正式模板链路生成最终文稿。',
         },
         {
           label: '优化格式规范',

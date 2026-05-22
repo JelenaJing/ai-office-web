@@ -80,6 +80,9 @@ export async function runWorkflowGenerate(input: WorkflowGenerateInput): Promise
       workspacePath: input.workspacePath,
       extraContext: input.extraContext,
       onStatus: input.onStatus,
+      onProgress: input.onProgress,
+      onContent: input.onContent,
+      signal: input.signal,
     })
 
     return {
@@ -87,6 +90,7 @@ export async function runWorkflowGenerate(input: WorkflowGenerateInput): Promise
       html: ftResult.html,
       markdown: ftResult.markdown,
       title: ftResult.title,
+      taskId: ftResult.taskId,
       message: ftResult.message,
       diagnostics: ftResult.diagnostics,
       formalTemplateResult: ftResult,
@@ -107,4 +111,3 @@ export async function runWorkflowGenerate(input: WorkflowGenerateInput): Promise
     documentResult: result,
   }
 }
-

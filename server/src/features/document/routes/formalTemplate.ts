@@ -1,19 +1,17 @@
-/**
- * formalTemplate.ts — formal template routes
- *
- * Routes:
- *   GET  /api/document/formal-template/presets         — list available presets
- *   POST /api/document/formal-template/analyze          — extract fields from template
- *   POST /api/document/formal-template/generate         — generate filled document
- */
-
 import { Router } from 'express'
 import { requireAccountUser } from '../../../lib/authUser'
 import {
   analyzeFormalTemplate,
   generateFormalTemplate,
+  runFormalTemplateWorkflow,
   listPresets,
 } from '../services/formalTemplateService'
+import {
+  createFormalTemplateTask,
+  getFormalTemplateTask,
+  requestFormalTemplateTaskCancel,
+  updateFormalTemplateTask,
+} from '../services/formalTemplateTaskStore'
 
 const router = Router()
 
@@ -51,6 +49,148 @@ router.post('/analyze', requireAccountUser, async (req, res) => {
     console.error('[formal-template/analyze]', message)
     res.status(500).json({ success: false, error: `分析失败：${message}` })
   }
+})
+
+/**
+ * POST /api/document/formal-template/start
+ *
+ * Starts an async formal-template task.
+ */
+router.post('/start', requireAccountUser, async (req, res) => {
+  const instruction = String(req.body?.instruction ?? '').trim()
+  if (!instruction) {
+    res.status(400).json({ success: false, error: '必须提供 instruction（文稿要求）' })
+    return
+  }
+
+  const presetId = typeof req.body?.presetId === 'string' ? req.body.presetId : undefined
+  const task = createFormalTemplateTask(presetId || 'formal-template')
+  updateFormalTemplateTask(task.taskId, {
+    status: 'running',
+    step: 'analyze',
+    message: '正在启动正式模板链路…',
+    progress: 5,
+  })
+
+  void runFormalTemplateWorkflow(
+    {
+      presetId,
+      customTemplateText: typeof req.body?.customTemplateText === 'string' ? req.body.customTemplateText : undefined,
+      instruction,
+      language: req.body?.language === 'en' ? 'en' : 'zh',
+      fieldOverrides: req.body?.fieldOverrides && typeof req.body.fieldOverrides === 'object'
+        ? req.body.fieldOverrides as Record<string, string>
+        : undefined,
+      extraContext: typeof req.body?.extraContext === 'string' ? req.body.extraContext : undefined,
+      workspacePath: typeof req.body?.workspacePath === 'string' ? req.body.workspacePath : undefined,
+    },
+    {
+      onStep: (step) => {
+        updateFormalTemplateTask(task.taskId, {
+          status: 'running',
+          step: step.step,
+          message: step.message,
+          progress: step.progress,
+          partialMarkdown: step.partialMarkdown,
+          partialHtml: step.partialHtml,
+        })
+      },
+      isCancelled: () => Boolean(getFormalTemplateTask(task.taskId)?.cancelRequested),
+    },
+  )
+    .then((result) => {
+      const current = getFormalTemplateTask(task.taskId)
+      if (current?.cancelRequested) return
+
+      if (!result.success) {
+        const statusCode = result.code === 'FT_CANCELLED' ? 'cancelled' : 'failed'
+        updateFormalTemplateTask(task.taskId, {
+          status: statusCode,
+          step: statusCode,
+          message: result.error,
+          error: result.error,
+        })
+        return
+      }
+
+      updateFormalTemplateTask(task.taskId, {
+        status: 'completed',
+        step: 'completed',
+        progress: 100,
+        message: `${result.presetLabel}链路已完成`,
+        partialMarkdown: result.markdown,
+        partialHtml: result.html,
+        result: {
+          title: result.title,
+          markdown: result.markdown,
+          html: result.html,
+          presetId: result.presetId,
+          presetLabel: result.presetLabel,
+          templateKind: result.templateKind,
+          runtimeKind: result.runtimeKind,
+          resolvedFields: result.resolvedFields,
+          diagnostics: result.diagnostics,
+        },
+      })
+    })
+    .catch((error) => {
+      const message = error instanceof Error ? error.message : String(error)
+      console.error('[formal-template/start]', message)
+      updateFormalTemplateTask(task.taskId, {
+        status: 'failed',
+        step: 'failed',
+        message,
+        error: message,
+      })
+    })
+
+  res.json({
+    success: true,
+    taskId: task.taskId,
+    presetId: presetId || null,
+    status: 'running',
+  })
+})
+
+/**
+ * GET /api/document/formal-template/tasks/:taskId
+ */
+router.get('/tasks/:taskId', requireAccountUser, (req, res) => {
+  const task = getFormalTemplateTask(req.params.taskId)
+  if (!task) {
+    res.status(404).json({ success: false, error: '任务不存在或已过期' })
+    return
+  }
+
+  res.json({
+    success: true,
+    taskId: task.taskId,
+    presetId: task.presetId,
+    status: task.status,
+    progress: task.progress,
+    step: task.step,
+    message: task.message,
+    partialMarkdown: task.partialMarkdown,
+    partialHtml: task.partialHtml,
+    result: task.result,
+    error: task.error,
+  })
+})
+
+/**
+ * POST /api/document/formal-template/tasks/:taskId/cancel
+ */
+router.post('/tasks/:taskId/cancel', requireAccountUser, (req, res) => {
+  const task = requestFormalTemplateTaskCancel(req.params.taskId)
+  if (!task) {
+    res.status(404).json({ success: false, error: '任务不存在或已过期' })
+    return
+  }
+  res.json({
+    success: true,
+    taskId: task.taskId,
+    status: 'cancelled',
+  })
 })
 
 /**

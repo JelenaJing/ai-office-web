@@ -1,26 +1,20 @@
-/**
- * formalTemplateAdapter.ts — Web formal template adapter
- *
- * Routes formal_template workflow to:
- *   Web: POST /api/document/formal-template/generate
- *   Electron: window.electronAPI.formalTemplate:* (if available)
- *
- * Calls server API for Web deployment (no window.electronAPI dependency).
- */
-
 import { isWebShim } from '../../../platform'
 
 function readAuthToken(): string | null {
   try {
     return (
-      window.localStorage.getItem('aios_auth_token') ??
-      window.localStorage.getItem('aios_itoken') ??
-      window.localStorage.getItem('ai_office_internal_token') ??
-      null
+      window.localStorage.getItem('aios_auth_token')
+      ?? window.localStorage.getItem('aios_itoken')
+      ?? window.localStorage.getItem('ai_office_internal_token')
+      ?? null
     )
   } catch {
     return null
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 export interface WebFieldSchema {
@@ -37,11 +31,20 @@ export interface FormalTemplatePreset {
   label: string
   description: string
   category: string
+  templateKind: string
+  runtimeKind: string
+  runtimeLabel: string
+  supported: boolean
+  unavailableReason?: string
 }
 
 export interface FormalTemplateAnalyzeResult {
   presetId: string
   presetLabel: string
+  templateKind: string
+  runtimeKind: string
+  supported: boolean
+  unavailableReason?: string
   templateText: string
   fields: WebFieldSchema[]
   defaultSections: string[]
@@ -52,11 +55,22 @@ export interface FormalTemplateGenerateResult {
   html: string
   markdown: string
   title: string
+  taskId?: string
   presetId: string
   presetLabel: string
+  templateKind: string
+  runtimeKind: string
   resolvedFields: Record<string, string>
   message?: string
-  diagnostics: { chain: string; steps: string[] }
+  diagnostics: {
+    chain: 'web-formal-template-schema-first' | 'web-template-document-rewrite'
+    steps: string[]
+  }
+}
+
+export interface FormalTemplateProgress {
+  step: string
+  message: string
 }
 
 export interface RunFormalTemplateGenerateInput {
@@ -68,21 +82,24 @@ export interface RunFormalTemplateGenerateInput {
   workspacePath?: string
   extraContext?: string
   onStatus?: (message: string) => void
+  onProgress?: (progress: FormalTemplateProgress) => void
+  onContent?: (payload: { markdown?: string; html?: string }) => void
+  signal?: AbortSignal
 }
 
-/** List available formal template presets from server */
 export async function listFormalTemplatePresets(): Promise<FormalTemplatePreset[]> {
   const token = readAuthToken()
   const headers: Record<string, string> = {}
   if (token) headers.Authorization = `Bearer ${token}`
 
-  const resp = await fetch('/api/document/formal-template/presets', { headers })
-  if (!resp.ok) throw new Error(`获取预设模板列表失败 (${resp.status})`)
-  const data = await resp.json() as { presets: FormalTemplatePreset[] }
-  return data.presets
+  const response = await fetch('/api/document/formal-template/presets', { headers })
+  const data = await response.json()
+  if (!response.ok || !data.success) {
+    throw new Error(String(data.error || `获取正式模板列表失败 (${response.status})`))
+  }
+  return Array.isArray(data.presets) ? data.presets as FormalTemplatePreset[] : []
 }
 
-/** Analyze a formal template: extract fields */
 export async function analyzeFormalTemplate(input: {
   presetId?: string
   customTemplateText?: string
@@ -92,73 +109,138 @@ export async function analyzeFormalTemplate(input: {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (token) headers.Authorization = `Bearer ${token}`
 
-  const resp = await fetch('/api/document/formal-template/analyze', {
+  const response = await fetch('/api/document/formal-template/analyze', {
     method: 'POST',
     headers,
     body: JSON.stringify(input),
   })
-  const data = await resp.json()
-  if (!resp.ok || !data.success) {
-    throw new Error(String(data.error || `分析失败 (${resp.status})`))
+  const data = await response.json()
+  if (!response.ok || !data.success) {
+    throw new Error(String(data.error || `分析失败 (${response.status})`))
   }
   return data as FormalTemplateAnalyzeResult
 }
 
-/** Generate a filled formal template document */
 export async function runFormalTemplateGenerate(
   input: RunFormalTemplateGenerateInput,
 ): Promise<FormalTemplateGenerateResult> {
-  // In desktop Electron with real IPC, defer to Electron's 4-stage pipeline.
-  // In Web (or Electron with web shim), call the server REST API.
   if (
-    typeof window !== 'undefined' &&
-    typeof (window as { electronAPI?: unknown }).electronAPI !== 'undefined' &&
-    !isWebShim()
+    typeof window !== 'undefined'
+    && typeof (window as { electronAPI?: unknown }).electronAPI !== 'undefined'
+    && !isWebShim()
   ) {
-    input.onStatus?.('正在调用本地正式模板链路…')
-    // Electron: delegate to prebuilt multi-stage pipeline
-    // (Electron IPC not available on web — this branch is Electron-only)
-    throw new Error('Electron 正式模板链路: 请通过 FormalTemplatePanel 调用完整管线。')
+    throw new Error('Electron 正式模板链路请继续通过 FormalTemplatePanel 调用。')
   }
 
-  // Web: call server REST API
   const token = readAuthToken()
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (token) headers.Authorization = `Bearer ${token}`
 
-  input.onStatus?.('正在解析字段并生成正文…')
+  input.onStatus?.('正在启动正式模板链路…')
 
-  const resp = await fetch('/api/document/formal-template/generate', {
+  const startResponse = await fetch('/api/document/formal-template/start', {
     method: 'POST',
     headers,
     body: JSON.stringify({
       presetId: input.presetId,
       customTemplateText: input.customTemplateText,
       instruction: input.instruction,
-      language: input.language,
+      language: input.language ?? 'zh',
       fieldOverrides: input.fieldOverrides,
       extraContext: input.extraContext,
       workspacePath: input.workspacePath,
     }),
+    signal: input.signal,
   })
 
-  const data = await resp.json()
-
-  if (!resp.ok || !data.success) {
-    const errMsg = String(data.error || data.message || `正式模板生成失败 (${resp.status})`)
-    throw new Error(errMsg)
+  const startData = await startResponse.json()
+  if (!startResponse.ok || !startData.success) {
+    throw new Error(String(startData.error || `正式模板启动失败 (${startResponse.status})`))
   }
 
-  input.onStatus?.('正式模板已生成')
+  const taskId = String(startData.taskId || '').trim()
+  if (!taskId) {
+    throw new Error('正式模板启动失败：服务端未返回 taskId')
+  }
 
-  return {
-    html: String(data.html ?? ''),
-    markdown: String(data.markdown ?? ''),
-    title: String(data.title ?? '正式模板文稿'),
-    presetId: String(data.presetId ?? 'custom'),
-    presetLabel: String(data.presetLabel ?? '正式模板'),
-    resolvedFields: (data.resolvedFields as Record<string, string>) ?? {},
-    message: '正式模板链路已完成',
-    diagnostics: data.diagnostics ?? { chain: 'web-formal-template-runtime', steps: [] },
+  const cancelTask = async () => {
+    try {
+      await fetch(`/api/document/formal-template/tasks/${taskId}/cancel`, {
+        method: 'POST',
+        headers,
+      })
+    } catch {
+      // no-op
+    }
+  }
+
+  if (input.signal?.aborted) {
+    await cancelTask()
+    throw new Error('正式模板任务已取消')
+  }
+
+  const abortHandler = () => {
+    void cancelTask()
+  }
+  input.signal?.addEventListener('abort', abortHandler, { once: true })
+
+  try {
+    while (true) {
+      const pollResponse = await fetch(`/api/document/formal-template/tasks/${taskId}`, {
+        headers,
+        signal: input.signal,
+      })
+      const pollData = await pollResponse.json()
+
+      if (!pollResponse.ok || !pollData.success) {
+        throw new Error(String(pollData.error || `正式模板状态查询失败 (${pollResponse.status})`))
+      }
+
+      const message = String(pollData.message || '正在生成正式模板…')
+      const step = String(pollData.step || '')
+      input.onStatus?.(message)
+      input.onProgress?.({ step, message })
+      if (pollData.partialMarkdown || pollData.partialHtml) {
+        input.onContent?.({
+          markdown: typeof pollData.partialMarkdown === 'string' ? pollData.partialMarkdown : undefined,
+          html: typeof pollData.partialHtml === 'string' ? pollData.partialHtml : undefined,
+        })
+      }
+
+      if (pollData.status === 'completed') {
+        const result = pollData.result as Record<string, unknown> | undefined
+        if (!result) {
+          throw new Error('正式模板任务已完成，但服务端未返回结果')
+        }
+        return {
+          html: String(result.html ?? ''),
+          markdown: String(result.markdown ?? ''),
+          title: String(result.title ?? '正式模板文稿'),
+          taskId,
+          presetId: String(result.presetId ?? input.presetId ?? 'unknown'),
+          presetLabel: String(result.presetLabel ?? '正式模板'),
+          templateKind: String(result.templateKind ?? 'generic'),
+          runtimeKind: String(result.runtimeKind ?? 'template-document-rewrite'),
+          resolvedFields: (result.resolvedFields as Record<string, string>) ?? {},
+          message: `${String(result.presetLabel ?? '正式模板')}链路已完成`,
+          diagnostics: (result.diagnostics as FormalTemplateGenerateResult['diagnostics']) ?? {
+            chain: 'web-template-document-rewrite',
+            steps: [],
+          },
+        }
+      }
+
+      if (pollData.status === 'failed') {
+        throw new Error(String(pollData.error || pollData.message || '正式模板任务失败'))
+      }
+
+      if (pollData.status === 'cancelled') {
+        throw new Error(String(pollData.message || '正式模板任务已取消'))
+      }
+
+      await sleep(1500)
+    }
+  } finally {
+    input.signal?.removeEventListener('abort', abortHandler)
   }
 }

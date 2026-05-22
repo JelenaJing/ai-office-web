@@ -1,189 +1,211 @@
 /**
- * formalTemplatePresets.ts — preset formal document template registry
+ * formalTemplatePresets.ts — Web formal-template preset registry
  *
- * Each template has:
- *   - id, label, description, category
- *   - templateText: the template body with {{field}} placeholders and section markers
- *   - defaultSections: ordered list of section headings for LLM generation
+ * Source of truth:
+ * - Electron schema-first route: electron/main/services/formalTemplate/*
+ * - Electron generic rewrite fallback: src/skills/builtins/templateDocumentGenerateLegacySkill.ts
+ *
+ * Web currently supports only the template kinds that have a real Electron
+ * routing concept behind them. Everything else is listed explicitly as
+ * unavailable instead of pretending it is already migrated.
  */
+
+export type FormalTemplatePresetCategory = 'letter' | 'general' | 'notice' | 'report'
+export type FormalTemplateTemplateKind = 'generic' | 'visit-letter' | 'congratulation-letter'
+export type FormalTemplateRuntimeKind = 'schema-first' | 'template-document-rewrite'
 
 export interface FormalTemplatePreset {
   id: string
   label: string
   description: string
-  category: 'letter' | 'notice' | 'report' | 'contract' | 'general'
+  category: FormalTemplatePresetCategory
+  templateKind: FormalTemplateTemplateKind
+  runtimeKind: FormalTemplateRuntimeKind
+  supported: boolean
+  unavailableReason?: string
+  runtimeLabel: string
+  sourceFiles: string[]
   templateText: string
   defaultSections: string[]
+}
+
+export interface FormalTemplatePresetSummary {
+  id: string
+  label: string
+  description: string
+  category: FormalTemplatePresetCategory
+  templateKind: FormalTemplateTemplateKind
+  runtimeKind: FormalTemplateRuntimeKind
+  supported: boolean
+  unavailableReason?: string
+  runtimeLabel: string
 }
 
 export const FORMAL_TEMPLATE_PRESETS: FormalTemplatePreset[] = [
   {
     id: 'visit_letter',
-    label: '访问函',
-    description: '向外单位发送正式访问/考察请求',
+    label: '拜访函',
+    description: '对应 Electron visit-letter schema-first 路由。',
     category: 'letter',
-    templateText: `{{收件单位}}
+    templateKind: 'visit-letter',
+    runtimeKind: 'schema-first',
+    supported: true,
+    runtimeLabel: 'schema-first / visit-letter / base-replace',
+    sourceFiles: [
+      'electron/main/services/formalTemplate/formalTemplateTaskService.ts',
+      'electron/main/services/formalTemplate/visitLetterSchemaStrategyService.ts',
+      'electron/main/services/formalTemplate/sampleAdapters/visitLetterTemplateSampleAdapter.ts',
+    ],
+    templateText: `拜访函
 
-尊敬的{{收件人}}：
+{{收函单位}}：
 
 您好！
 
-{{发件单位}}拟于{{访问日期}}前往贵单位进行{{访问目的}}，特函联系。
+{{正文}}
 
-{{访问背景}}
+联系人：{{联系人}}    电话：{{联系电话}}
+{{发信单位}}
+{{发函日期}}`,
+    defaultSections: ['正文'],
+  },
+  {
+    id: 'congratulation_letter',
+    label: '贺信',
+    description: '对应 Electron congratulation-letter schema-first 路由。',
+    category: 'letter',
+    templateKind: 'congratulation-letter',
+    runtimeKind: 'schema-first',
+    supported: true,
+    runtimeLabel: 'schema-first / congratulation-letter / base-replace',
+    sourceFiles: [
+      'electron/main/services/formalTemplate/formalTemplateTaskService.ts',
+      'electron/main/services/formalTemplate/visitLetterSchemaStrategyService.ts',
+    ],
+    templateText: `贺信
 
-为此，我方申请如下：
+{{收件人}}：
 
-{{具体请求}}
+{{正文}}
 
-望贵单位给予大力支持与协助。敬请回复。
-
-此致
-敬礼
-
-{{发件单位}}
-{{签发人}}
+{{发信单位}}
 {{日期}}`,
-    defaultSections: ['访问背景', '具体请求'],
+    defaultSections: ['正文'],
+  },
+  {
+    id: 'generic_template_rewrite',
+    label: '通用模板改写',
+    description: '对应 Electron templateDocument.generate.legacy / template document rewrite 链路。',
+    category: 'general',
+    templateKind: 'generic',
+    runtimeKind: 'template-document-rewrite',
+    supported: true,
+    runtimeLabel: 'template-document-rewrite / generic',
+    sourceFiles: [
+      'src/skills/builtins/templateDocumentGenerateLegacySkill.ts',
+      'src/modules/formal/hooks/useFormalTemplateGeneration.ts',
+    ],
+    templateText: `{{标题}}
+
+{{正文}}
+
+{{落款单位}}
+{{日期}}`,
+    defaultSections: ['正文'],
   },
   {
     id: 'official_notice',
     label: '正式通知',
-    description: '向各部门/单位发出的正式行政通知',
+    description: '目前仅展示，不在本轮 Web formal_template 迁移范围内。',
     category: 'notice',
-    templateText: `{{发文单位}}
-
-{{标题}}
-
-各{{受文对象}}：
-
-{{背景说明}}
-
-现就有关事项通知如下：
-
-{{工作要求}}
-
-{{时间安排}}
-
-请各单位高度重视，认真贯彻落实。如有疑问，请联系{{联系部门}}（联系人：{{联系人}}）。
-
-{{发文单位}}
-{{日期}}`,
-    defaultSections: ['背景说明', '工作要求', '时间安排'],
+    templateKind: 'generic',
+    runtimeKind: 'template-document-rewrite',
+    supported: false,
+    unavailableReason: '当前 Web formal_template 仅接入 Electron 已有 visit-letter / congratulation-letter / template document rewrite 链路；正式通知尚无对应 DOCX schema contract。',
+    runtimeLabel: 'not-migrated',
+    sourceFiles: [],
+    templateText: '',
+    defaultSections: [],
   },
   {
     id: 'work_report',
     label: '工作报告',
-    description: '向上级汇报工作进展与成果的正式报告',
+    description: '目前仅展示，不在本轮 Web formal_template 迁移范围内。',
     category: 'report',
-    templateText: `{{报告标题}}
-
-{{报告对象}}：
-
-{{汇报部门}}{{时间段}}工作情况汇报如下：
-
-一、主要工作完成情况
-
-{{主要工作}}
-
-二、存在的问题与不足
-
-{{存在问题}}
-
-三、下阶段工作计划
-
-{{工作计划}}
-
-四、请示事项（如有）
-
-{{请示事项（可选）}}
-
-特此汇报。
-
-{{汇报部门}}
-{{汇报人}}
-{{日期}}`,
-    defaultSections: ['主要工作', '存在问题', '工作计划'],
+    templateKind: 'generic',
+    runtimeKind: 'template-document-rewrite',
+    supported: false,
+    unavailableReason: '当前 Web formal_template 还没有对应的 Electron 正式模板样例与 schema contract。',
+    runtimeLabel: 'not-migrated',
+    sourceFiles: [],
+    templateText: '',
+    defaultSections: [],
   },
   {
     id: 'investigation_report',
     label: '调查报告',
-    description: '针对特定问题或事件的调查情况报告',
+    description: '目前仅展示，不在本轮 Web formal_template 迁移范围内。',
     category: 'report',
-    templateText: `{{报告标题}}
-
-{{报告对象}}：
-
-根据{{调查来源}}，{{调查单位}}于{{调查时间}}对{{调查对象}}开展了专项调查。现将调查情况报告如下：
-
-一、基本情况
-
-{{基本情况}}
-
-二、调查发现
-
-{{调查发现}}
-
-三、问题分析
-
-{{问题分析}}
-
-四、处理建议
-
-{{处理建议}}
-
-以上为调查情况，请审阅。
-
-{{调查单位}}
-{{调查人}}
-{{日期}}`,
-    defaultSections: ['基本情况', '调查发现', '问题分析', '处理建议'],
+    templateKind: 'generic',
+    runtimeKind: 'template-document-rewrite',
+    supported: false,
+    unavailableReason: '当前 Web formal_template 还没有对应的 Electron 正式模板样例与 schema contract。',
+    runtimeLabel: 'not-migrated',
+    sourceFiles: [],
+    templateText: '',
+    defaultSections: [],
   },
   {
     id: 'meeting_minutes',
     label: '会议纪要',
-    description: '记录会议内容与决议事项',
+    description: '目前仅展示，不在本轮 Web formal_template 迁移范围内。',
     category: 'general',
-    templateText: `{{会议名称}}纪要
-
-会议时间：{{会议时间}}
-会议地点：{{会议地点}}
-主持人：{{主持人}}
-参会人员：{{参会人员}}
-记录人：{{记录人}}
-
-一、会议议题
-
-{{会议议题}}
-
-二、会议讨论情况
-
-{{讨论情况}}
-
-三、会议决议
-
-{{会议决议}}
-
-四、后续行动
-
-{{后续行动}}
-
-本纪要经与会人员确认后生效。
-
-{{发文单位}}
-{{日期}}`,
-    defaultSections: ['会议议题', '讨论情况', '会议决议', '后续行动'],
+    templateKind: 'generic',
+    runtimeKind: 'template-document-rewrite',
+    supported: false,
+    unavailableReason: '当前 Web formal_template 还没有对应的 Electron 正式模板样例与 schema contract。',
+    runtimeLabel: 'not-migrated',
+    sourceFiles: [],
+    templateText: '',
+    defaultSections: [],
   },
   {
     id: 'custom',
-    label: '自定义模板',
-    description: '粘贴您自己的模板文本（支持 {{字段名}} 占位符）',
+    label: '自定义模板文本',
+    description: '需要提供实际模板正文后才可接入；当前 AICommandBox 未提供模板文本输入区。',
     category: 'general',
+    templateKind: 'generic',
+    runtimeKind: 'template-document-rewrite',
+    supported: false,
+    unavailableReason: '当前 Web formal_template 没有接入“粘贴模板正文 → 结构抽取 → rewrite”输入面板，请改用 FormalTemplatePanel 或后续专用入口。',
+    runtimeLabel: 'not-migrated',
+    sourceFiles: [
+      'src/modules/formal/components/FormalTemplateGeneratePanel.tsx',
+      'src/modules/formal/hooks/useFormalTemplateGeneration.ts',
+    ],
     templateText: '',
     defaultSections: [],
   },
 ]
 
 export function getPreset(id: string): FormalTemplatePreset | undefined {
-  return FORMAL_TEMPLATE_PRESETS.find((p) => p.id === id)
+  return FORMAL_TEMPLATE_PRESETS.find((preset) => preset.id === id)
+}
+
+export function getDefaultSupportedPreset(): FormalTemplatePreset {
+  return FORMAL_TEMPLATE_PRESETS.find((preset) => preset.supported) ?? FORMAL_TEMPLATE_PRESETS[0]
+}
+
+export function listPresetSummaries(): FormalTemplatePresetSummary[] {
+  return FORMAL_TEMPLATE_PRESETS.map((preset) => ({
+    id: preset.id,
+    label: preset.label,
+    description: preset.description,
+    category: preset.category,
+    templateKind: preset.templateKind,
+    runtimeKind: preset.runtimeKind,
+    supported: preset.supported,
+    unavailableReason: preset.unavailableReason,
+    runtimeLabel: preset.runtimeLabel,
+  }))
 }
