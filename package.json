@@ -102,7 +102,8 @@
     "package:win": "npm run build && node build/package-win.mjs",
     "package:win:with-plot-runtime": "npm run build && node build/package-win.mjs --with-plot-runtime",
     "package:win:full": "npm run package:win:with-plot-runtime",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "check:boundaries": "npx tsx scripts/check-module-boundaries.ts"
   },
   "dependencies": {
     "@tiptap/core": "^2.27.2",
