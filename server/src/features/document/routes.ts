@@ -2,6 +2,8 @@ import { Router } from 'express'
 import multer from 'multer'
 import { requireAccountUser } from '../../lib/authUser'
 import { extractDocxContent } from './services/docxExtractService'
+import paperWorkflowRouter from './routes/paperWorkflow'
+import formalTemplateRouter from './routes/formalTemplate'
 
 const router = Router()
 
@@ -9,6 +11,9 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB
 })
+
+router.use('/paper-workflow', paperWorkflowRouter)
+router.use('/formal-template', formalTemplateRouter)
 
 /**
  * POST /api/document/import-docx

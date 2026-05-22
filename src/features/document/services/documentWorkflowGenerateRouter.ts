@@ -4,6 +4,7 @@ import {
   type PaperWorkflowGenerateResult,
   type PaperWorkflowMode,
 } from './paperWorkflowAdapter'
+import { runFormalTemplateGenerate, type FormalTemplateGenerateResult } from './formalTemplateAdapter'
 
 export interface WorkflowGenerateInput extends DocumentGenerateInput {
   signal?: AbortSignal
@@ -11,10 +12,14 @@ export interface WorkflowGenerateInput extends DocumentGenerateInput {
   onStatus?: (message: string) => void
   onProgress?: (progress: { step: string; message: string }) => void
   onContent?: (payload: { html?: string; markdown?: string }) => void
+  /** For formal_template: which preset to use */
+  formalTemplatePresetId?: string
+  formalTemplateCustomText?: string
+  formalTemplateFieldOverrides?: Record<string, string>
 }
 
 export interface WorkflowGenerateResult {
-  mode: 'document' | 'paper'
+  mode: 'document' | 'paper' | 'formal_template'
   html?: string
   markdown?: string
   title?: string
@@ -26,6 +31,7 @@ export interface WorkflowGenerateResult {
     steps: string[]
   }
   documentResult?: DocumentSkillResult
+  formalTemplateResult?: FormalTemplateGenerateResult
 }
 
 function isPaperWorkflow(workflowId?: string): workflowId is 'academic_paper' | 'literature_review' {
@@ -64,7 +70,27 @@ export async function runWorkflowGenerate(input: WorkflowGenerateInput): Promise
   }
 
   if (input.workflowId === 'formal_template') {
-    throw new Error('正式模板链路尚未接入 Web，当前不能作为普通文稿生成。')
+    input.onStatus?.('正在启动正式模板链路…')
+    const ftResult = await runFormalTemplateGenerate({
+      instruction: input.instruction.trim(),
+      presetId: input.formalTemplatePresetId,
+      customTemplateText: input.formalTemplateCustomText,
+      fieldOverrides: input.formalTemplateFieldOverrides,
+      language: input.language ?? 'zh',
+      workspacePath: input.workspacePath,
+      extraContext: input.extraContext,
+      onStatus: input.onStatus,
+    })
+
+    return {
+      mode: 'formal_template',
+      html: ftResult.html,
+      markdown: ftResult.markdown,
+      title: ftResult.title,
+      message: ftResult.message,
+      diagnostics: ftResult.diagnostics,
+      formalTemplateResult: ftResult,
+    }
   }
 
   const result = await runDocumentGenerate(input)
@@ -81,3 +107,4 @@ export async function runWorkflowGenerate(input: WorkflowGenerateInput): Promise
     documentResult: result,
   }
 }
+

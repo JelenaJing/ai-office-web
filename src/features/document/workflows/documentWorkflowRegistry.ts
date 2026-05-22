@@ -41,6 +41,7 @@ export interface WorkflowQuickAction {
   action: 'generate' | 'edit'
   prompt: string
   mode?: DocumentEditMode
+  paperMode?: string
   successTitle?: string
   successBody?: string
   requiresContent?: boolean
@@ -447,95 +448,104 @@ export function getWorkflowQuickActions(id: DocumentWorkflowId): WorkflowQuickAc
     case 'academic_paper':
       return [
         {
-          label: '生成论文初稿',
+          label: '生成研究文章',
           action: 'generate',
           prompt: '请生成一篇学术论文初稿，包含：标题、摘要（Abstract）、关键词、引言、相关研究/文献综述、研究方法、实验与分析、讨论、结论、参考文献（占位）。',
+          paperMode: 'full',
+        },
+        {
+          label: '生成论文大纲',
+          action: 'generate',
+          prompt: '请生成论文大纲，突出研究背景、相关研究、研究方法、结果分析、讨论与结论。',
+          paperMode: 'outline',
         },
         {
           label: '生成摘要',
-          action: 'edit',
-          mode: 'insert_at_cursor',
-          prompt: '请为当前论文生成一段学术摘要（Abstract），包含研究目的、方法、主要结论，约150-250字，中英文各一份。',
-          requiresContent: true,
-          successTitle: '已完成：生成摘要',
-          successBody: '摘要已插入，请核对并补充关键词。',
+          action: 'generate',
+          prompt: '请生成研究文章的标题、摘要与关键词，突出研究目标、方法与主要发现。',
+          paperMode: 'abstract',
         },
         {
-          label: '扩写引言',
-          action: 'edit',
-          mode: 'insert_at_cursor',
+          label: '生成引言',
+          action: 'generate',
           prompt: '请为当前论文写一段完整的引言（Introduction），包含研究背景、研究意义、国内外现状简述和本文的研究贡献。',
-          requiresContent: false,
-          successTitle: '已完成：生成引言',
-          successBody: '引言已生成，可继续补充文献综述。',
+          paperMode: 'introduction',
         },
         {
-          label: '生成文献综述',
-          action: 'edit',
-          mode: 'insert_at_cursor',
-          prompt: '请为当前论文生成"相关研究/文献综述"章节，梳理国内外相关研究现状，指出研究空白和本文的切入点，参考文献用[1][2]格式占位。',
-          requiresContent: false,
-          successTitle: '已完成：文献综述',
-          successBody: '文献综述已生成，请后续替换参考文献占位。',
+          label: '生成研究方法',
+          action: 'generate',
+          prompt: '请生成研究方法 / 分析框架章节，说明研究设计、变量、数据来源与分析步骤。',
+          paperMode: 'methodology',
         },
         {
           label: '生成结论',
-          action: 'edit',
-          mode: 'insert_at_cursor',
+          action: 'generate',
           prompt: '请为当前论文生成结论章节，总结主要研究发现、贡献、局限性和未来研究方向。',
-          requiresContent: true,
-          successTitle: '已完成：生成结论',
-          successBody: '结论已插入，可继续修改或下载。',
+          paperMode: 'conclusion',
         },
       ]
 
     case 'literature_review':
       return [
         {
-          label: '生成综述初稿',
+          label: '生成文献综述',
           action: 'generate',
           prompt: '请生成一篇文献综述，包含：研究背景与意义、国内外研究现状、研究脉络与演进、主要争议与分歧、评述与研究展望、参考文献（占位）。',
+          paperMode: 'full',
+        },
+        {
+          label: '生成综述大纲',
+          action: 'generate',
+          prompt: '请生成综述大纲，包含文献检索与筛选说明、研究脉络、主题分类、代表性研究、争议与不足、未来方向。',
+          paperMode: 'outline',
         },
         {
           label: '整理研究脉络',
-          action: 'edit',
-          mode: 'insert_at_cursor',
-          prompt: '请整理当前研究领域的历史演进脉络，按时间线梳理重要研究节点和代表性成果。',
-          requiresContent: true,
-          successTitle: '已完成：研究脉络',
-          successBody: '研究脉络已整理，可继续修改或下载。',
+          action: 'generate',
+          prompt: '请梳理该研究主题的发展脉络，按时间和主题演进整理关键阶段与趋势。',
+          paperMode: 'trajectory',
         },
         {
-          label: '提取争议焦点',
-          action: 'edit',
-          mode: 'insert_at_cursor',
-          prompt: '请在文末整理该研究领域当前存在的主要争议点和分歧，并对各方观点进行简要评析。',
-          requiresContent: true,
-          successTitle: '已完成：争议焦点',
-          successBody: '争议焦点已整理，可继续修改或下载。',
+          label: '提取代表性研究',
+          action: 'generate',
+          prompt: '请整理该领域的代表性研究，按主题分类概括核心观点、方法与贡献。',
+          paperMode: 'representative-studies',
         },
         {
-          label: '生成参考文献占位',
-          action: 'edit',
-          mode: 'insert_at_cursor',
-          prompt: '请在文末生成参考文献占位列表，使用[1][2][3]格式，包含该领域5-10篇具有代表性的文献（标注为占位，需后续替换为真实引用）。',
-          requiresContent: false,
-          successTitle: '已完成：参考文献占位',
-          successBody: '参考文献占位已插入，请后续替换为真实引用。',
+          label: '总结争议点',
+          action: 'generate',
+          prompt: '请总结该研究领域的主要争议点、分歧和不足，并作出简要评述。',
+          paperMode: 'debates',
+        },
+        {
+          label: '生成未来方向',
+          action: 'generate',
+          prompt: '请生成未来研究方向章节，指出值得继续推进的问题、方法与潜在突破口。',
+          paperMode: 'future-directions',
         },
       ]
 
     case 'formal_template':
       return [
         {
-          label: '填充模板内容',
+          label: '生成正式通知',
           action: 'generate',
-          prompt: '请按照正式模板结构生成文稿，使用标准格式和规范化语言，填写完整的正文内容。',
+          prompt: '请生成一份正式通知，包含标题、背景说明、工作要求、时间安排和落款。',
         },
         {
-          label: '生成模板结构',
+          label: '生成访问函',
           action: 'generate',
-          prompt: '请生成这类文档的标准结构框架，包含各章节标题和格式说明（内容待填写）。',
+          prompt: '请生成一份正式访问函，包含访问目的、访问背景、具体请求和礼貌性结语。',
+        },
+        {
+          label: '生成工作报告',
+          action: 'generate',
+          prompt: '请生成一份工作报告，包含主要工作完成情况、存在问题与不足、下阶段工作计划。',
+        },
+        {
+          label: '生成会议纪要',
+          action: 'generate',
+          prompt: '请生成一份会议纪要，包含会议议题、讨论情况、会议决议和后续行动。',
         },
         {
           label: '优化格式规范',

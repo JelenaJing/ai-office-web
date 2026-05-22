@@ -8,7 +8,6 @@ import type { A4EditorHandle } from './A4RichTextEditor'
 import {
   AI_MODE_HINT_LABELS,
   inferDocumentEditMode,
-  runDocumentGenerate,
 } from '../services/documentEditSkills'
 import { type DocumentExportFormat } from '../services/docxWebGeneration'
 import { sessionFromSkillResult } from '../services/docxWebGeneration'
@@ -23,6 +22,8 @@ import {
   type DocumentWorkflowId,
   type WorkflowQuickAction,
 } from '../workflows/documentWorkflowRegistry'
+import { runWorkflowGenerate } from '../services/documentWorkflowGenerateRouter'
+import type { PaperWorkflowMode } from '../services/paperWorkflowAdapter'
 
 const Panel = styled.div`
   display: flex;
@@ -318,6 +319,7 @@ export function AICommandBox({
   const [lastKbContext, setLastKbContext] = useState<{
     kbCount: number; fileCount: number; hasContext: boolean; isRagEnabled: boolean
   } | null>(null)
+  const [formalTemplatePresetId, setFormalTemplatePresetId] = useState<string>('official_notice')
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
   const streamControllerRef = useRef<TypewriterController | null>(null)
 
@@ -394,7 +396,16 @@ export function AICommandBox({
     streamControllerRef.current?.cancel()
   }, [])
 
-  const finishStreamingDraft = useCallback((base: WebDocumentSession, body: string, cancelled: boolean) => {
+  const finishStreamingDraft = useCallback((
+    base: WebDocumentSession,
+    body: string,
+    cancelled: boolean,
+    options?: {
+      successTitle?: string
+      successBody?: string
+      successStatus?: string
+    },
+  ) => {
     onSessionUpdate(buildSessionSnapshot({
       base,
       title,
@@ -411,11 +422,17 @@ export function AICommandBox({
       return
     }
 
-    showSuccessCard('初稿已生成', '你可以继续修改，或直接下载当前文稿。')
-    onStatus?.('初稿已生成，可继续修改或下载', 'ok')
+    showSuccessCard(
+      options?.successTitle ?? '初稿已生成',
+      options?.successBody ?? '你可以继续修改，或直接下载当前文稿。',
+    )
+    onStatus?.(options?.successStatus ?? '初稿已生成，可继续修改或下载', 'ok')
   }, [fileIds, knowledgeBaseIds, onSessionUpdate, onStatus, showSuccessCard, template.id, title])
 
-  const handleGenerateDraft = useCallback(async (promptOverride?: string) => {
+  const handleGenerateDraft = useCallback(async (
+    promptOverride?: string,
+    options?: { paperMode?: PaperWorkflowMode },
+  ) => {
     const ed = readEditor()
     if (!workspacePath) {
       setInfo('请先打开工作区', 'err')
@@ -432,10 +449,20 @@ export function AICommandBox({
     setBusy(true)
     setStreaming(false)
     setResultCard(null)
-    setInfo('正在生成初稿…')
+    const isPaperWorkflow = workflowId === 'academic_paper' || workflowId === 'literature_review'
+    const isFormalTemplate = workflowId === 'formal_template'
+    setInfo(
+      isPaperWorkflow
+        ? workflowId === 'academic_paper'
+          ? '正在启动研究文章链路（paper workflow / research）…'
+          : '正在启动综述文章链路（paper workflow / review）…'
+        : isFormalTemplate
+        ? '正在启动正式模板链路…'
+        : '正在生成初稿…',
+    )
 
     try {
-      const result = await runDocumentGenerate({
+      const workflowResult = await runWorkflowGenerate({
         instruction: prompt,
         workspacePath,
         title,
@@ -452,33 +479,75 @@ export function AICommandBox({
         workflowLabel: getWorkflow(workflowId).label,
         outlineSections: getWorkflow(workflowId).outlineSections,
         documentKind: workflowId,
+        paperMode: options?.paperMode,
+        formalTemplatePresetId: isFormalTemplate ? formalTemplatePresetId : undefined,
+        onStatus: (message) => {
+          setInfo(message)
+          onStatus?.(message)
+        },
+        onProgress: ({ message }) => {
+          setInfo(message)
+          onStatus?.(message)
+        },
       })
 
-      if (!result.success) {
-        const msg = result.error || '生成失败'
-        setInfo(msg, 'err')
-        onStatus?.(msg, 'err')
-        return
-      }
+      let streamTargetHtml = workflowResult.html
+      let nextSession = session
+      let successTitle = '初稿已生成'
+      let successBody = '你可以继续修改，或直接下载当前文稿。'
+      let successStatus = '初稿已生成，可继续修改或下载'
 
-      // Capture knowledge context stats for display
-      if (result.data?.knowledgeContext) {
-        setLastKbContext(result.data.knowledgeContext)
-      }
+      if (workflowResult.mode === 'document') {
+        const result = workflowResult.documentResult
+        if (!result?.success) {
+          const msg = result?.error || '生成失败'
+          setInfo(msg, 'err')
+          onStatus?.(msg, 'err')
+          return
+        }
 
-      const patch = result.data?.patch
-      const next = sessionFromSkillResult(result, template, knowledgeBaseIds, fileIds)
-      const streamTargetHtml = patch?.type === 'replace_document'
-        ? patch.html
-        : next?.html
+        if (result.data?.knowledgeContext) {
+          setLastKbContext(result.data.knowledgeContext)
+        }
 
-      if (patch && patch.type !== 'replace_document') {
-        patchActions.applyPatchWithUndo(patch)
-        setInstruction('')
-        showSuccessCard('已完成：生成初稿', '初稿已生成，可继续修改或下载。')
-        onStatus?.('初稿已生成，可继续修改或下载', 'ok')
-        refreshSelectionState()
-        return
+        const patch = result.data?.patch
+        nextSession = sessionFromSkillResult(result, template, knowledgeBaseIds, fileIds) ?? session
+        streamTargetHtml = patch?.type === 'replace_document' ? patch.html : nextSession.html
+
+        if (patch && patch.type !== 'replace_document') {
+          patchActions.applyPatchWithUndo(patch)
+          setInstruction('')
+          showSuccessCard('已完成：生成初稿', '初稿已生成，可继续修改或下载。')
+          onStatus?.('初稿已生成，可继续修改或下载', 'ok')
+          refreshSelectionState()
+          return
+        }
+      } else {
+        nextSession = buildSessionSnapshot({
+          base: {
+            ...session,
+            markdown: workflowResult.markdown ?? session.markdown,
+          },
+          title,
+          templateId: template.id,
+          knowledgeBaseIds,
+          fileIds,
+          html: workflowResult.html ?? session.html,
+          markdown: workflowResult.markdown ?? session.markdown,
+        })
+        if (workflowResult.mode === 'formal_template') {
+          successTitle = '正式模板链路已完成'
+          successBody = '正式模板已生成，结果已写入当前编辑器，可继续修改或下载。'
+          successStatus = '当前使用：web-formal-template-runtime'
+        } else {
+          successTitle = workflowId === 'literature_review' ? '文献综述链路已完成' : '研究文章链路已完成'
+          successBody = workflowId === 'literature_review'
+            ? '综述文章链路已完成，结果已写入当前编辑器，可继续修改或下载。'
+            : '研究文章链路已完成，结果已写入当前编辑器，可继续修改或下载。'
+          successStatus = workflowId === 'literature_review'
+            ? '当前使用：paper workflow / review'
+            : '当前使用：paper workflow / research'
+        }
       }
 
       if (!streamTargetHtml || !ed) {
@@ -488,8 +557,16 @@ export function AICommandBox({
 
       patchActions.captureUndoSnapshot()
       setStreaming(true)
-      setInfo('AI 正在构思…')
-      onStatus?.('AI 正在构思…')
+      if (workflowResult.mode === 'paper') {
+        setInfo(
+          workflowId === 'literature_review'
+            ? '正在生成综述正文…'
+            : '正在生成论文正文…',
+        )
+      } else {
+        setInfo('AI 正在构思…')
+        onStatus?.('AI 正在构思…')
+      }
 
       const controller = createDocumentTypewriter({
         editorRef,
@@ -514,7 +591,16 @@ export function AICommandBox({
       streamControllerRef.current = null
       setStreaming(false)
       setInstruction('')
-      finishStreamingDraft(twResult.cancelled ? session : next ?? session, ed.getHtml(), twResult.cancelled)
+      finishStreamingDraft(
+        twResult.cancelled ? session : nextSession,
+        ed.getHtml(),
+        twResult.cancelled,
+        {
+          successTitle,
+          successBody,
+          successStatus,
+        },
+      )
       refreshSelectionState()
     } catch (error) {
       const msg = error instanceof Error ? error.message : '生成失败'
@@ -543,6 +629,7 @@ export function AICommandBox({
     title,
     workflowId,
     workspacePath,
+    formalTemplatePresetId,
   ])
 
   const executeEdit = useCallback(async (
@@ -664,7 +751,7 @@ export function AICommandBox({
       return
     }
     if (qa.action === 'generate') {
-      await handleGenerateDraft(qa.prompt)
+      await handleGenerateDraft(qa.prompt, { paperMode: qa.paperMode })
     } else {
       await executeEdit(
         qa.prompt,
@@ -699,9 +786,11 @@ export function AICommandBox({
         {workflowId !== 'general' && (
           <div style={{ fontSize: 12, color: '#6366f1', fontWeight: 600, marginTop: 2 }}>
             📄 {currentWorkflow.label}
+            {workflowId === 'academic_paper' ? ' · 当前使用：研究文章链路' : ''}
+            {workflowId === 'literature_review' ? ' · 当前使用：综述文章链路' : ''}
             {workflowId === 'formal_template' && (
-              <span style={{ fontWeight: 400, color: '#94a3b8', marginLeft: 6 }}>
-                （完整模板 Shell 接入中）
+              <span style={{ fontWeight: 600, color: '#6366f1', marginLeft: 6 }}>
+                · 当前使用：正式模板链路
               </span>
             )}
           </div>
@@ -709,6 +798,37 @@ export function AICommandBox({
       </AssistantCard>
 
       <ModeHint>{modeHint}</ModeHint>
+
+      {workflowId === 'formal_template' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <SectionTitle>选择模板类型</SectionTitle>
+          <select
+            value={formalTemplatePresetId}
+            onChange={(e) => setFormalTemplatePresetId(e.target.value)}
+            disabled={busy || disabled}
+            style={{
+              fontSize: 13,
+              padding: '6px 10px',
+              borderRadius: 8,
+              border: '1px solid #d1d5db',
+              background: '#fff',
+              color: '#1e293b',
+              cursor: 'pointer',
+              outline: 'none',
+            }}
+          >
+            <option value="official_notice">正式通知</option>
+            <option value="visit_letter">访问函</option>
+            <option value="work_report">工作报告</option>
+            <option value="investigation_report">调查报告</option>
+            <option value="meeting_minutes">会议纪要</option>
+            <option value="custom">自定义模板（粘贴到指令中）</option>
+          </select>
+          <div style={{ fontSize: 11, color: '#94a3b8' }}>
+            在下方指令框中描述文稿内容要求，将自动填充选中模板的字段。
+          </div>
+        </div>
+      )}
 
       <div>
         <SectionTitle>快捷操作</SectionTitle>
