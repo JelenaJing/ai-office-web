@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { useKnowledge } from '../../knowledge/contexts/KnowledgeContext'
+import { useKnowledge } from '../../knowledge'
 import { type GenerationMode, useWorkspaceMode } from '../../../contexts/WorkspaceModeContext'
 import type { DocumentArtifact } from '../../../document/core'
 import type { EmailReplyDraft, EmailReplyTone } from '../../../types/email'

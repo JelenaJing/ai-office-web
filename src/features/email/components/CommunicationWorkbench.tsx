@@ -10,8 +10,8 @@ import { useInternalAccount } from '../../../contexts/InternalAccountContext'
 import { useMatrixChat } from '../../../contexts/MatrixChatContext'
 import { useWorkspace } from '../../../contexts/WorkspaceContext'
 import { useWorkspaceMode } from '../../../contexts/WorkspaceModeContext'
-import { useGenerationWorkbench, type PptSlidePreview } from '../../ppt/contexts/GenerationWorkbenchContext'
-import { useDepartment } from '../../knowledge/contexts/DepartmentContext'
+import { useGenerationWorkbench, type PptSlidePreview } from '../../ppt'
+import { useDepartment } from '../../knowledge'
 import { logActivity } from '../../../services/workActivityLog'
 import { fetchMatrixMediaBlob } from '../../../services/matrixClient'
 import type { MailAttachmentOpenResult } from '../../../types/mailAttachment'
@@ -43,7 +43,7 @@ import { shouldAutoStartWorkflow, buildAutoWorkflowInput } from '../services/ema
 import { detectMatterScenario, buildEmailMatter, serializeMatterToSummary } from '../services/emailMatterBuilder'
 import { handleCampusCardReplacementMatter, type AgentWorkflowResult } from '../services/cuhkszAgentWorkflow'
 import { emailRuntimeTestConnection } from '../services/emailRuntime'
-import { createMatterFromEmail } from '../../aios/services/matterRuntime'
+import { createMatterFromEmail } from '../../aios'
 
 type ImportedDeckSlide = {
   index?: number
