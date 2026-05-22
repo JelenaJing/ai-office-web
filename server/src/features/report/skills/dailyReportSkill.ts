@@ -3,6 +3,7 @@ import { saveSkillArtifact } from '../../../lib/skillArtifact'
 import { readFilesIndex } from '../../../lib/userFiles'
 import { parseWorkspacePath } from '../../../artifacts/ArtifactStore'
 import { getOrCreateDefaultWorkspace } from '../../../lib/workspaceStore'
+import { listMatters } from '../../aios/services/matterService'
 
 export interface DailyReportInput {
   userId: string
@@ -25,11 +26,18 @@ export async function runDailyReportSkill(
   const ws = getOrCreateDefaultWorkspace(input.userId)
   const files = readFilesIndex(input.userId, ws.id).files
   const artifacts = listArtifactsByUser(input.userId)
+  const matters = listMatters(input.userId)
 
   const dayStart = `${dateLabel}T00:00:00.000Z`
   const dayEnd = `${dateLabel}T23:59:59.999Z`
   const dayArtifacts = artifacts.filter(
     (a) => a.createdAt >= dayStart && a.createdAt <= dayEnd,
+  )
+  const activeMattersList = matters.filter(m =>
+    m.status !== 'done' && m.status !== 'archived',
+  )
+  const dayMattersList = matters.filter(
+    m => m.createdAt >= dayStart && m.createdAt <= dayEnd,
   )
 
   const lines: string[] = [
@@ -37,6 +45,16 @@ export async function runDailyReportSkill(
     ``,
     `**日期：** ${dateLabel}`,
     `**生成时间：** ${new Date().toLocaleString('zh-CN')}`,
+    ``,
+    `## 今日事项（当日新增）`,
+    dayMattersList.length === 0
+      ? '- （今日无新建事项）'
+      : dayMattersList.map((m) => `- [${m.priority}] ${m.title}（状态：${m.status}）`).join('\n'),
+    ``,
+    `## 进行中事项`,
+    activeMattersList.length === 0
+      ? '- （暂无进行中事项）'
+      : activeMattersList.slice(0, 10).map((m) => `- [${m.status}] ${m.title}`).join('\n'),
     ``,
     `## 我的文件`,
     files.length === 0 ? '- （无上传文件）' : files.map((f) => `- ${f.name}（${f.uploadedAt}）`).join('\n'),
@@ -51,7 +69,7 @@ export async function runDailyReportSkill(
       ? '- （暂无）'
       : artifacts.slice(0, 20).map((a) => `- [${a.type}] ${a.title}`).join('\n'),
     ``,
-    `> 本报告为 Web MVP 自动汇总，后续将接入完整活动日志。`,
+    `> 本报告为 Web MVP 自动汇总，包含 AIOS 事项数据。`,
   ]
 
   const markdown = lines.join('\n')

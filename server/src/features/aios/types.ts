@@ -49,6 +49,9 @@ export interface AuditEvent {
     | 'create_matter_from_email'
     | 'add_email_evidence'
     | 'add_attachment_evidence'
+    | 'generate_reply_draft'
+    | 'generate_document_artifact'
+    | 'generate_ppt_artifact'
   detail: Record<string, unknown>
   createdAt: string
 }

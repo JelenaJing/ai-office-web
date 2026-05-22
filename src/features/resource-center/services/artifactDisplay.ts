@@ -17,6 +17,8 @@ export function artifactTypeLabel(type: string): string {
       return '报告'
     case 'email_draft':
       return '邮件草稿'
+    case 'decision_package':
+      return '决策包'
     default:
       return type || '未知'
   }

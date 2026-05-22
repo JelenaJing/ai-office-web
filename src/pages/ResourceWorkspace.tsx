@@ -122,6 +122,7 @@ function ArtifactsTab() {
   const [downloadError, setDownloadError] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [actionBusy, setActionBusy] = useState(false)
+  const [typeFilter, setTypeFilter] = useState<string>('all')
 
   const fetchArtifacts = useCallback(async () => {
     setLoading(true)
@@ -223,6 +224,23 @@ function ArtifactsTab() {
           {downloadError}
         </div>
       )}
+      {/* Type filter */}
+      <div style={{ flexShrink: 0, padding: '8px 20px', borderBottom: '1px solid #eef2f7', display: 'flex', gap: 8, alignItems: 'center' }}>
+        <span style={{ fontSize: 12, color: '#8094a8' }}>类型：</span>
+        <select
+          value={typeFilter}
+          onChange={e => setTypeFilter(e.target.value)}
+          style={{ fontSize: 12, padding: '3px 8px', border: '1px solid #e2e8f0', borderRadius: 6, background: '#fff', color: '#2d3748', cursor: 'pointer' }}
+        >
+          <option value="all">全部</option>
+          {Array.from(new Set(artifacts.map(a => a.type))).sort().map(t => (
+            <option key={t} value={t}>{artifactTypeLabel(t)}</option>
+          ))}
+        </select>
+        <span style={{ fontSize: 12, color: '#a0aec0', marginLeft: 4 }}>
+          {typeFilter === 'all' ? artifacts.length : artifacts.filter(a => a.type === typeFilter).length} 条
+        </span>
+      </div>
       <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
@@ -238,7 +256,7 @@ function ArtifactsTab() {
             </tr>
           </thead>
           <tbody>
-            {artifacts.map((a) => {
+            {artifacts.filter(a => typeFilter === 'all' || a.type === typeFilter).map((a) => {
               const canDownload = artifactHasExport(a)
               return (
                 <tr key={a.id} style={{ borderBottom: '1px solid #f0f4f8' }}>

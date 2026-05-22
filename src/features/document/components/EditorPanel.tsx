@@ -4819,6 +4819,11 @@ const EditorPanel: React.FC<EditorPanelProps> = ({
       setStatusMessage('导出失败：编辑器未就绪')
       return
     }
+    // Web 版：PDF 渲染服务未配置，引导用户使用 Word 导出
+    if (isWebShim()) {
+      setStatusMessage('Web 版暂不支持 PDF 导出，请使用「导出 Word」或「导出 Markdown」代替。')
+      return
+    }
     const html = editor.getHTML()
     const title = (activeTab?.fileName || '').replace(/\.[^.]+$/, '') || '文档'
     const tpl = activeTemplateDefinition
@@ -4873,6 +4878,18 @@ ${bodyHtml}
 </html>`
     setStatusMessage('正在导出 HTML…')
     try {
+      if (isWebShim()) {
+        // Web 版：直接在浏览器触发 HTML 文件下载
+        const blob = new Blob([fullHtml], { type: 'text/html;charset=utf-8' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `${title}.html`
+        a.click()
+        URL.revokeObjectURL(url)
+        setStatusMessage(`HTML 已下载：${title}.html`)
+        return
+      }
       const chosenPath = await window.electronAPI.saveFileDialog(`${title}.html`)
       if (!chosenPath) { setStatusMessage('已取消导出'); return }
       const finalPath = chosenPath.endsWith('.html') || chosenPath.endsWith('.htm') ? chosenPath : `${chosenPath}.html`

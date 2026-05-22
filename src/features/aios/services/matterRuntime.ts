@@ -150,3 +150,37 @@ export async function getAuditTrail(matterId: string): Promise<AuditEvent[]> {
   const data = await request<{ events: AuditEvent[] }>('GET', `/matters/${matterId}/audit`)
   return data.events
 }
+
+// ── Artifact Generation ───────────────────────────────────────────────────────
+
+export interface GeneratedArtifact {
+  id: string
+  type: string
+  title: string
+  createdAt: string
+  exports?: Array<{ format: string; filename: string }>
+}
+
+export async function generateReplyDraft(matterId: string): Promise<GeneratedArtifact> {
+  const data = await request<{ artifact: GeneratedArtifact }>(
+    'POST',
+    `/matters/${matterId}/generate-reply`,
+  )
+  return data.artifact
+}
+
+export async function generateDocumentArtifact(matterId: string): Promise<GeneratedArtifact> {
+  const data = await request<{ artifact: GeneratedArtifact }>(
+    'POST',
+    `/matters/${matterId}/generate-document`,
+  )
+  return data.artifact
+}
+
+export async function generatePptArtifact(matterId: string): Promise<GeneratedArtifact> {
+  const data = await request<{ artifact: GeneratedArtifact }>(
+    'POST',
+    `/matters/${matterId}/generate-ppt`,
+  )
+  return data.artifact
+}

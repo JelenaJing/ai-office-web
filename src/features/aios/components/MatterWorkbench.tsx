@@ -182,6 +182,23 @@ const SaveBtn = styled.button`
   &:disabled { background: #a0aec0; }
 `
 
+const ActionBtn = styled.button<{ $variant?: 'green' | 'purple' | 'orange' }>`
+  width: 100%;
+  padding: 7px 10px;
+  background: ${p =>
+    p.$variant === 'green' ? '#38a169' :
+    p.$variant === 'purple' ? '#805ad5' :
+    p.$variant === 'orange' ? '#dd6b20' : '#3182ce'};
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+  &:disabled { background: #a0aec0; cursor: not-allowed; }
+  &:not(:disabled):hover { filter: brightness(1.08); }
+`
+
 const ErrorMsg = styled.div`
   color: #e53e3e;
   font-size: 12px;
@@ -198,6 +215,10 @@ export default function MatterWorkbench({ matterId, onBack }: Props) {
   // Edit fields
   const [goalDraft, setGoalDraft] = useState('')
   const [saving, setSaving] = useState(false)
+
+  // Artifact generation
+  const [genBusy, setGenBusy] = useState<string | null>(null)
+  const [genMsg, setGenMsg] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -258,6 +279,31 @@ export default function MatterWorkbench({ matterId, onBack }: Props) {
   function handleDecisionPackageGenerated(pkg: DecisionPackage) {
     if (matter) setMatter({ ...matter, decisionPackage: pkg })
     matterRuntime.getAuditTrail(matterId).then(setAuditEvents).catch(() => {})
+  }
+
+  async function handleGenerate(type: 'reply' | 'document' | 'ppt') {
+    setGenBusy(type)
+    setGenMsg(null)
+    try {
+      let artifact: { title: string }
+      if (type === 'reply') {
+        artifact = await matterRuntime.generateReplyDraft(matterId)
+        setGenMsg(`✅ 回复草稿已生成：${artifact.title}（可在资源中心查看）`)
+      } else if (type === 'document') {
+        artifact = await matterRuntime.generateDocumentArtifact(matterId)
+        setGenMsg(`✅ 文稿已生成：${artifact.title}（可在资源中心查看）`)
+      } else {
+        artifact = await matterRuntime.generatePptArtifact(matterId)
+        setGenMsg(`✅ PPT 已生成：${artifact.title}（可在资源中心查看）`)
+      }
+      // Refresh audit trail
+      const audit = await matterRuntime.getAuditTrail(matterId)
+      setAuditEvents(audit)
+    } catch (e) {
+      setGenMsg(`❌ 生成失败：${e instanceof Error ? e.message : '未知错误'}`)
+    } finally {
+      setGenBusy(null)
+    }
   }
 
   if (loading) {
@@ -354,6 +400,42 @@ export default function MatterWorkbench({ matterId, onBack }: Props) {
           <FieldBlock>
             <FieldLabel>更新时间</FieldLabel>
             <FieldValue>{new Date(matter.updatedAt).toLocaleString('zh-CN')}</FieldValue>
+          </FieldBlock>
+
+          <FieldBlock style={{ marginTop: 8 }}>
+            <FieldLabel>AI 生成</FieldLabel>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <ActionBtn
+                $variant="green"
+                disabled={!!genBusy}
+                onClick={() => handleGenerate('reply')}
+              >
+                {genBusy === 'reply' ? '⏳ 生成中…' : '✉️ 生成回复草稿'}
+              </ActionBtn>
+              <ActionBtn
+                $variant="purple"
+                disabled={!!genBusy}
+                onClick={() => handleGenerate('document')}
+              >
+                {genBusy === 'document' ? '⏳ 生成中…' : '📄 生成文稿 Artifact'}
+              </ActionBtn>
+              <ActionBtn
+                $variant="orange"
+                disabled={!!genBusy}
+                onClick={() => handleGenerate('ppt')}
+              >
+                {genBusy === 'ppt' ? '⏳ 生成中…' : '🎞 生成 PPT Artifact'}
+              </ActionBtn>
+            </div>
+            {genMsg && (
+              <div style={{
+                marginTop: 8, fontSize: 12, color: genMsg.startsWith('✅') ? '#276749' : '#c53030',
+                background: genMsg.startsWith('✅') ? '#f0fff4' : '#fff5f5',
+                padding: '6px 8px', borderRadius: 6, border: `1px solid ${genMsg.startsWith('✅') ? '#9ae6b4' : '#feb2b2'}`,
+              }}>
+                {genMsg}
+              </div>
+            )}
           </FieldBlock>
         </LeftPanel>
 

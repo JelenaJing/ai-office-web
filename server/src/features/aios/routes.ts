@@ -13,6 +13,11 @@ import {
   type EmailInput,
 } from './services/matterService'
 import { generateDecisionPackage } from './services/decisionPackageService'
+import {
+  generateReplyDraft,
+  generateDocumentArtifact,
+  generatePptArtifact,
+} from './services/generationService'
 import { getAuditTrail } from './services/auditTrailService'
 import type { MatterStatus, MatterPriority, MatterSourceType, EvidenceType } from './types'
 
@@ -148,6 +153,47 @@ router.get('/matters/:id/audit', async (req, res) => {
   const userId = await requireAccountUser(req, res)
   if (!userId) return
   res.json({ events: getAuditTrail(userId, req.params.id) })
+})
+
+// ── Artifact Generation ────────────────────────────────────────────────────────
+
+router.post('/matters/:id/generate-reply', async (req, res) => {
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+  try {
+    const result = await generateReplyDraft(userId, req.params.id)
+    if (!result.success) return res.status(404).json({ message: result.error })
+    res.json({ artifact: result.artifact })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    res.status(500).json({ message: `生成回复草稿失败：${msg}` })
+  }
+})
+
+router.post('/matters/:id/generate-document', async (req, res) => {
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+  try {
+    const result = await generateDocumentArtifact(userId, req.params.id)
+    if (!result.success) return res.status(404).json({ message: result.error })
+    res.json({ artifact: result.artifact })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    res.status(500).json({ message: `生成文稿失败：${msg}` })
+  }
+})
+
+router.post('/matters/:id/generate-ppt', async (req, res) => {
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+  try {
+    const result = await generatePptArtifact(userId, req.params.id)
+    if (!result.success) return res.status(404).json({ message: result.error })
+    res.json({ artifact: result.artifact })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    res.status(500).json({ message: `生成 PPT 失败：${msg}` })
+  }
 })
 
 export default router
