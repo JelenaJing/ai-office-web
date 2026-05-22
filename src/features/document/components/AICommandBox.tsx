@@ -227,7 +227,13 @@ export interface AICommandBoxProps {
   session: WebDocumentSession
   onSessionUpdate: (session: WebDocumentSession) => void
   onStatus?: (message: string, tone?: 'ok' | 'err') => void
+  /** 当前文档导出并立即下载 (顶部工具栏) */
   onExportCurrentDocument: (format: DocumentExportFormat) => Promise<void>
+  /**
+   * 可选别名 —— 生成完成卡片里的下载按钮使用此回调；
+   * 未传时自动降级到 onExportCurrentDocument。
+   */
+  onExportRequest?: (format: DocumentExportFormat) => void | Promise<void>
   exportBusyFormat?: DocumentExportFormat | null
   disabled?: boolean
   generationMode?: 'default' | 'knowledge-template-document'
@@ -268,12 +274,21 @@ export function AICommandBox({
   onSessionUpdate,
   onStatus,
   onExportCurrentDocument,
+  onExportRequest,
   exportBusyFormat,
   disabled,
   templateDocument,
   documentTypePreset,
   patchActions,
 }: AICommandBoxProps) {
+  // 生成完成卡片的下载按钮优先使用 onExportRequest，否则降级到 onExportCurrentDocument
+  const handleCardExport = useCallback(
+    (format: DocumentExportFormat) => {
+      if (onExportRequest) return void onExportRequest(format)
+      return void onExportCurrentDocument(format)
+    },
+    [onExportRequest, onExportCurrentDocument],
+  )
   const [instruction, setInstruction] = useState('')
   const [busy, setBusy] = useState(false)
   const [selectionTick, setSelectionTick] = useState(0)
@@ -374,7 +389,7 @@ export function AICommandBox({
       return
     }
 
-    showSuccessCard('已完成：生成初稿', '初稿已生成，可继续修改或下载。')
+    showSuccessCard('初稿已生成', '你可以继续修改，或直接下载当前文稿。')
     onStatus?.('初稿已生成，可继续修改或下载', 'ok')
   }, [fileIds, knowledgeBaseIds, onSessionUpdate, onStatus, showSuccessCard, template.id, title])
 
@@ -697,7 +712,7 @@ export function AICommandBox({
             <ActionBtn
               type="button"
               disabled={busy || disabled || Boolean(exportBusyFormat)}
-              onClick={() => void onExportCurrentDocument('docx')}
+              onClick={() => handleCardExport('docx')}
             >
               <Download size={14} />
               {exportBusyFormat === 'docx' ? '正在生成 Word…' : '下载 Word'}
@@ -705,7 +720,7 @@ export function AICommandBox({
             <ActionBtn
               type="button"
               disabled={busy || disabled || Boolean(exportBusyFormat)}
-              onClick={() => void onExportCurrentDocument('markdown')}
+              onClick={() => handleCardExport('markdown')}
             >
               <Download size={14} />
               {exportBusyFormat === 'markdown' ? '正在生成 Markdown…' : '下载 Markdown'}
@@ -713,10 +728,17 @@ export function AICommandBox({
             <ActionBtn
               type="button"
               disabled={busy || disabled || Boolean(exportBusyFormat)}
-              onClick={() => void onExportCurrentDocument('html')}
+              onClick={() => handleCardExport('html')}
             >
               <Download size={14} />
               {exportBusyFormat === 'html' ? '正在生成 HTML…' : '下载 HTML'}
+            </ActionBtn>
+            <ActionBtn
+              type="button"
+              disabled={busy || disabled}
+              onClick={() => void handleQuickAction('polish')}
+            >
+              优化全文
             </ActionBtn>
             <ActionBtn
               type="button"
