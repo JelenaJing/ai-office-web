@@ -3,9 +3,10 @@
  */
 
 export type MatterSourceType = 'manual' | 'email' | 'document' | 'upload'
-export type MatterStatus = 'new' | 'todo' | 'doing' | 'waiting' | 'done' | 'archived'
+export type MatterStatus = 'draft' | 'collecting_evidence' | 'decision_package_ready' | 'completed' | 'new' | 'todo' | 'doing' | 'waiting' | 'done' | 'archived'
 export type MatterPriority = 'urgent' | 'important' | 'normal' | 'low'
 export type EvidenceType = 'email' | 'attachment' | 'file' | 'note' | 'knowledge'
+export type MatterRouteType = 'point_to_point' | 'point_to_many'
 
 export interface Matter {
   id: string
@@ -16,6 +17,7 @@ export interface Matter {
   goal: string
   sourceType: MatterSourceType
   status: MatterStatus
+  routeType: MatterRouteType
   priority: MatterPriority
   evidenceIds: string[]
   artifactIds: string[]
@@ -31,6 +33,8 @@ export interface MatterEvidence {
   title: string
   content: string
   sourceRef: string
+  artifactId?: string
+  knowledgeVerificationStatus?: 'verified' | 'partial' | 'unverified'
   createdAt: string
 }
 
@@ -52,6 +56,7 @@ export interface AuditEvent {
     | 'generate_reply_draft'
     | 'generate_document_artifact'
     | 'generate_ppt_artifact'
+    | 'complete_matter'
   detail: Record<string, unknown>
   createdAt: string
 }
@@ -64,6 +69,8 @@ export interface DecisionPackage {
   missingMaterials: string[]
   riskPoints: string[]
   suggestedActions: string[]
+  sourceReferences: Array<{ type: EvidenceType; evidenceId: string; sourceRef: string; title: string; artifactId?: string }>
+  knowledgeVerificationStatus: 'verified' | 'partial' | 'unverified'
 }
 
 // ── Persist layer types ────────────────────────────────────────────────────────

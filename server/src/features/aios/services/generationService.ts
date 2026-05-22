@@ -14,7 +14,7 @@ import {
 } from '../../../modules/ai-gateway'
 import { buildSlidePlanFromPrompt, writePptxFile } from '../../../modules/ppt'
 import { saveSkillArtifact } from '../../../lib/skillArtifact'
-import { parseWorkspacePath, type Artifact } from '../../../artifacts/ArtifactStore'
+import { parseWorkspacePath, type Artifact, type ArtifactKnowledgeRef, type ArtifactSourceRef } from '../../../artifacts/ArtifactStore'
 import { getMatter, getEvidence } from './matterService'
 import { readMatters, writeMatters } from './matterStore'
 import { logAudit } from './auditTrailService'
@@ -41,6 +41,27 @@ function buildEvidenceSummary(evidence: ReturnType<typeof getEvidence>): string 
     .slice(0, 8)
     .map(e => `- [${e.type}] ${e.title}${e.content ? '：' + e.content.slice(0, 150) : ''}`)
     .join('\n')
+}
+
+function buildArtifactSourceRefs(matterId: string, evidence: ReturnType<typeof getEvidence>): ArtifactSourceRef[] {
+  return [
+    { type: 'matter', id: matterId, label: 'AIOS Matter' },
+    ...evidence.map((item) => ({
+      type: item.type,
+      id: item.artifactId || item.sourceRef || item.id,
+      label: item.title,
+    })),
+  ]
+}
+
+function buildKnowledgeRefs(evidence: ReturnType<typeof getEvidence>): ArtifactKnowledgeRef[] {
+  return evidence
+    .filter((item) => item.type === 'knowledge')
+    .map((item) => ({
+      documentId: item.sourceRef || item.id,
+      title: item.title,
+      citationStatus: item.knowledgeVerificationStatus ?? 'partial',
+    }))
 }
 
 // ── Reply Draft ───────────────────────────────────────────────────────────────
@@ -90,6 +111,10 @@ export async function generateReplyDraft(
     filename: 'reply-draft.txt',
     format: 'text',
     content: draftText,
+    matterId,
+    emailId: emailEv?.sourceRef,
+    sourceRefs: buildArtifactSourceRefs(matterId, evidence),
+    knowledgeRefs: buildKnowledgeRefs(evidence),
   })
 
   appendArtifactToMatter(userId, matterId, artifact.id)
@@ -134,6 +159,10 @@ export async function generateDocumentArtifact(
     filename: 'document.md',
     format: 'md',
     content: markdown,
+    matterId,
+    documentId: matterId,
+    sourceRefs: buildArtifactSourceRefs(matterId, evidence),
+    knowledgeRefs: buildKnowledgeRefs(evidence),
   })
 
   appendArtifactToMatter(userId, matterId, artifact.id)
@@ -181,6 +210,10 @@ export async function generatePptArtifact(
       filename,
       format: 'pptx',
       content: buffer,
+      matterId,
+      deckId: matterId,
+      sourceRefs: buildArtifactSourceRefs(matterId, evidence),
+      knowledgeRefs: buildKnowledgeRefs(evidence),
     })
 
     appendArtifactToMatter(userId, matterId, artifact.id)

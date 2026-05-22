@@ -3,9 +3,10 @@
  */
 
 export type MatterSourceType = 'manual' | 'email' | 'document' | 'upload'
-export type MatterStatus = 'new' | 'todo' | 'doing' | 'waiting' | 'done' | 'archived'
+export type MatterStatus = 'draft' | 'collecting_evidence' | 'decision_package_ready' | 'completed' | 'new' | 'todo' | 'doing' | 'waiting' | 'done' | 'archived'
 export type MatterPriority = 'urgent' | 'important' | 'normal' | 'low'
 export type EvidenceType = 'email' | 'attachment' | 'file' | 'note' | 'knowledge'
+export type MatterRouteType = 'point_to_point' | 'point_to_many'
 
 export interface Matter {
   id: string
@@ -16,6 +17,7 @@ export interface Matter {
   goal: string
   sourceType: MatterSourceType
   status: MatterStatus
+  routeType: MatterRouteType
   priority: MatterPriority
   evidenceIds: string[]
   artifactIds: string[]
@@ -31,6 +33,8 @@ export interface MatterEvidence {
   title: string
   content: string
   sourceRef: string
+  artifactId?: string
+  knowledgeVerificationStatus?: 'verified' | 'partial' | 'unverified'
   createdAt: string
 }
 
@@ -51,10 +55,16 @@ export interface DecisionPackage {
   missingMaterials: string[]
   riskPoints: string[]
   suggestedActions: string[]
+  sourceReferences: Array<{ type: EvidenceType; evidenceId: string; sourceRef: string; title: string; artifactId?: string }>
+  knowledgeVerificationStatus: 'verified' | 'partial' | 'unverified'
 }
 
 export const STATUS_LABELS: Record<MatterStatus, string> = {
   new: '新建',
+  draft: '草稿',
+  collecting_evidence: '收集证据',
+  decision_package_ready: '决策包就绪',
+  completed: '已完成',
   todo: '待处理',
   doing: '处理中',
   waiting: '等待中',
@@ -78,6 +88,10 @@ export const PRIORITY_COLORS: Record<MatterPriority, string> = {
 
 export const STATUS_COLORS: Record<MatterStatus, string> = {
   new: '#805ad5',
+  draft: '#805ad5',
+  collecting_evidence: '#3182ce',
+  decision_package_ready: '#2b6cb0',
+  completed: '#38a169',
   todo: '#3182ce',
   doing: '#d69e2e',
   waiting: '#718096',

@@ -27,6 +27,7 @@ This report summarizes the overnight Electron/public-review to Web parity migrat
 | Skill runtime / store | `3ecae04` | pass | partial |
 | Settings / account / model | `ab4eb06` | pass | partial |
 | AIOS / Matter / OA | `ff8640a` | pass | partial |
+| Deep AIOS E2E hardening | pending | pass | smoke passed; partial |
 
 ## Full parity features
 
@@ -46,7 +47,7 @@ No module is marked full Electron parity in this pass. The Web runtime now has c
 - Communication: chat room/message/attachment and directory API contracts.
 - Skill Center: built-in skill list/run plus selected built-in async jobs and runtime status.
 - Settings: feature-owned settings routes, AI connection test, and parity status.
-- AIOS: Matter/Evidence/DecisionPackage/AuditTrail, email-to-Matter, generated artifacts, parity status, and audit replay.
+- AIOS: Matter/Evidence/DecisionPackage/AuditTrail, email-to-Matter, generated Artifacts with relationship metadata, route types, source references, knowledge verification status, lifecycle smoke, parity status, and audit replay full events.
 
 ## Missing or unsupported Web features
 
@@ -62,7 +63,7 @@ No module is marked full Electron parity in this pass. The Web runtime now has c
 - Real-time Matrix/internal IM provider bridge and organization directory provider.
 - Remote Skill Store install, AOSKIN package execution, and generalized skill job runtime.
 - Editable model/provider settings, full role/permission matrix, and full Electron settings-store migration.
-- OA approval workflow, knowledge verification, and full audit replay.
+- OA approval workflow, fully verified knowledge/RAG status, and Electron-equivalent replay side effects.
 
 ## Module source mapping and Web APIs
 
@@ -96,7 +97,7 @@ No module is marked full Electron parity in this pass. The Web runtime now has c
 | Communication | attachment references only | no |
 | Skill | skill-dependent | selected built-ins |
 | Settings | no | no |
-| AIOS | yes for reply/document/PPT | no |
+| AIOS | yes for reply/document/PPT with `matterId`/source refs | no |
 
 ## Can Web replace Electron now?
 
@@ -113,7 +114,7 @@ Not yet. Web now has clearer module APIs and safer partial parity markers, but i
 - Exercise chat room/message endpoints and directory status.
 - Check Skill Center status and selected built-in job execution.
 - Verify AI settings, auth token compatibility, and email account settings.
-- Create Matter, add evidence, generate decision package, view audit, run audit replay, and generate reply/document/PPT artifacts.
+- Create Matter, add email/attachment/knowledge evidence, generate decision package, inspect source refs, run audit replay, generate reply/document/PPT artifacts, and complete lifecycle.
 
 ## Deployment configuration requirements
 

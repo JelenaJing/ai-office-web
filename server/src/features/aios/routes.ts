@@ -19,7 +19,7 @@ import {
   generatePptArtifact,
 } from './services/generationService'
 import { getAuditTrail } from './services/auditTrailService'
-import type { MatterStatus, MatterPriority, MatterSourceType, EvidenceType } from './types'
+import type { MatterStatus, MatterPriority, MatterSourceType, EvidenceType, MatterRouteType } from './types'
 
 const router = Router()
 
@@ -45,6 +45,7 @@ router.get('/parity-status', async (req, res) => {
       artifactGeneration: true,
       approvalWorkflow: false,
       auditReplay: 'partial',
+      routeTypes: ['point_to_point', 'point_to_many'],
     },
     partialMissing: AIOS_PARTIAL_MISSING,
   })
@@ -62,18 +63,19 @@ router.get('/matters', async (req, res) => {
 router.post('/matters', async (req, res) => {
   const userId = await requireAccountUser(req, res)
   if (!userId) return
-  const { title, goal, sourceType, status, priority, workspacePath } = req.body as {
+  const { title, goal, sourceType, status, priority, workspacePath, routeType } = req.body as {
     title?: string
     goal?: string
     sourceType?: MatterSourceType
     status?: MatterStatus
     priority?: MatterPriority
     workspacePath?: string
+    routeType?: MatterRouteType
   }
   if (!title?.trim()) {
     return res.status(400).json({ message: '事项标题必填' })
   }
-  const matter = createMatter(userId, { title, goal, sourceType, status, priority, workspacePath })
+  const matter = createMatter(userId, { title, goal, sourceType, status, priority, workspacePath, routeType })
   res.status(201).json({ matter })
 })
 
@@ -89,14 +91,15 @@ router.get('/matters/:id', async (req, res) => {
 router.patch('/matters/:id', async (req, res) => {
   const userId = await requireAccountUser(req, res)
   if (!userId) return
-  const { title, goal, status, priority, workspacePath } = req.body as {
+  const { title, goal, status, priority, workspacePath, routeType } = req.body as {
     title?: string
     goal?: string
     status?: MatterStatus
     priority?: MatterPriority
     workspacePath?: string
+    routeType?: MatterRouteType
   }
-  const updated = updateMatter(userId, req.params.id, { title, goal, status, priority, workspacePath })
+  const updated = updateMatter(userId, req.params.id, { title, goal, status, priority, workspacePath, routeType })
   if (!updated) return res.status(404).json({ message: '事项不存在' })
   res.json({ matter: updated })
 })
@@ -121,16 +124,18 @@ router.get('/matters/:id/evidence', async (req, res) => {
 router.post('/matters/:id/evidence', async (req, res) => {
   const userId = await requireAccountUser(req, res)
   if (!userId) return
-  const { type, title, content, sourceRef } = req.body as {
+  const { type, title, content, sourceRef, artifactId, knowledgeVerificationStatus } = req.body as {
     type?: EvidenceType
     title?: string
     content?: string
     sourceRef?: string
+    artifactId?: string
+    knowledgeVerificationStatus?: 'verified' | 'partial' | 'unverified'
   }
   if (!type || !title?.trim()) {
     return res.status(400).json({ message: '证据类型和标题必填' })
   }
-  const ev = addEvidence(userId, req.params.id, { type, title, content, sourceRef })
+  const ev = addEvidence(userId, req.params.id, { type, title, content, sourceRef, artifactId, knowledgeVerificationStatus })
   if (!ev) return res.status(404).json({ message: '事项不存在' })
   res.status(201).json({ evidence: ev })
 })
@@ -190,10 +195,13 @@ router.get('/matters/:id/audit/replay', async (req, res) => {
     success: true,
     replay: events.map((event, index) => ({
       step: index + 1,
+      eventId: event.id,
+      matterId: event.matterId,
       action: event.action,
       actorId: event.actorId,
       createdAt: event.createdAt,
       detail: event.detail,
+      fullEvent: event,
     })),
     partialMissing: AIOS_PARTIAL_MISSING,
   })

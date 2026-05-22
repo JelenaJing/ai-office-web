@@ -12,6 +12,7 @@ import type {
   MatterStatus,
   MatterPriority,
   EvidenceType,
+  MatterRouteType,
 } from '../types'
 
 // ── Matters ───────────────────────────────────────────────────────────────────
@@ -24,6 +25,7 @@ export interface CreateMatterInput {
   priority?: MatterPriority
   workspacePath?: string
   tenantId?: string
+  routeType?: MatterRouteType
 }
 
 export function listMatters(userId: string, status?: MatterStatus): Matter[] {
@@ -47,7 +49,8 @@ export function createMatter(userId: string, input: CreateMatterInput): Matter {
     title: input.title.trim(),
     goal: input.goal?.trim() ?? '',
     sourceType: input.sourceType ?? 'manual',
-    status: input.status ?? 'new',
+    status: input.status ?? 'draft',
+    routeType: input.routeType ?? 'point_to_point',
     priority: input.priority ?? 'normal',
     evidenceIds: [],
     artifactIds: [],
@@ -57,7 +60,7 @@ export function createMatter(userId: string, input: CreateMatterInput): Matter {
   const index = readMatters(userId)
   index.matters.push(matter)
   writeMatters(userId, index)
-  logAudit(userId, matter.id, 'create_matter', { title: matter.title, priority: matter.priority })
+  logAudit(userId, matter.id, 'create_matter', { title: matter.title, priority: matter.priority, routeType: matter.routeType })
   return matter
 }
 
@@ -67,6 +70,7 @@ export interface UpdateMatterInput {
   status?: MatterStatus
   priority?: MatterPriority
   workspacePath?: string
+  routeType?: MatterRouteType
 }
 
 export function updateMatter(
@@ -88,6 +92,7 @@ export function updateMatter(
     ...(input.status !== undefined && { status: input.status }),
     ...(input.priority !== undefined && { priority: input.priority }),
     ...(input.workspacePath !== undefined && { workspacePath: input.workspacePath }),
+    ...(input.routeType !== undefined && { routeType: input.routeType }),
     updatedAt: new Date().toISOString(),
   }
   index.matters[idx] = updated
@@ -128,6 +133,8 @@ export interface AddEvidenceInput {
   title: string
   content?: string
   sourceRef?: string
+  artifactId?: string
+  knowledgeVerificationStatus?: 'verified' | 'partial' | 'unverified'
 }
 
 export function getEvidence(userId: string, matterId: string): MatterEvidence[] {
@@ -150,6 +157,8 @@ export function addEvidence(
     title: input.title.trim(),
     content: input.content?.trim() ?? '',
     sourceRef: input.sourceRef?.trim() ?? '',
+    artifactId: input.artifactId?.trim(),
+    knowledgeVerificationStatus: input.knowledgeVerificationStatus ?? (input.type === 'knowledge' ? 'partial' : undefined),
     createdAt: new Date().toISOString(),
   }
 
@@ -162,6 +171,11 @@ export function addEvidence(
   const mIdx = matterIndex.matters.findIndex(m => m.id === matterId)
   if (mIdx !== -1) {
     matterIndex.matters[mIdx].evidenceIds.push(ev.id)
+    if (matterIndex.matters[mIdx].status === 'draft' || matterIndex.matters[mIdx].status === 'new' || matterIndex.matters[mIdx].status === 'todo') {
+      const from = matterIndex.matters[mIdx].status
+      matterIndex.matters[mIdx].status = 'collecting_evidence'
+      logAudit(userId, matterId, 'change_status', { from, to: 'collecting_evidence' })
+    }
     matterIndex.matters[mIdx].updatedAt = new Date().toISOString()
     writeMatters(userId, matterIndex)
   }
@@ -211,6 +225,7 @@ export function createMatterFromEmail(
     status: 'new',
     priority: priority ?? 'normal',
     workspacePath,
+    routeType: 'point_to_point',
   })
 
   logAudit(userId, matter.id, 'create_matter_from_email', {

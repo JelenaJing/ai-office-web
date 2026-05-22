@@ -18,9 +18,10 @@ import type { ArtifactRef } from './artifact'
 // ── Primitive enums ───────────────────────────────────────────────────────────
 
 export type MatterSourceType = 'manual' | 'email' | 'document' | 'upload'
-export type MatterStatus = 'new' | 'todo' | 'doing' | 'waiting' | 'done' | 'archived'
+export type MatterStatus = 'draft' | 'collecting_evidence' | 'decision_package_ready' | 'completed' | 'new' | 'todo' | 'doing' | 'waiting' | 'done' | 'archived'
 export type MatterPriority = 'urgent' | 'important' | 'normal' | 'low'
 export type EvidenceType = 'email' | 'attachment' | 'file' | 'note' | 'knowledge'
+export type MatterRouteType = 'point_to_point' | 'point_to_many'
 
 export type AuditAction =
   | 'create_matter'
@@ -49,6 +50,7 @@ export interface Matter {
   goal: string
   sourceType: MatterSourceType
   status: MatterStatus
+  routeType: MatterRouteType
   priority: MatterPriority
   evidenceIds: string[]
   artifactIds: string[]
@@ -65,6 +67,8 @@ export interface MatterEvidence {
   title: string
   content: string
   sourceRef: string
+  artifactId?: string
+  knowledgeVerificationStatus?: 'verified' | 'partial' | 'unverified'
   createdAt: string
 }
 
@@ -89,6 +93,8 @@ export interface DecisionPackage {
   missingMaterials: string[]
   riskPoints: string[]
   suggestedActions: string[]
+  sourceReferences: Array<{ type: EvidenceType; evidenceId: string; sourceRef: string; title: string; artifactId?: string }>
+  knowledgeVerificationStatus: 'verified' | 'partial' | 'unverified'
 }
 
 // ── Cross-boundary references ─────────────────────────────────────────────────

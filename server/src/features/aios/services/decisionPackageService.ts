@@ -12,12 +12,34 @@ import { logAudit } from './auditTrailService'
 import type { DecisionPackage, Matter, MatterEvidence } from '../types'
 
 const STATUS_LABEL: Record<string, string> = {
+  draft: '草稿',
+  collecting_evidence: '收集证据',
+  decision_package_ready: '决策包就绪',
+  completed: '已完成',
   new: '新建',
   todo: '待处理',
   doing: '处理中',
   waiting: '等待中',
   done: '已完成',
   archived: '已归档',
+}
+
+function buildSourceReferences(evidence: MatterEvidence[]): DecisionPackage['sourceReferences'] {
+  return evidence.map((item) => ({
+    type: item.type,
+    evidenceId: item.id,
+    sourceRef: item.sourceRef,
+    title: item.title,
+    artifactId: item.artifactId,
+  }))
+}
+
+function resolveKnowledgeVerificationStatus(evidence: MatterEvidence[]): DecisionPackage['knowledgeVerificationStatus'] {
+  const knowledge = evidence.filter((item) => item.type === 'knowledge')
+  if (knowledge.length === 0) return 'partial'
+  if (knowledge.every((item) => item.knowledgeVerificationStatus === 'verified')) return 'verified'
+  if (knowledge.some((item) => item.knowledgeVerificationStatus === 'unverified')) return 'unverified'
+  return 'partial'
 }
 
 const PRIORITY_LABEL: Record<string, string> = {
@@ -157,6 +179,12 @@ function buildSuggestedActions(matter: Matter, evidence: MatterEvidence[]): stri
   if (matter.status === 'new') {
     actions.push('将事项状态更新为「待处理」，分配优先级。')
   }
+  if (matter.status === 'draft') {
+    actions.push('进入证据收集阶段，补充邮件、附件、知识库或备注证据。')
+  }
+  if (matter.status === 'collecting_evidence') {
+    actions.push('确认材料是否齐备，生成决策包并进入审阅。')
+  }
   if (matter.status === 'todo') {
     actions.push('开始处理事项，将状态更新为「处理中」。')
   }
@@ -200,14 +228,24 @@ export function generateDecisionPackage(
     missingMaterials: buildMissingMaterials(matter, evidence),
     riskPoints: buildRiskPoints(matter, evidence),
     suggestedActions: buildSuggestedActions(matter, evidence),
+    sourceReferences: buildSourceReferences(evidence),
+    knowledgeVerificationStatus: resolveKnowledgeVerificationStatus(evidence),
   }
 
   // Persist decision package onto the matter
   const mIdx = matters.findIndex(m => m.id === matterId)
   if (mIdx !== -1) {
     matters[mIdx].decisionPackage = pkg
+    const previousStatus = matters[mIdx].status
+    matters[mIdx].status = 'decision_package_ready'
     matters[mIdx].updatedAt = new Date().toISOString()
     writeMatters(userId, { matters })
+    if (previousStatus !== 'decision_package_ready') {
+      logAudit(userId, matterId, 'change_status', {
+        from: previousStatus,
+        to: 'decision_package_ready',
+      })
+    }
   }
 
   logAudit(userId, matterId, 'generate_decision_package', {
@@ -217,4 +255,3 @@ export function generateDecisionPackage(
 
   return pkg
 }
-
