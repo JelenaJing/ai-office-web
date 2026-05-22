@@ -45,6 +45,7 @@ export interface PaperWorkflowGenerateResult {
   diagnostics?: {
     chain: 'paper-workflow' | 'paper-workflow-web-adapter'
     steps: string[]
+    partialMissing?: string[]
   }
 }
 
@@ -323,6 +324,7 @@ async function runWebPaperWorkflow(
           markdown: result.markdown,
           title: result.title,
           taskId,
+          artifact: result.artifact,
           message: input.paperType === 'review' ? '文献综述链路已完成' : '研究文章链路已完成',
           diagnostics: result.diagnostics,
         }

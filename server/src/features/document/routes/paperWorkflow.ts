@@ -83,6 +83,12 @@ router.post('/start', requireAccountUser, async (req, res) => {
           markdown: result.markdown,
           html: result.html,
           paperType: result.paperType as PaperWorkflowPaperType,
+          references: result.references,
+          outline: result.outline,
+          sections: result.sections,
+          citationStatus: result.citationStatus,
+          referencesSidecar: result.referencesSidecar,
+          artifact: result.artifact,
           diagnostics: result.diagnostics,
         },
       })

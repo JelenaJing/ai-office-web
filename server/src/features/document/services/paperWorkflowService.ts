@@ -1,5 +1,13 @@
 import { invokeLlmJson, invokeLlmText, isLlmConfigured } from '../../../modules/ai-gateway'
 import { markdownToHtml } from './markdownToHtml'
+import {
+  PAPER_NFTCORE_PARTIAL_MISSING,
+  type PaperArtifact,
+  type PaperArtifactSection,
+  type PaperCitationStatus,
+  type PaperReferencesSidecar,
+} from './paperNFTCORERuntime'
+import type { ReferenceItem } from './openAlexClient'
 
 export type PaperWorkflowPaperType = 'research' | 'review' | 'thesis_research'
 
@@ -35,10 +43,16 @@ export interface PaperWorkflowGenerateResult {
   markdown: string
   html: string
   paperType: PaperWorkflowPaperType
-  artifact?: unknown
+  references: ReferenceItem[]
+  outline: string[]
+  sections: PaperArtifactSection[]
+  citationStatus: PaperCitationStatus
+  referencesSidecar: PaperReferencesSidecar
+  artifact: PaperArtifact
   diagnostics: {
     chain: 'paper-workflow' | 'paper-workflow-web-adapter' | 'electron-compatible-nftcore' | 'web-paper-runtime' | 'web-paper-compatible-runtime'
     steps: string[]
+    partialMissing: string[]
   }
 }
 
@@ -105,6 +119,84 @@ function assertNotCancelled(input: Pick<PaperWorkflowGenerateInput, 'isCancelled
     const error = new Error('论文任务已取消')
     error.name = 'PaperWorkflowCancelledError'
     throw error
+  }
+}
+
+function extractSectionArtifacts(markdown: string): PaperArtifactSection[] {
+  const matches = Array.from(markdown.matchAll(/^##\s+(.+)$/gm))
+  return matches.map((match, index) => {
+    const start = match.index ?? 0
+    const next = matches[index + 1]?.index ?? markdown.length
+    const sectionMarkdown = markdown.slice(start, next).trim()
+    return {
+      index: index + 1,
+      title: String(match[1] || '').trim(),
+      markdown: sectionMarkdown,
+      citationMarkers: Array.from(new Set(sectionMarkdown.match(/\[\d+\]/g) ?? [])),
+    }
+  })
+}
+
+function buildWebAdapterPaperResult(params: {
+  title: string
+  markdown: string
+  html: string
+  paperType: PaperWorkflowPaperType
+  outline: string[]
+  diagnosticsSteps: string[]
+}): PaperWorkflowGenerateResult {
+  const sections = extractSectionArtifacts(params.markdown)
+  const referencesSidecar: PaperReferencesSidecar = {
+    status: 'generated',
+    source: 'empty',
+    references: [],
+    generatedAt: new Date().toISOString(),
+  }
+  const citationStatus: PaperCitationStatus = {
+    mode: 'deferred',
+    markerCount: params.markdown.match(/\[\d+\]/g)?.length ?? 0,
+    referenceCount: 0,
+    verified: false,
+    verificationStatus: 'not-ported',
+    missing: [
+      'OpenAlex references are only available in the full NFTCORE runtime.',
+      'Electron referenceManager citation verification is not yet ported to Web server.',
+    ],
+  }
+  const artifact: PaperArtifact = {
+    type: 'paper',
+    boundary: 'paper-result',
+    title: params.title,
+    paperType: params.paperType,
+    markdown: params.markdown,
+    html: params.html,
+    outline: params.outline,
+    sections,
+    referencesSidecar,
+    citationStatus,
+    sourceRuntime: 'electron-compatible-nftcore',
+  }
+
+  return {
+    success: true,
+    title: params.title,
+    markdown: params.markdown,
+    html: params.html,
+    paperType: params.paperType,
+    references: [],
+    outline: params.outline,
+    sections,
+    citationStatus,
+    referencesSidecar,
+    artifact,
+    diagnostics: {
+      chain: 'paper-workflow-web-adapter',
+      steps: params.diagnosticsSteps,
+      partialMissing: [
+        'full NFTCORE OpenAlex reference search for partial modes',
+        ...PAPER_NFTCORE_PARTIAL_MISSING,
+      ],
+    },
   }
 }
 
@@ -275,6 +367,10 @@ export async function runPaperWorkflowService(
   const diagnostics = {
     chain: 'paper-workflow-web-adapter' as const,
     steps: resolveSteps(normalizedInput.mode ?? 'full'),
+    partialMissing: [
+      'full NFTCORE OpenAlex reference search for partial modes',
+      ...PAPER_NFTCORE_PARTIAL_MISSING,
+    ],
   }
 
   if (!normalizedInput.topic.trim()) {
@@ -284,14 +380,14 @@ export async function runPaperWorkflowService(
   if (!isLlmConfigured()) {
     assertNotCancelled(normalizedInput)
     const markdown = buildOfflineMarkdown(normalizedInput)
-    return {
-      success: true,
+    return buildWebAdapterPaperResult({
       title: normalizedInput.topic.trim(),
       markdown,
       html: markdownToHtml(markdown),
       paperType: normalizedInput.paperType,
-      diagnostics,
-    }
+      outline: normalizeOutline([], normalizedInput.paperType),
+      diagnosticsSteps: diagnostics.steps,
+    })
   }
 
   const plan = await (async () => {
@@ -335,12 +431,12 @@ export async function runPaperWorkflowService(
 
   assertNotCancelled(normalizedInput)
   normalizedInput.onStep?.('prepare-references', '正在整理参考文献占位…', 90)
-  return {
-    success: true,
+  return buildWebAdapterPaperResult({
     title,
     markdown,
     html: markdownToHtml(markdown),
     paperType: normalizedInput.paperType,
-    diagnostics,
-  }
+    outline: normalizeOutline(plan.outline, normalizedInput.paperType),
+    diagnosticsSteps: diagnostics.steps,
+  })
 }

@@ -14,7 +14,10 @@ The Web server now runs the NFTCORE pipeline (`electron-compatible-nftcore`) for
 - [ ] Cancellation calls `POST /api/document/paper-workflow/tasks/:taskId/cancel`
 - [ ] **Does NOT call** `runDocumentGenerate`
 - [ ] Diagnostics `chain` = `"electron-compatible-nftcore"`
+- [ ] Task result includes normalized `artifact`, `references`, `outline`, `sections`, `citationStatus`, and `referencesSidecar`
+- [ ] `diagnostics.partialMissing` lists known non-ported Electron gaps instead of claiming full parity
 - [ ] Right-side panel displays "当前使用：研究文章链路"
+- [ ] Right-side panel displays partial status when `partialMissing` is non-empty
 - [ ] Generation progress updates shown step-by-step
 - [ ] Output contains: 标题, 摘要, 关键词, 引言, 相关研究, 研究方法/分析框架, 结果或分析, 讨论, 结论, 参考文献
 - [ ] Completed result enters A4 editor
@@ -27,7 +30,10 @@ The Web server now runs the NFTCORE pipeline (`electron-compatible-nftcore`) for
 - [ ] Cancellation calls `POST /api/document/paper-workflow/tasks/:taskId/cancel`
 - [ ] **Does NOT call** `runDocumentGenerate`
 - [ ] Diagnostics `chain` = `"electron-compatible-nftcore"`
+- [ ] Task result includes normalized `artifact`, `references`, `outline`, `sections`, `citationStatus`, and `referencesSidecar`
+- [ ] `diagnostics.partialMissing` lists known non-ported Electron gaps instead of claiming full parity
 - [ ] Right-side panel displays "当前使用：综述文章链路"
+- [ ] Right-side panel displays partial status when `partialMissing` is non-empty
 - [ ] Generation progress updates shown step-by-step
 - [ ] Output contains: 文献检索与筛选说明, 研究脉络, 主题分类, 代表性研究, 争议与不足, 未来研究方向, 结论, 参考文献
 - [ ] Completed result enters A4 editor
@@ -60,6 +66,9 @@ cd server && npm run build ✅
 6. ✅ Per-section: thinking → body with inline citations
 7. ✅ Conclusion generation
 8. ✅ Reference list formatting
+9. ✅ References sidecar normalized in task result
+10. ✅ PaperArtifact-like result normalized for Web consumers
+11. ✅ Citation status exposed as `not-ported` until Electron `referenceManager` verification is migrated
 
 ## Known Differences from Electron Runtime
 
@@ -71,3 +80,4 @@ cd server && npm run build ✅
 | Journal category filter | ✅ bundled DB | ❌ skipped | Minor quality impact |
 | OOXML snapshot | ✅ | ❌ | Not applicable to Web |
 | Task cancellation responsiveness | ✅ | ⚠️ cooperative | Web cancel stops at task checkpoints, not mid-request |
+| Citation verification | ✅ via `referenceManager` | ⚠️ status exposed as `not-ported` | `diagnostics.partialMissing` and `citationStatus.missing` must be visible |

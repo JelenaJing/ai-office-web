@@ -29,6 +29,7 @@ export interface WorkflowGenerateResult {
   diagnostics?: {
     chain: string
     steps: string[]
+    partialMissing?: string[]
   }
   documentResult?: DocumentSkillResult
   formalTemplateResult?: FormalTemplateGenerateResult

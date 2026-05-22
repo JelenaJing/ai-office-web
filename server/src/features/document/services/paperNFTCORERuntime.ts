@@ -55,19 +55,103 @@ export interface PaperNFTCOREResult {
   paperType: string
   references: ReferenceItem[]
   outline: string[]
+  sections: PaperArtifactSection[]
+  citationStatus: PaperCitationStatus
+  referencesSidecar: PaperReferencesSidecar
+  artifact: PaperArtifact
   diagnostics: {
     chain: 'electron-compatible-nftcore' | 'web-paper-runtime' | 'web-paper-compatible-runtime'
     steps: string[]
+    partialMissing: string[]
   }
 }
 
 export type NFTCOREStepCallback = (step: number, message: string, partial?: string) => void
+
+export interface PaperArtifactSection {
+  index: number
+  title: string
+  markdown: string
+  citationMarkers: string[]
+}
+
+export interface PaperCitationStatus {
+  mode: CitationMode
+  markerCount: number
+  referenceCount: number
+  verified: false
+  verificationStatus: 'not-ported'
+  missing: string[]
+}
+
+export interface PaperReferencesSidecar {
+  status: 'generated'
+  source: 'openalex' | 'empty'
+  references: ReferenceItem[]
+  generatedAt: string
+}
+
+export interface PaperArtifact {
+  type: 'paper'
+  boundary: 'paper-result'
+  title: string
+  paperType: PaperNFTCOREParams['paperType']
+  markdown: string
+  html: string
+  outline: string[]
+  sections: PaperArtifactSection[]
+  referencesSidecar: PaperReferencesSidecar
+  citationStatus: PaperCitationStatus
+  sourceRuntime: 'electron-compatible-nftcore'
+}
+
+export const PAPER_NFTCORE_PARTIAL_MISSING = [
+  'incremental reference organisation pass',
+  'knowledge tree check',
+  'final full-paper review',
+  'citation verification',
+] as const
 
 function assertNotCancelled(isCancelled?: (() => boolean) | undefined): void {
   if (isCancelled?.()) {
     const error = new Error('论文任务已取消')
     error.name = 'PaperWorkflowCancelledError'
     throw error
+  }
+}
+
+function extractSectionArtifacts(markdown: string): PaperArtifactSection[] {
+  const matches = Array.from(markdown.matchAll(/^##\s+(.+)$/gm))
+  return matches.map((match, index) => {
+    const start = match.index ?? 0
+    const next = matches[index + 1]?.index ?? markdown.length
+    const sectionMarkdown = markdown.slice(start, next).trim()
+    return {
+      index: index + 1,
+      title: String(match[1] || '').trim(),
+      markdown: sectionMarkdown,
+      citationMarkers: Array.from(new Set(sectionMarkdown.match(/\[\d+\]/g) ?? [])),
+    }
+  })
+}
+
+function buildCitationStatus(markdown: string, references: ReferenceItem[], mode: CitationMode): PaperCitationStatus {
+  return {
+    mode,
+    markerCount: markdown.match(/\[\d+\]/g)?.length ?? 0,
+    referenceCount: references.length,
+    verified: false,
+    verificationStatus: 'not-ported',
+    missing: ['Electron referenceManager citation verification is not yet ported to Web server.'],
+  }
+}
+
+function buildReferencesSidecar(references: ReferenceItem[]): PaperReferencesSidecar {
+  return {
+    status: 'generated',
+    source: references.length > 0 ? 'openalex' : 'empty',
+    references,
+    generatedAt: new Date().toISOString(),
   }
 }
 
@@ -329,6 +413,23 @@ export async function runPaperNFTCORE(
   assertNotCancelled(params.isCancelled)
 
   const html = markdownToHtml(assembledMarkdown)
+  const outline = paperPlan.sections.map((s) => s.title)
+  const sections = extractSectionArtifacts(assembledMarkdown)
+  const citationStatus = buildCitationStatus(assembledMarkdown, references, citationMode)
+  const referencesSidecar = buildReferencesSidecar(references)
+  const artifact: PaperArtifact = {
+    type: 'paper',
+    boundary: 'paper-result',
+    title,
+    paperType: params.paperType,
+    markdown: assembledMarkdown,
+    html,
+    outline,
+    sections,
+    referencesSidecar,
+    citationStatus,
+    sourceRuntime: 'electron-compatible-nftcore',
+  }
 
   return {
     title,
@@ -336,10 +437,15 @@ export async function runPaperNFTCORE(
     html,
     paperType: params.paperType,
     references,
-    outline: paperPlan.sections.map((s) => s.title),
+    outline,
+    sections,
+    citationStatus,
+    referencesSidecar,
+    artifact,
     diagnostics: {
       chain: 'electron-compatible-nftcore',
       steps,
+      partialMissing: [...PAPER_NFTCORE_PARTIAL_MISSING],
     },
   }
 }

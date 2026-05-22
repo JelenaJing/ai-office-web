@@ -569,6 +569,7 @@ export function AICommandBox({
           successBody = `${selectedFormalTemplatePreset?.label || '正式模板'}已生成，结果已写入当前编辑器，可继续修改或下载。`
           successStatus = `当前使用：${workflowResult.diagnostics?.chain || selectedFormalTemplatePreset?.runtimeLabel || '正式模板链路'}`
         } else {
+          const partialMissing = workflowResult.diagnostics?.partialMissing ?? []
           successTitle = workflowId === 'literature_review' ? '文献综述链路已完成' : '研究文章链路已完成'
           successBody = workflowId === 'literature_review'
             ? '综述文章链路已完成，结果已写入当前编辑器，可继续修改或下载。'
@@ -576,6 +577,9 @@ export function AICommandBox({
           successStatus = workflowId === 'literature_review'
             ? '当前使用：paper workflow / review'
             : '当前使用：paper workflow / research'
+          if (partialMissing.length > 0) {
+            successStatus += ` · partial：缺失 ${partialMissing.slice(0, 2).join('、')}${partialMissing.length > 2 ? ' 等' : ''}`
+          }
         }
       }
 
