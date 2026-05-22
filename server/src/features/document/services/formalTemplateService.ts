@@ -81,10 +81,46 @@ export interface FormalTemplateGenerateResult {
   templateKind: string
   runtimeKind: string
   resolvedFields: Record<string, string>
+  previewMetadata: FormalTemplatePreviewMetadata
+  commitMetadata: FormalTemplateCommitMetadata
+  artifact: FormalTemplateArtifact
   diagnostics: {
     chain: 'web-formal-template-schema-first' | 'web-template-document-rewrite'
     steps: string[]
+    partialMissing: string[]
   }
+}
+
+export interface FormalTemplatePreviewMetadata {
+  stage: 'preview'
+  templateKind: string
+  runtimeKind: string
+  fieldCount: number
+  resolvedFieldCount: number
+  unavailableReason?: string
+}
+
+export interface FormalTemplateCommitMetadata {
+  stage: 'commit'
+  target: 'a4-editor-html'
+  docxCommitStatus: 'not-ported'
+  missing: string[]
+}
+
+export interface FormalTemplateArtifact {
+  type: 'formal_template'
+  boundary: 'formal-template-result'
+  title: string
+  presetId: string
+  presetLabel: string
+  templateKind: string
+  runtimeKind: string
+  markdown: string
+  html: string
+  resolvedFields: Record<string, string>
+  previewMetadata: FormalTemplatePreviewMetadata
+  commitMetadata: FormalTemplateCommitMetadata
+  sourceRuntime: 'web-formal-template-schema-first' | 'web-template-document-rewrite'
 }
 
 export type FormalTemplateServiceError = {
@@ -108,6 +144,14 @@ interface ResolvedFieldState {
   fields: WebFieldSchema[]
   values: Record<string, string>
 }
+
+const FORMAL_TEMPLATE_PARTIAL_MISSING = [
+  'OOXML block-level shell write-back',
+  'header/footer fidelity',
+  'schema-first base replace',
+  'high-fidelity field extraction',
+  'full commit-to-docx parity',
+] as const
 
 export async function analyzeFormalTemplate(
   input: FormalTemplateAnalyzeInput,
@@ -203,6 +247,7 @@ export async function runFormalTemplateWorkflow(
     emit('confirm', '正在整理模板字段并确认可填写信息…', 28)
 
     const preview = await buildPreviewCandidate(preset, input, fieldState.values)
+    const previewMetadata = buildPreviewMetadata(preset, fieldState)
     ensureNotCancelled()
     emit('preview', '正在生成模板正文候选…', 62, {
       markdown: preview.partialMarkdown,
@@ -210,6 +255,15 @@ export async function runFormalTemplateWorkflow(
     })
 
     const committed = commitTemplateResult(preset, templateText, fieldState.values, preview)
+    const commitMetadata = buildCommitMetadata()
+    const artifact = buildFormalTemplateArtifact({
+      preset,
+      committed,
+      resolvedFields: fieldState.values,
+      previewMetadata,
+      commitMetadata,
+      runtimeChain,
+    })
     ensureNotCancelled()
     emit('commit', '正在合成最终稿并准备写入编辑器…', 90, {
       markdown: committed.markdown,
@@ -231,9 +285,13 @@ export async function runFormalTemplateWorkflow(
       templateKind: preset.templateKind,
       runtimeKind: preset.runtimeKind,
       resolvedFields: fieldState.values,
+      previewMetadata,
+      commitMetadata,
+      artifact,
       diagnostics: {
         chain: runtimeChain,
         steps: diagnosticsSteps,
+        partialMissing: [...FORMAL_TEMPLATE_PARTIAL_MISSING],
       },
     }
   } catch (error) {
@@ -246,6 +304,57 @@ export async function runFormalTemplateWorkflow(
         : 'FT_UNKNOWN',
       availableTemplates: listPresets(),
     }
+  }
+}
+
+function buildPreviewMetadata(
+  preset: FormalTemplatePreset,
+  fieldState: ResolvedFieldState,
+): FormalTemplatePreviewMetadata {
+  const resolvedFieldCount = fieldState.fields
+    .filter((field) => String(fieldState.values[field.label] || fieldState.values[field.fieldId] || '').trim())
+    .length
+  return {
+    stage: 'preview',
+    templateKind: preset.templateKind,
+    runtimeKind: preset.runtimeKind,
+    fieldCount: fieldState.fields.length,
+    resolvedFieldCount,
+    unavailableReason: preset.unavailableReason,
+  }
+}
+
+function buildCommitMetadata(): FormalTemplateCommitMetadata {
+  return {
+    stage: 'commit',
+    target: 'a4-editor-html',
+    docxCommitStatus: 'not-ported',
+    missing: [...FORMAL_TEMPLATE_PARTIAL_MISSING],
+  }
+}
+
+function buildFormalTemplateArtifact(input: {
+  preset: FormalTemplatePreset
+  committed: { title: string; markdown: string; html: string }
+  resolvedFields: Record<string, string>
+  previewMetadata: FormalTemplatePreviewMetadata
+  commitMetadata: FormalTemplateCommitMetadata
+  runtimeChain: FormalTemplateGenerateResult['diagnostics']['chain']
+}): FormalTemplateArtifact {
+  return {
+    type: 'formal_template',
+    boundary: 'formal-template-result',
+    title: input.committed.title,
+    presetId: input.preset.id,
+    presetLabel: input.preset.label,
+    templateKind: input.preset.templateKind,
+    runtimeKind: input.preset.runtimeKind,
+    markdown: input.committed.markdown,
+    html: input.committed.html,
+    resolvedFields: input.resolvedFields,
+    previewMetadata: input.previewMetadata,
+    commitMetadata: input.commitMetadata,
+    sourceRuntime: input.runtimeChain,
   }
 }
 

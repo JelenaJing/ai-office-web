@@ -62,6 +62,13 @@ Document parity remains **partial**, but the P0 Web task contracts are now stric
 - Async formal-template task runtime exists.
 - Template preset availability and unavailable reasons are exposed.
 - Analyze / confirm / preview / commit semantics are represented in the Web task flow.
+- Task result now exposes:
+  - `previewMetadata`
+  - `commitMetadata`
+  - formal-template `artifact`
+  - `diagnostics.partialMissing`
+- `commitMetadata.docxCommitStatus` is explicitly `not-ported`.
+- Web UI shows `partial` status when known OOXML / schema-first commit gaps remain.
 
 ### Remaining gaps
 

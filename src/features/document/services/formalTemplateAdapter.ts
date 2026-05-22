@@ -61,10 +61,26 @@ export interface FormalTemplateGenerateResult {
   templateKind: string
   runtimeKind: string
   resolvedFields: Record<string, string>
+  previewMetadata?: {
+    stage: 'preview'
+    templateKind: string
+    runtimeKind: string
+    fieldCount: number
+    resolvedFieldCount: number
+    unavailableReason?: string
+  }
+  commitMetadata?: {
+    stage: 'commit'
+    target: 'a4-editor-html'
+    docxCommitStatus: 'not-ported'
+    missing: string[]
+  }
+  artifact?: unknown
   message?: string
   diagnostics: {
     chain: 'web-formal-template-schema-first' | 'web-template-document-rewrite'
     steps: string[]
+    partialMissing?: string[]
   }
 }
 
@@ -222,6 +238,9 @@ export async function runFormalTemplateGenerate(
           templateKind: String(result.templateKind ?? 'generic'),
           runtimeKind: String(result.runtimeKind ?? 'template-document-rewrite'),
           resolvedFields: (result.resolvedFields as Record<string, string>) ?? {},
+          previewMetadata: result.previewMetadata as FormalTemplateGenerateResult['previewMetadata'],
+          commitMetadata: result.commitMetadata as FormalTemplateGenerateResult['commitMetadata'],
+          artifact: result.artifact,
           message: `${String(result.presetLabel ?? '正式模板')}链路已完成`,
           diagnostics: (result.diagnostics as FormalTemplateGenerateResult['diagnostics']) ?? {
             chain: 'web-template-document-rewrite',

@@ -101,6 +101,7 @@ Web 迁移以这些文件为功能标准。
 - 显示所选模板运行时
 - 显示可用模板列表
 - 显示不可用模板及原因
+- 生成完成后如果 `diagnostics.partialMissing` 非空，显示 `partial` 状态，不显示 full parity
 
 ### 7. 快捷操作与正式模板链路绑定
 
@@ -134,6 +135,15 @@ Web 版当前做到的是：
 
 但 **还没有** 把真实 DOCX OOXML block-level patch 移到 server。
 
+当前 task result 会显式返回：
+
+- `previewMetadata`
+- `commitMetadata`
+- `artifact`
+- `diagnostics.partialMissing`
+
+其中 `commitMetadata.docxCommitStatus = "not-ported"`，用于防止 UI 或集成方误判为完整 Electron parity。
+
 ### 2. A4 编辑器写入的是最终 HTML 结果
 
 本轮结果进入当前 A4 编辑器，Word 导出继续使用当前编辑器内容，符合 Web 工作台预期；但还不是 Electron FormalTemplatePanel 的独立预览/提交 UI。
@@ -151,7 +161,11 @@ Web 版当前做到的是：
 7. 选“贺信”时走 `schema-first / congratulation-letter`。
 8. 选“通用模板改写”时走 `template-document-rewrite / generic`。
 9. 生成结果进入当前 A4 编辑器。
-10. Word 导出继续使用当前编辑器内容。
-11. `npm run check:boundaries` 通过。
-12. `npm run build:web` 通过。
-13. `cd server && npm run build` 通过。
+10. task result 包含 `previewMetadata`。
+11. task result 包含 `commitMetadata`，且 DOCX commit 标记为 `not-ported`。
+12. task result 包含 formal-template artifact-style record。
+13. `diagnostics.partialMissing` 包含 OOXML / header/footer / schema-first commit 缺口。
+14. Word 导出继续使用当前编辑器内容。
+15. `npm run check:boundaries` 通过。
+16. `npm run build:web` 通过。
+17. `cd server && npm run build` 通过。

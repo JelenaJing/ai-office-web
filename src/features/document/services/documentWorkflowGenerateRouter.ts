@@ -92,6 +92,7 @@ export async function runWorkflowGenerate(input: WorkflowGenerateInput): Promise
       markdown: ftResult.markdown,
       title: ftResult.title,
       taskId: ftResult.taskId,
+      artifact: ftResult.artifact,
       message: ftResult.message,
       diagnostics: ftResult.diagnostics,
       formalTemplateResult: ftResult,

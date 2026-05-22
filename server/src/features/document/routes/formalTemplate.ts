@@ -129,6 +129,9 @@ router.post('/start', requireAccountUser, async (req, res) => {
           templateKind: result.templateKind,
           runtimeKind: result.runtimeKind,
           resolvedFields: result.resolvedFields,
+          previewMetadata: result.previewMetadata,
+          commitMetadata: result.commitMetadata,
+          artifact: result.artifact,
           diagnostics: result.diagnostics,
         },
       })
