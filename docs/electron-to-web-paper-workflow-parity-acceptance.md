@@ -14,7 +14,8 @@ The Web server now runs the NFTCORE pipeline (`electron-compatible-nftcore`) for
 - [ ] Cancellation calls `POST /api/document/paper-workflow/tasks/:taskId/cancel`
 - [ ] **Does NOT call** `runDocumentGenerate`
 - [ ] Diagnostics `chain` = `"electron-compatible-nftcore"`
-- [ ] Task result includes normalized `artifact`, `references`, `outline`, `sections`, `citationStatus`, and `referencesSidecar`
+- [x] Task result includes normalized `artifact`, `references`, `outline`, `sections`, `citationStatus`, and `referencesSidecar`
+- [x] Normalized `artifact` includes `artifactId`, `sourceRefs`, and `exportRefs`
 - [ ] `diagnostics.partialMissing` lists known non-ported Electron gaps instead of claiming full parity
 - [ ] Right-side panel displays "当前使用：研究文章链路"
 - [ ] Right-side panel displays partial status when `partialMissing` is non-empty
@@ -30,7 +31,8 @@ The Web server now runs the NFTCORE pipeline (`electron-compatible-nftcore`) for
 - [ ] Cancellation calls `POST /api/document/paper-workflow/tasks/:taskId/cancel`
 - [ ] **Does NOT call** `runDocumentGenerate`
 - [ ] Diagnostics `chain` = `"electron-compatible-nftcore"`
-- [ ] Task result includes normalized `artifact`, `references`, `outline`, `sections`, `citationStatus`, and `referencesSidecar`
+- [x] Task result includes normalized `artifact`, `references`, `outline`, `sections`, `citationStatus`, and `referencesSidecar`
+- [x] Normalized `artifact` includes `artifactId`, `sourceRefs`, and `exportRefs`
 - [ ] `diagnostics.partialMissing` lists known non-ported Electron gaps instead of claiming full parity
 - [ ] Right-side panel displays "当前使用：综述文章链路"
 - [ ] Right-side panel displays partial status when `partialMissing` is non-empty
@@ -53,6 +55,21 @@ npm run check:boundaries  ✅
 npm run build:web         ✅
 cd server && npm run build ✅
 ```
+
+## Deep E2E Smoke
+
+Command:
+
+```bash
+npx tsx scripts/smoke/run-web-parity-smoke.ts document
+```
+
+Latest result:
+
+- `academic_paper`: passed via `/api/document/paper-workflow/start` with `paperType: "research"`.
+- `literature_review`: passed via `/api/document/paper-workflow/start` with `paperType: "review"` and review outline sections.
+- cancellation: passed via `/api/document/paper-workflow/tasks/:taskId/cancel`.
+- Paper result contains `artifact.artifactId`, `artifact.sourceRefs`, and `artifact.exportRefs`.
 
 ---
 

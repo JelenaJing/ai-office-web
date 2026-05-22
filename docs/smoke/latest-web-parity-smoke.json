@@ -1,17 +1,14 @@
 {
-  "startedAt": "2026-05-22T17:10:47.325Z",
-  "finishedAt": "2026-05-22T17:10:47.973Z",
+  "startedAt": "2026-05-22T17:14:36.000Z",
+  "finishedAt": "2026-05-22T17:15:11.367Z",
   "baseUrl": "http://127.0.0.1:3001",
   "modules": [
-    "document",
-    "ppt",
-    "email",
-    "aios"
+    "document"
   ],
   "totals": {
-    "passed": 5,
+    "passed": 11,
     "failed": 0,
-    "skipped": 0
+    "skipped": 1
   },
   "steps": [
     {
@@ -20,39 +17,96 @@
       "expected": "HTTP 2xx and token",
       "actual": "HTTP 200 with token",
       "status": "passed",
-      "durationMs": 545
+      "durationMs": 481
     },
     {
       "module": "document",
-      "endpoint": "GET /api/settings/parity-status",
-      "expected": "authenticated smoke can reach Web API",
-      "actual": "HTTP 200",
+      "endpoint": "GET /api/workspaces/default",
+      "expected": "default workspace path",
+      "actual": "workspace=web-workspace:7b33dbd9-1a28-48e4-b2a3-226e3b0f6494:32425493-bbc7-481e-8c25-92ff13fbc626",
       "status": "passed",
-      "durationMs": 21
+      "durationMs": 0
     },
     {
-      "module": "ppt",
-      "endpoint": "GET /api/artifacts",
-      "expected": "authenticated smoke can list artifacts before PPT E2E",
+      "module": "document",
+      "endpoint": "POST /api/skills/web.document.generate/run",
+      "expected": "normal document returns html/session or artifact",
       "actual": "HTTP 200",
       "status": "passed",
-      "durationMs": 22
+      "durationMs": 2677
     },
     {
-      "module": "email",
-      "endpoint": "GET /api/email/accounts",
-      "expected": "email accounts endpoint exists",
-      "actual": "HTTP 404",
+      "module": "document",
+      "endpoint": "POST /api/document/paper-workflow/start (academic_paper)",
+      "expected": "taskId returned",
+      "actual": "HTTP 200 taskId=37fceff4-b051-4f88-9006-0b200e6def1e",
       "status": "passed",
-      "durationMs": 13
+      "durationMs": 0
     },
     {
-      "module": "aios",
-      "endpoint": "GET /api/aios/parity-status",
-      "expected": "AIOS parity status endpoint exists",
+      "module": "document",
+      "endpoint": "GET /api/document/paper-workflow/tasks/:taskId (academic_paper)",
+      "expected": "completed structured paper result with artifactId/sourceRefs/exportRefs",
+      "actual": "status=completed paperType=research chain=paper-workflow-web-adapter artifactId=paper-mph6jmzq",
+      "status": "passed",
+      "durationMs": 0
+    },
+    {
+      "module": "document",
+      "endpoint": "POST /api/document/paper-workflow/start (literature_review)",
+      "expected": "taskId returned",
+      "actual": "HTTP 200 taskId=0ed4e8f7-a887-48d4-8678-788927cd3bbb",
+      "status": "passed",
+      "durationMs": 0
+    },
+    {
+      "module": "document",
+      "endpoint": "GET /api/document/paper-workflow/tasks/:taskId (literature_review)",
+      "expected": "completed structured paper result with artifactId/sourceRefs/exportRefs",
+      "actual": "status=completed paperType=review chain=paper-workflow-web-adapter artifactId=paper-mph6jwmw",
+      "status": "passed",
+      "durationMs": 0
+    },
+    {
+      "module": "document",
+      "endpoint": "POST /api/document/paper-workflow/tasks/:taskId/cancel",
+      "expected": "cancelled status",
+      "actual": "HTTP 200 status=cancelled",
+      "status": "passed",
+      "durationMs": 0
+    },
+    {
+      "module": "document",
+      "endpoint": "POST /api/document/formal-template/start",
+      "expected": "taskId returned",
+      "actual": "HTTP 200 taskId=9eeb0204-6323-44f3-bb5f-16d4dca343fa",
+      "status": "passed",
+      "durationMs": 0
+    },
+    {
+      "module": "document",
+      "endpoint": "GET /api/document/formal-template/tasks/:taskId",
+      "expected": "completed formal template with analyze/confirm/preview/commit and artifact metadata",
+      "actual": "status=completed phases=analyze,confirm,preview,commit,completed artifactId=formal-template-mph6k55u",
+      "status": "passed",
+      "durationMs": 0
+    },
+    {
+      "module": "document",
+      "endpoint": "POST /api/skills/web.docx.export/run",
+      "expected": "Word export returns docx artifact",
       "actual": "HTTP 200",
       "status": "passed",
-      "durationMs": 23
+      "durationMs": 67
+    },
+    {
+      "module": "document",
+      "endpoint": "POST /api/document/import-docx",
+      "expected": "fixtures/test-duty.docx exists",
+      "actual": "fixture missing",
+      "status": "skipped",
+      "error": "Created docs/smoke/manual-fixtures-needed.md",
+      "durationMs": 0
     }
   ]
 }

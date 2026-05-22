@@ -11,6 +11,7 @@ This report summarizes the overnight Electron/public-review to Web parity migrat
 | Phase 0 baseline | existing main | pass | completed |
 | Document paper P0 | `55e2d74` | pass | partial |
 | Document formal template P0 | `bf0d4b7` | pass | partial |
+| Deep document E2E hardening | pending | pass | smoke passed; partial |
 | PPT | `e15fcbb` | pass | partial |
 | Email | `69d7539` | pass | partial |
 | Knowledge | `448ce46` | pass | partial |
@@ -29,8 +30,8 @@ No module is marked full Electron parity in this pass. The Web runtime now has c
 
 ## Partial parity features
 
-- Document paper workflow: async start/status/cancel, normalized artifact, references sidecar, sections, and citation status.
-- Formal template workflow: async task metadata, preview/commit metadata, artifact-style result, and OOXML gap diagnostics.
+- Document paper workflow: async start/status/cancel, normalized artifact, `artifactId`, `sourceRefs`, `exportRefs`, references sidecar, sections, and citation status.
+- Formal template workflow: async task metadata, preview/commit metadata, artifact-style result with `artifactId`/source/export refs, and OOXML gap diagnostics.
 - PPT: DeckDocument task API, download endpoint, and zero-token metadata retemplate endpoint.
 - Email: account/IMAP/SMTP baseline plus async unread triage task API with safe deterministic classification.
 - Knowledge: remote-backed info/list/import/delete plus parity status.

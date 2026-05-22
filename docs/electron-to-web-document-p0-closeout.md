@@ -24,6 +24,9 @@ Document parity remains **partial**, but the P0 Web task contracts are now stric
 ### P0 changes
 
 - Paper task results now expose:
+  - `artifact.artifactId`
+  - `artifact.sourceRefs`
+  - `artifact.exportRefs`
   - `references`
   - `outline`
   - `sections`
@@ -68,6 +71,7 @@ Document parity remains **partial**, but the P0 Web task contracts are now stric
   - formal-template `artifact`
   - `diagnostics.partialMissing`
 - `commitMetadata.docxCommitStatus` is explicitly `not-ported`.
+- Formal template artifact-style records now include `artifactId`, `sourceRefs`, and `exportRefs`.
 - Web UI shows `partial` status when known OOXML / schema-first commit gaps remain.
 
 ### Remaining gaps
@@ -87,3 +91,18 @@ npm run check:boundaries
 npm run build:web
 cd server && npm run build
 ```
+
+## Deep E2E smoke
+
+`scripts/smoke/document-smoke.ts` now verifies:
+
+- login and default workspace resolution
+- normal document generation through `web.document.generate`
+- `academic_paper` through `POST /api/document/paper-workflow/start`
+- `literature_review` through `POST /api/document/paper-workflow/start`
+- paper cancellation through `/tasks/:taskId/cancel`
+- formal template `analyze -> confirm -> preview -> commit`
+- Word export through `web.docx.export`
+- DOCX import fixture readiness
+
+Latest document smoke result: **passed 11, skipped 1**. The skipped item is DOCX import because `fixtures/test-duty.docx` is not present; `docs/smoke/manual-fixtures-needed.md` records the manual fixture requirement.

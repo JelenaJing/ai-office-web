@@ -5,7 +5,7 @@
  * against AccountCenter /api/auth/me. No local JWT.
  */
 
-import type { Request, Response } from 'express'
+import type { NextFunction, Request, Response } from 'express'
 
 export const ACCOUNT_CENTER_URL =
   process.env.ACCOUNT_CENTER_URL ?? 'http://10.20.5.61:13100'
@@ -51,10 +51,14 @@ export async function resolveUserId(req: Request): Promise<string> {
 export async function requireAccountUser(
   req: Request,
   res: Response,
+  next?: NextFunction,
 ): Promise<string | null> {
   const token = bearerToken(req)
   if (!token) {
-    if (!IS_PRODUCTION) return DEV_FALLBACK_USER
+    if (!IS_PRODUCTION) {
+      next?.()
+      return DEV_FALLBACK_USER
+    }
     res.status(401).json({ message: '未授权' })
     return null
   }
@@ -65,7 +69,10 @@ export async function requireAccountUser(
       signal: AbortSignal.timeout(5000),
     })
     if (!resp.ok) {
-      if (!IS_PRODUCTION) return DEV_FALLBACK_USER
+      if (!IS_PRODUCTION) {
+        next?.()
+        return DEV_FALLBACK_USER
+      }
       res.status(401).json({ message: 'token 无效或已过期' })
       return null
     }
@@ -75,12 +82,21 @@ export async function requireAccountUser(
       user?: { id?: string }
     }
     const uid = data.id ?? data.userId ?? data.user?.id
-    if (uid) return String(uid)
-    if (!IS_PRODUCTION) return DEV_FALLBACK_USER
+    if (uid) {
+      next?.()
+      return String(uid)
+    }
+    if (!IS_PRODUCTION) {
+      next?.()
+      return DEV_FALLBACK_USER
+    }
     res.status(401).json({ message: '无法解析用户信息' })
     return null
   } catch {
-    if (!IS_PRODUCTION) return DEV_FALLBACK_USER
+    if (!IS_PRODUCTION) {
+      next?.()
+      return DEV_FALLBACK_USER
+    }
     res.status(502).json({ message: 'AccountCenter 不可达' })
     return null
   }

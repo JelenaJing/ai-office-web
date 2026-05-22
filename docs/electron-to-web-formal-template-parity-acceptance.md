@@ -164,8 +164,10 @@ Web 版当前做到的是：
 10. task result 包含 `previewMetadata`。
 11. task result 包含 `commitMetadata`，且 DOCX commit 标记为 `not-ported`。
 12. task result 包含 formal-template artifact-style record。
-13. `diagnostics.partialMissing` 包含 OOXML / header/footer / schema-first commit 缺口。
-14. Word 导出继续使用当前编辑器内容。
-15. `npm run check:boundaries` 通过。
-16. `npm run build:web` 通过。
-17. `cd server && npm run build` 通过。
+13. artifact-style record 包含 `artifactId` / `sourceRefs` / `exportRefs`。
+14. `diagnostics.partialMissing` 包含 OOXML / header/footer / schema-first commit 缺口。
+15. Word 导出继续使用当前编辑器内容。
+16. `npx tsx scripts/smoke/run-web-parity-smoke.ts document` 通过 formal_template E2E smoke。
+17. `npm run check:boundaries` 通过。
+18. `npm run build:web` 通过。
+19. `cd server && npm run build` 通过。

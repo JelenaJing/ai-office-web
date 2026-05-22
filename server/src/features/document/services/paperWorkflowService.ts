@@ -164,6 +164,7 @@ function buildWebAdapterPaperResult(params: {
     ],
   }
   const artifact: PaperArtifact = {
+    artifactId: `paper-${Date.now().toString(36)}`,
     type: 'paper',
     boundary: 'paper-result',
     title: params.title,
@@ -174,6 +175,14 @@ function buildWebAdapterPaperResult(params: {
     sections,
     referencesSidecar,
     citationStatus,
+    sourceRefs: [
+      { type: 'topic', id: `topic:${params.title}`, label: params.title },
+    ],
+    exportRefs: [
+      { format: 'html', status: 'inline' },
+      { format: 'markdown', status: 'inline' },
+      { format: 'references', status: 'inline' },
+    ],
     sourceRuntime: 'electron-compatible-nftcore',
   }
 

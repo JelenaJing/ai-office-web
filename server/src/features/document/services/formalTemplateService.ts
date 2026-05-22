@@ -108,6 +108,7 @@ export interface FormalTemplateCommitMetadata {
 }
 
 export interface FormalTemplateArtifact {
+  artifactId: string
   type: 'formal_template'
   boundary: 'formal-template-result'
   title: string
@@ -120,6 +121,8 @@ export interface FormalTemplateArtifact {
   resolvedFields: Record<string, string>
   previewMetadata: FormalTemplatePreviewMetadata
   commitMetadata: FormalTemplateCommitMetadata
+  sourceRefs: Array<{ type: 'template' | 'instruction'; id: string; label: string }>
+  exportRefs: Array<{ format: 'html' | 'markdown'; status: 'inline' }>
   sourceRuntime: 'web-formal-template-schema-first' | 'web-template-document-rewrite'
 }
 
@@ -342,6 +345,7 @@ function buildFormalTemplateArtifact(input: {
   runtimeChain: FormalTemplateGenerateResult['diagnostics']['chain']
 }): FormalTemplateArtifact {
   return {
+    artifactId: `formal-template-${Date.now().toString(36)}`,
     type: 'formal_template',
     boundary: 'formal-template-result',
     title: input.committed.title,
@@ -354,6 +358,14 @@ function buildFormalTemplateArtifact(input: {
     resolvedFields: input.resolvedFields,
     previewMetadata: input.previewMetadata,
     commitMetadata: input.commitMetadata,
+    sourceRefs: [
+      { type: 'template', id: input.preset.id, label: input.preset.label },
+      { type: 'instruction', id: `instruction:${input.committed.title}`, label: input.committed.title },
+    ],
+    exportRefs: [
+      { format: 'html', status: 'inline' },
+      { format: 'markdown', status: 'inline' },
+    ],
     sourceRuntime: input.runtimeChain,
   }
 }

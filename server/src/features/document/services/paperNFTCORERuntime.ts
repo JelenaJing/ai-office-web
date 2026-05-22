@@ -92,6 +92,7 @@ export interface PaperReferencesSidecar {
 }
 
 export interface PaperArtifact {
+  artifactId: string
   type: 'paper'
   boundary: 'paper-result'
   title: string
@@ -102,6 +103,8 @@ export interface PaperArtifact {
   sections: PaperArtifactSection[]
   referencesSidecar: PaperReferencesSidecar
   citationStatus: PaperCitationStatus
+  sourceRefs: Array<{ type: 'topic' | 'reference'; id: string; label: string }>
+  exportRefs: Array<{ format: 'html' | 'markdown' | 'references'; status: 'inline' }>
   sourceRuntime: 'electron-compatible-nftcore'
 }
 
@@ -418,6 +421,7 @@ export async function runPaperNFTCORE(
   const citationStatus = buildCitationStatus(assembledMarkdown, references, citationMode)
   const referencesSidecar = buildReferencesSidecar(references)
   const artifact: PaperArtifact = {
+    artifactId: `paper-${Date.now().toString(36)}`,
     type: 'paper',
     boundary: 'paper-result',
     title,
@@ -428,6 +432,19 @@ export async function runPaperNFTCORE(
     sections,
     referencesSidecar,
     citationStatus,
+    sourceRefs: [
+      { type: 'topic', id: `topic:${params.topic}`, label: params.topic },
+      ...references.slice(0, 8).map((ref) => ({
+        type: 'reference' as const,
+        id: ref.id,
+        label: ref.title,
+      })),
+    ],
+    exportRefs: [
+      { format: 'html', status: 'inline' },
+      { format: 'markdown', status: 'inline' },
+      { format: 'references', status: 'inline' },
+    ],
     sourceRuntime: 'electron-compatible-nftcore',
   }
 
