@@ -26,6 +26,7 @@ export interface PaperWorkflowGenerateInput {
   mode?: PaperWorkflowMode
   /** Optional progress callback — called at key pipeline steps. */
   onStep?: (step: string, message: string, progress: number) => void
+  isCancelled?: () => boolean
 }
 
 export interface PaperWorkflowGenerateResult {
@@ -97,6 +98,14 @@ function resolveSteps(mode: PaperWorkflowMode): string[] {
   if (mode === 'outline') return ['analyze-topic', 'draft-outline']
   if (mode === 'abstract') return ['analyze-topic', 'draft-title-abstract']
   return base
+}
+
+function assertNotCancelled(input: Pick<PaperWorkflowGenerateInput, 'isCancelled'>): void {
+  if (input.isCancelled?.()) {
+    const error = new Error('论文任务已取消')
+    error.name = 'PaperWorkflowCancelledError'
+    throw error
+  }
 }
 
 function buildOfflineMarkdown(input: PaperWorkflowGenerateInput): string {
@@ -273,6 +282,7 @@ export async function runPaperWorkflowService(
   }
 
   if (!isLlmConfigured()) {
+    assertNotCancelled(normalizedInput)
     const markdown = buildOfflineMarkdown(normalizedInput)
     return {
       success: true,
@@ -285,6 +295,7 @@ export async function runPaperWorkflowService(
   }
 
   const plan = await (async () => {
+    assertNotCancelled(normalizedInput)
     normalizedInput.onStep?.('analyze-topic', '正在分析主题和规划大纲…', 20)
     return invokeLlmJson<PaperOutlinePlan>(buildPlannerMessages(normalizedInput), {
       temperature: 0.35,
@@ -293,6 +304,7 @@ export async function runPaperWorkflowService(
   })()
 
   const title = String(plan.title || normalizedInput.topic).trim() || normalizedInput.topic.trim()
+  assertNotCancelled(normalizedInput)
   normalizedInput.onStep?.('generate-sections', '正在生成论文正文…', 50)
   const markdown = await invokeLlmText(
     [
@@ -321,6 +333,7 @@ export async function runPaperWorkflowService(
     },
   )
 
+  assertNotCancelled(normalizedInput)
   normalizedInput.onStep?.('prepare-references', '正在整理参考文献占位…', 90)
   return {
     success: true,

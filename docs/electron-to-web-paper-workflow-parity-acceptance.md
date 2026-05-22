@@ -11,6 +11,7 @@ The Web server now runs the NFTCORE pipeline (`electron-compatible-nftcore`) for
 ### Research Paper (academic_paper)
 
 - [ ] Selecting "论文/学术文章" calls `POST /api/document/paper-workflow/start` with `paperType: "research"`
+- [ ] Cancellation calls `POST /api/document/paper-workflow/tasks/:taskId/cancel`
 - [ ] **Does NOT call** `runDocumentGenerate`
 - [ ] Diagnostics `chain` = `"electron-compatible-nftcore"`
 - [ ] Right-side panel displays "当前使用：研究文章链路"
@@ -23,6 +24,7 @@ The Web server now runs the NFTCORE pipeline (`electron-compatible-nftcore`) for
 ### Literature Review (literature_review)
 
 - [ ] Selecting "文献综述" calls `POST /api/document/paper-workflow/start` with `paperType: "review"`
+- [ ] Cancellation calls `POST /api/document/paper-workflow/tasks/:taskId/cancel`
 - [ ] **Does NOT call** `runDocumentGenerate`
 - [ ] Diagnostics `chain` = `"electron-compatible-nftcore"`
 - [ ] Right-side panel displays "当前使用：综述文章链路"
@@ -31,11 +33,6 @@ The Web server now runs the NFTCORE pipeline (`electron-compatible-nftcore`) for
 - [ ] Completed result enters A4 editor
 - [ ] Typewriter effect preserved
 - [ ] Download Word uses current editor content
-
-### Formal Template (formal_template)
-
-- [ ] Selecting "正式模板" does NOT call `runDocumentGenerate`
-- [ ] Error message shown: "正式模板链路尚未接入 Web，当前不能作为普通文稿生成。"
 
 ### Other Document Types
 
@@ -73,3 +70,4 @@ cd server && npm run build ✅
 | Knowledge tree check | ✅ optional | ❌ | Future P2 |
 | Journal category filter | ✅ bundled DB | ❌ skipped | Minor quality impact |
 | OOXML snapshot | ✅ | ❌ | Not applicable to Web |
+| Task cancellation responsiveness | ✅ | ⚠️ cooperative | Web cancel stops at task checkpoints, not mid-request |

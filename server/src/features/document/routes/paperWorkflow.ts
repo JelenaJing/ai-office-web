@@ -8,6 +8,7 @@ import {
 import {
   createPaperTask,
   getPaperTask,
+  requestPaperTaskCancel,
   updatePaperTask,
 } from '../services/paperTaskStore'
 import { runPaperNFTCORE } from '../services/paperNFTCORERuntime'
@@ -49,7 +50,15 @@ router.post('/start', requireAccountUser, async (req, res) => {
   // Fire-and-forget: run generation in background
   ;(isFullMode
     ? runPaperNFTCORE(
-        { topic, paperType, language, extraContext, yearFrom, yearTo },
+        {
+          topic,
+          paperType,
+          language,
+          extraContext,
+          yearFrom,
+          yearTo,
+          isCancelled: () => Boolean(getPaperTask(task.taskId)?.cancelRequested),
+        },
         (_step, message, partial) => {
           updatePaperTask(task.taskId, { status: 'running', message, partialMarkdown: partial })
         },
@@ -59,9 +68,12 @@ router.post('/start', requireAccountUser, async (req, res) => {
         onStep: (_step, message, progress) => {
           updatePaperTask(task.taskId, { status: 'running', message, progress })
         },
+        isCancelled: () => Boolean(getPaperTask(task.taskId)?.cancelRequested),
       })
   )
     .then((result) => {
+      const current = getPaperTask(task.taskId)
+      if (current?.cancelRequested) return
       updatePaperTask(task.taskId, {
         status: 'completed',
         progress: 100,
@@ -77,8 +89,13 @@ router.post('/start', requireAccountUser, async (req, res) => {
     })
     .catch((error) => {
       const msg = error instanceof Error ? error.message : '论文工作流失败'
+      const cancelled = error instanceof Error && error.name === 'PaperWorkflowCancelledError'
       console.error('[document/paper-workflow/start]', msg)
-      updatePaperTask(task.taskId, { status: 'failed', message: msg, error: msg })
+      updatePaperTask(task.taskId, {
+        status: cancelled ? 'cancelled' : 'failed',
+        message: msg,
+        error: cancelled ? undefined : msg,
+      })
     })
 
   res.json({ success: true, taskId: task.taskId, paperType, status: 'running' })
@@ -104,6 +121,19 @@ router.get('/tasks/:taskId', requireAccountUser, (req, res) => {
     partialMarkdown: task.partialMarkdown,
     result: task.result,
     error: task.error,
+  })
+})
+
+router.post('/tasks/:taskId/cancel', requireAccountUser, (req, res) => {
+  const task = requestPaperTaskCancel(req.params.taskId)
+  if (!task) {
+    res.status(404).json({ error: '任务不存在或已过期' })
+    return
+  }
+  res.json({
+    success: true,
+    taskId: task.taskId,
+    status: 'cancelled',
   })
 })
 
@@ -146,4 +176,3 @@ router.post('/generate', requireAccountUser, async (req, res) => {
 })
 
 export default router
-

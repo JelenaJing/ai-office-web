@@ -243,67 +243,96 @@ async function runWebPaperWorkflow(
     message: input.paperType === 'review' ? 'paper workflow / review' : 'paper workflow / research',
   })
 
+  const cancelTask = async () => {
+    try {
+      await fetch(`/api/document/paper-workflow/tasks/${taskId}/cancel`, {
+        method: 'POST',
+        headers,
+      })
+    } catch {
+      // no-op
+    }
+  }
+
+  if (input.signal?.aborted) {
+    await cancelTask()
+    throw new Error('论文任务已取消')
+  }
+
+  const abortHandler = () => {
+    void cancelTask()
+  }
+  input.signal?.addEventListener('abort', abortHandler, { once: true })
+
   // ── Step 2: poll task status ─────────────────────────────────────────────────
   let lastMessage = ''
   const POLL_INTERVAL_MS = 1500
   const MAX_POLLS = 200 // 200 × 1.5 s = 5 min hard cap
 
-  for (let i = 0; i < MAX_POLLS; i++) {
-    if (input.signal?.aborted) throw new Error('已停止生成')
+  try {
+    for (let i = 0; i < MAX_POLLS; i++) {
+      if (input.signal?.aborted) throw new Error('已停止生成')
 
-    await new Promise<void>((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))
+      await new Promise<void>((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))
 
-    if (input.signal?.aborted) throw new Error('已停止生成')
+      if (input.signal?.aborted) throw new Error('已停止生成')
 
-    const pollResp = await fetch(`/api/document/paper-workflow/tasks/${taskId}`, {
-      headers,
-      signal: input.signal,
-    })
+      const pollResp = await fetch(`/api/document/paper-workflow/tasks/${taskId}`, {
+        headers,
+        signal: input.signal,
+      })
 
-    const pollBody = await pollResp.json().catch(() => ({ error: '轮询失败' })) as {
-      success?: boolean
-      taskId?: string
-      status?: string
-      progress?: number
-      message?: string
-      partialMarkdown?: string
-      result?: PaperWorkflowGenerateResult & { success?: boolean }
-      error?: string
-    }
-
-    if (!pollResp.ok || pollBody.error) {
-      throw new Error(`论文工作流失败：${pollBody.error || '轮询失败'}`)
-    }
-
-    const { status, message, result, error: taskError } = pollBody
-
-    if (message && message !== lastMessage) {
-      input.onStatus?.(message)
-      input.onProgress?.({ step: 'task-progress', message })
-      lastMessage = message
-    }
-
-    if (status === 'failed') {
-      throw new Error(`论文工作流失败：${taskError || '未知错误'}`)
-    }
-
-    if (status === 'completed' && result) {
-      if (!result.html?.trim() || !result.markdown?.trim()) {
-        throw new Error('论文工作流未返回正文')
+      const pollBody = await pollResp.json().catch(() => ({ error: '轮询失败' })) as {
+        success?: boolean
+        taskId?: string
+        status?: string
+        progress?: number
+        message?: string
+        partialMarkdown?: string
+        result?: PaperWorkflowGenerateResult & { success?: boolean }
+        error?: string
       }
-      input.onContent?.({ html: result.html, markdown: result.markdown })
-      return {
-        html: result.html,
-        markdown: result.markdown,
-        title: result.title,
-        taskId,
-        message: input.paperType === 'review' ? '文献综述链路已完成' : '研究文章链路已完成',
-        diagnostics: result.diagnostics,
+
+      if (!pollResp.ok || pollBody.error) {
+        throw new Error(`论文工作流失败：${pollBody.error || '轮询失败'}`)
+      }
+
+      const { status, message, result, error: taskError } = pollBody
+
+      if (message && message !== lastMessage) {
+        input.onStatus?.(message)
+        input.onProgress?.({ step: 'task-progress', message })
+        lastMessage = message
+      }
+
+      if (status === 'failed') {
+        throw new Error(`论文工作流失败：${taskError || '未知错误'}`)
+      }
+
+      if (status === 'cancelled') {
+        throw new Error(String(message || '论文任务已取消'))
+      }
+
+      if (status === 'completed' && result) {
+        if (!result.html?.trim() || !result.markdown?.trim()) {
+          throw new Error('论文工作流未返回正文')
+        }
+        input.onContent?.({ html: result.html, markdown: result.markdown })
+        return {
+          html: result.html,
+          markdown: result.markdown,
+          title: result.title,
+          taskId,
+          message: input.paperType === 'review' ? '文献综述链路已完成' : '研究文章链路已完成',
+          diagnostics: result.diagnostics,
+        }
       }
     }
+
+    throw new Error('论文工作流超时：生成时间过长，请重试')
+  } finally {
+    input.signal?.removeEventListener('abort', abortHandler)
   }
-
-  throw new Error('论文工作流超时：生成时间过长，请重试')
 }
 
 export async function runPaperWorkflowGenerate(

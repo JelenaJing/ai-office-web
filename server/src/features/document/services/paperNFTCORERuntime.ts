@@ -45,6 +45,7 @@ export interface PaperNFTCOREParams {
   extraContext?: string
   skipSectionThinking?: boolean
   citationMode?: CitationMode
+  isCancelled?: () => boolean
 }
 
 export interface PaperNFTCOREResult {
@@ -61,6 +62,14 @@ export interface PaperNFTCOREResult {
 }
 
 export type NFTCOREStepCallback = (step: number, message: string, partial?: string) => void
+
+function assertNotCancelled(isCancelled?: (() => boolean) | undefined): void {
+  if (isCancelled?.()) {
+    const error = new Error('论文任务已取消')
+    error.name = 'PaperWorkflowCancelledError'
+    throw error
+  }
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -116,6 +125,7 @@ export async function runPaperNFTCORE(
   let currentStep = 1
 
   const emit = (message: string, partial?: string): number => {
+    assertNotCancelled(params.isCancelled)
     const step = currentStep++
     steps.push(message)
     try { onStep(step, message, partial) } catch { /* ignore */ }
@@ -128,6 +138,7 @@ export async function runPaperNFTCORE(
   // ── Step 1–3: Reference search ───────────────────────────────────────────
   let references: ReferenceItem[] = []
   try {
+    assertNotCancelled(params.isCancelled)
     emit('正在检索 OpenAlex 学术文献…')
     references = await searchReferencesWithNftcoreStrategy({
       topic: params.topic,
@@ -144,6 +155,7 @@ export async function runPaperNFTCORE(
   // ── Step 4–5: Structure planning ─────────────────────────────────────────
   emit(params.paperType === 'research' ? '正在应用研究论文固定章节结构' : '正在用 LLM 动态生成论文章节结构')
 
+  assertNotCancelled(params.isCancelled)
   const paperPlan = await buildPaperPlanDynamic(
     { topic: params.topic, paperType: params.paperType, language, extraContext: params.extraContext },
     references,
@@ -157,6 +169,7 @@ export async function runPaperNFTCORE(
 
   // ── Structure thinking ───────────────────────────────────────────────────
   emit('正在推理全文架构')
+  assertNotCancelled(params.isCancelled)
   const structureThinkingPrompt = buildStructureThinkingPrompt({
     topic: params.topic,
     language,
@@ -171,6 +184,7 @@ export async function runPaperNFTCORE(
 
   // ── Step 6–7: Title + Abstract ───────────────────────────────────────────
   emit('正在按 NFTCORE 模板生成标题和摘要')
+  assertNotCancelled(params.isCancelled)
   const citationMode: CitationMode = params.citationMode
     ?? (shouldDeferReferenceInsertion(params.paperType) ? 'deferred' : 'inline')
 
@@ -209,6 +223,7 @@ export async function runPaperNFTCORE(
 
   // ── Step 8–N: Sections ───────────────────────────────────────────────────
   for (const sectionPlan of paperPlan.sections) {
+    assertNotCancelled(params.isCancelled)
     // Section thinking
     let thinking = ''
     if (!params.skipSectionThinking) {
@@ -256,6 +271,7 @@ export async function runPaperNFTCORE(
   const conclusionTitle = language === 'zh' ? '结论' : 'Conclusion'
   emit(`正在推理结论章节`)
 
+  assertNotCancelled(params.isCancelled)
   const conclusionThinkingPlan: SectionPlan = {
     title: conclusionTitle,
     description: 'Summarize findings and suggest future research directions.',
@@ -301,6 +317,7 @@ export async function runPaperNFTCORE(
   // ── Reference list ───────────────────────────────────────────────────────
   const refHeading = language === 'zh' ? '## 参考文献' : '## References'
   if (references.length > 0) {
+    assertNotCancelled(params.isCancelled)
     emit('正在整理参考文献')
     const refList = formatReferenceList(references)
     assembledMarkdown = appendMarkdown(assembledMarkdown, `${refHeading}\n\n${refList}`)
@@ -309,6 +326,7 @@ export async function runPaperNFTCORE(
   }
 
   emit('论文生成完成，正在转换为 HTML…')
+  assertNotCancelled(params.isCancelled)
 
   const html = markdownToHtml(assembledMarkdown)
 

@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto'
 import type { PaperWorkflowPaperType, PaperWorkflowGenerateResult } from './paperWorkflowService'
 
-export type PaperTaskStatus = 'queued' | 'running' | 'completed' | 'failed'
+export type PaperTaskStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
 
 export interface PaperTaskRecord {
   taskId: string
@@ -12,6 +12,7 @@ export interface PaperTaskRecord {
   partialMarkdown?: string
   result?: Omit<PaperWorkflowGenerateResult, 'success'>
   error?: string
+  cancelRequested: boolean
   createdAt: number
   updatedAt: number
 }
@@ -36,6 +37,7 @@ export function createPaperTask(paperType: PaperWorkflowPaperType): PaperTaskRec
     status: 'queued',
     progress: 0,
     message: '任务已排队',
+    cancelRequested: false,
     createdAt: now,
     updatedAt: now,
   }
@@ -51,4 +53,14 @@ export function updatePaperTask(taskId: string, patch: Partial<PaperTaskRecord>)
   const task = tasks.get(taskId)
   if (!task) return
   Object.assign(task, patch, { updatedAt: Date.now() })
+}
+
+export function requestPaperTaskCancel(taskId: string): PaperTaskRecord | undefined {
+  const task = tasks.get(taskId)
+  if (!task) return undefined
+  task.cancelRequested = true
+  task.status = 'cancelled'
+  task.message = '任务已取消'
+  task.updatedAt = Date.now()
+  return task
 }
