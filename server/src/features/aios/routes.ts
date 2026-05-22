@@ -23,6 +23,33 @@ import type { MatterStatus, MatterPriority, MatterSourceType, EvidenceType } fro
 
 const router = Router()
 
+const AIOS_PARTIAL_MISSING = [
+  'approval workflow is not connected to an OA engine',
+  'knowledge-base verification is partial',
+  'audit replay is deterministic event listing, not full Electron replay',
+  'cross-module artifact relationship graph is partial',
+]
+
+router.get('/parity-status', async (req, res) => {
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+  res.json({
+    success: true,
+    status: 'partial',
+    capabilities: {
+      matter: true,
+      evidence: true,
+      decisionPackage: true,
+      auditTrail: true,
+      emailToMatter: true,
+      artifactGeneration: true,
+      approvalWorkflow: false,
+      auditReplay: 'partial',
+    },
+    partialMissing: AIOS_PARTIAL_MISSING,
+  })
+})
+
 // ── Matters ───────────────────────────────────────────────────────────────────
 
 router.get('/matters', async (req, res) => {
@@ -153,6 +180,23 @@ router.get('/matters/:id/audit', async (req, res) => {
   const userId = await requireAccountUser(req, res)
   if (!userId) return
   res.json({ events: getAuditTrail(userId, req.params.id) })
+})
+
+router.get('/matters/:id/audit/replay', async (req, res) => {
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+  const events = getAuditTrail(userId, req.params.id)
+  res.json({
+    success: true,
+    replay: events.map((event, index) => ({
+      step: index + 1,
+      action: event.action,
+      actorId: event.actorId,
+      createdAt: event.createdAt,
+      detail: event.detail,
+    })),
+    partialMissing: AIOS_PARTIAL_MISSING,
+  })
 })
 
 // ── Artifact Generation ────────────────────────────────────────────────────────

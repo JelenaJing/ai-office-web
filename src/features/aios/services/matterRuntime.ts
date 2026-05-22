@@ -17,7 +17,12 @@ const BASE = '/api/aios'
 
 function authHeaders(): Record<string, string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  const token = localStorage.getItem('auth_token') ?? sessionStorage.getItem('auth_token')
+  const token =
+    localStorage.getItem('aios_auth_token') ??
+    localStorage.getItem('aios_itoken') ??
+    localStorage.getItem('ai_office_internal_token') ??
+    localStorage.getItem('auth_token') ??
+    sessionStorage.getItem('auth_token')
   if (token) headers['Authorization'] = `Bearer ${token}`
   return headers
 }
@@ -149,6 +154,14 @@ export async function generateDecisionPackage(matterId: string): Promise<Decisio
 export async function getAuditTrail(matterId: string): Promise<AuditEvent[]> {
   const data = await request<{ events: AuditEvent[] }>('GET', `/matters/${matterId}/audit`)
   return data.events
+}
+
+export async function getAiosParityStatus(): Promise<{
+  status: string
+  capabilities: Record<string, unknown>
+  partialMissing?: string[]
+}> {
+  return request('GET', '/parity-status')
 }
 
 // ── Artifact Generation ───────────────────────────────────────────────────────
