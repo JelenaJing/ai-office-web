@@ -37,6 +37,39 @@ router.get('/:departmentId/info', async (req, res) => {
   }
 })
 
+router.get('/:departmentId/parity-status', async (req, res) => {
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+  const departmentId = String(req.params.departmentId || '').trim()
+  try {
+    const partition = await resolvePartition(departmentId)
+    const info = await getBaseInfo(partition)
+    res.json({
+      status: 'partial',
+      departmentId,
+      partition,
+      documentCount: info.documentCount,
+      capabilities: {
+        upload: true,
+        textExtraction: 'remote-service',
+        chunking: 'remote-service',
+        embedding: 'remote-service-if-configured',
+        vectorSearch: 'remote-service-if-configured',
+        citationSourceDisplay: 'partial',
+        permissions: 'account-token-only',
+      },
+      partialMissing: [
+        'local Electron knowledgeService parity is not fully ported',
+        'citation source propagation across document/ppt/email is partial',
+        'permission and trust-level metadata are not fully exposed',
+      ],
+    })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    res.status(502).json({ message: `知识库状态检测失败：${msg}` })
+  }
+})
+
 /** GET /api/knowledge/:departmentId/documents */
 router.get('/:departmentId/documents', async (req, res) => {
   const userId = await requireAccountUser(req, res)
