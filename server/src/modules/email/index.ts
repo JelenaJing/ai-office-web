@@ -1,8 +1,2 @@
-export { getEmailAccount, saveEmailAccount, maskAccount } from './emailStore'
-export type { StoredEmailAccount } from './emailStore'
-export {
-  fetchInbox,
-  fetchMessage,
-  sendPlainEmail,
-  testEmailAccount,
-} from './emailMvp'
+// Compatibility re-export — moved to server/src/features/email/services/
+export * from '../../features/email/services/index'

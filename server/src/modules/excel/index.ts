@@ -1,5 +1,2 @@
-export {
-  analyzeSpreadsheet,
-  isSpreadsheetExt,
-  type AnalyzeSpreadsheetInput,
-} from './excelAnalyzer'
+// Compatibility re-export — moved to server/src/features/data-analysis/services/
+export * from '../../features/data-analysis/services/index'

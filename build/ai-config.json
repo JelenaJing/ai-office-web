@@ -11,7 +11,7 @@
       },
       "qwen": {
         "label": "通义千问",
-        "defaultModel": "qwen-max",
+        "defaultModel": "qwen3.6-plus",
         "defaultBaseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "builtinKeySupported": false,
         "builtinKeyEnvNames": ["QWEN_API_KEY"]
@@ -25,7 +25,7 @@
       },
       "deepseek": {
         "label": "DeepSeek",
-        "defaultModel": "deepseek-chat",
+        "defaultModel": "deepseek-v4-flash",
         "defaultBaseUrl": "https://api.deepseek.com/v1",
         "builtinKeySupported": false,
         "builtinKeyEnvNames": ["DEEPSEEK_API_KEY"]

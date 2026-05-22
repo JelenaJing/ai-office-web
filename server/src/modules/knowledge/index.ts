@@ -1,17 +1,2 @@
-export {
-  listKnowledgeBases,
-  getKnowledgeBase,
-  listFiles,
-  getBaseInfo,
-  deleteFile,
-  ingestFilesFromBuffers,
-  type RemoteDepartment,
-  type RemoteDocumentMeta,
-  type RemoteLibraryInfo,
-} from './remoteKnowledgeClient'
-
-export {
-  PRESET_DEPARTMENT_PARENTS,
-  applyPresetHierarchy,
-  resolveRemoteKnowledgePartitionId,
-} from './presetDepartments'
+// Compatibility re-export — moved to server/src/features/knowledge/services/
+export * from '../../features/knowledge/services/index'
