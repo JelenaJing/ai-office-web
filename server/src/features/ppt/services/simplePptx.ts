@@ -19,6 +19,56 @@ export interface GeneratedSlidePlan {
   slides: SlidePlanItem[]
 }
 
+const SLIDE_TYPES = new Set<SlidePlanItem['type']>(['cover', 'toc', 'content', 'summary'])
+
+function normalizeTextList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item || '').trim()).filter(Boolean)
+  }
+  if (typeof value === 'string') {
+    return value
+      .split(/\n|；|;/)
+      .map((item) => item.replace(/^[-•\d.、\s]+/, '').trim())
+      .filter(Boolean)
+  }
+  if (value && typeof value === 'object') {
+    return Object.values(value)
+      .map((item) => String(item || '').trim())
+      .filter(Boolean)
+  }
+  return []
+}
+
+function normalizeGeneratedSlidePlan(value: unknown, fallback: GeneratedSlidePlan, requestedTitle: string): GeneratedSlidePlan {
+  const raw = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  const rawSlides = Array.isArray(raw.slides) ? raw.slides : []
+  const slides = rawSlides
+    .map((item, index): SlidePlanItem => {
+      const slide = item && typeof item === 'object' ? item as Record<string, unknown> : {}
+      const rawType = String(slide.type || '').trim()
+      const type = SLIDE_TYPES.has(rawType as SlidePlanItem['type'])
+        ? rawType as SlidePlanItem['type']
+        : index === 0
+          ? 'cover'
+          : index === rawSlides.length - 1
+            ? 'summary'
+            : 'content'
+      return {
+        type,
+        title: typeof slide.title === 'string' ? slide.title : undefined,
+        subtitle: typeof slide.subtitle === 'string' ? slide.subtitle : undefined,
+        items: normalizeTextList(slide.items),
+      }
+    })
+    .filter((slide) => slide.title || slide.items?.length || slide.subtitle)
+
+  if (!slides.length) return fallback
+  return {
+    title: typeof raw.title === 'string' && raw.title.trim() ? raw.title.trim() : requestedTitle || fallback.title,
+    slides,
+  }
+}
+
 export async function buildSlidePlanFromPrompt(
   title: string,
   prompt: string,
@@ -52,7 +102,7 @@ export async function buildSlidePlanFromPrompt(
       ],
       { temperature: 0.4, maxTokens: 2000 },
     )
-    if (plan?.slides?.length) return { title: plan.title || title, slides: plan.slides }
+    if (plan?.slides?.length) return normalizeGeneratedSlidePlan(plan, fallback, title)
   } catch {
     // use fallback
   }

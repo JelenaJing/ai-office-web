@@ -9,10 +9,12 @@ This report summarizes the overnight Electron/public-review to Web parity migrat
 | Phase | Commit | Build | Status |
 | --- | --- | --- | --- |
 | Phase 0 baseline | existing main | pass | completed |
+| Deep smoke runner | `be5a6ad` | pass | smoke framework |
 | Document paper P0 | `55e2d74` | pass | partial |
 | Document formal template P0 | `bf0d4b7` | pass | partial |
-| Deep document E2E hardening | pending | pass | smoke passed; partial |
+| Deep document E2E hardening | `19fbe7e` | pass | smoke passed; partial |
 | PPT | `e15fcbb` | pass | partial |
+| Deep PPT E2E hardening | pending | pass | smoke passed; partial |
 | Email | `69d7539` | pass | partial |
 | Knowledge | `448ce46` | pass | partial |
 | Artifact / Resource Center | `bfeb069` | pass | partial |
@@ -32,7 +34,7 @@ No module is marked full Electron parity in this pass. The Web runtime now has c
 
 - Document paper workflow: async start/status/cancel, normalized artifact, `artifactId`, `sourceRefs`, `exportRefs`, references sidecar, sections, and citation status.
 - Formal template workflow: async task metadata, preview/commit metadata, artifact-style result with `artifactId`/source/export refs, and OOXML gap diagnostics.
-- PPT: DeckDocument task API, download endpoint, and zero-token metadata retemplate endpoint.
+- PPT: DeckDocument task API, download endpoint, zero-token retemplate preview, template manifest inventory, server-bound slot metadata, slide-level content-fit diagnostics, Matter source refs, and artifact relationship metadata.
 - Email: account/IMAP/SMTP baseline plus async unread triage task API with safe deterministic classification.
 - Knowledge: remote-backed info/list/import/delete plus parity status.
 - Artifact: list/detail/download plus preview, rename, and delete.
@@ -48,7 +50,7 @@ No module is marked full Electron parity in this pass. The Web runtime now has c
 
 - Full Electron NFTCORE paper reference/citation verification and final full-paper review.
 - High-fidelity formal template OOXML block write-back, header/footer fidelity, and schema-first replacement.
-- Durable PPT DeckDocument storage, full RetemplateEngine layout matching, external PPT import, and full template registry parity.
+- Durable PPT DeckDocument storage, full RetemplateEngine layout matching, external PPT import, full template registry parity, and high-fidelity slotBinder/contentPaginator rendering.
 - LLM-backed email triage, bulk recipient resolver, salutation generation, dry-run bulk send, and attachment-to-artifact opening flow.
 - Verified end-to-end RAG/vector search with citation propagation across all generators.
 - High-fidelity Office artifact preview and complete cross-module relationship graph.
@@ -82,7 +84,7 @@ No module is marked full Electron parity in this pass. The Web runtime now has c
 | Module | Artifact output | Async task |
 | --- | --- | --- |
 | Document | yes | yes |
-| PPT | yes | yes |
+| PPT | yes with `relationships.artifactId` | yes |
 | Email | partial for drafts/attachments | triage yes |
 | Knowledge | no generated Artifact | no |
 | Artifact | manages all Artifacts | no |
@@ -101,7 +103,7 @@ Not yet. Web now has clearer module APIs and safer partial parity markers, but i
 ## Manual test checklist
 
 - Generate paper and formal template documents and verify partial banners/diagnostics.
-- Generate PPT, download PPTX, and test metadata-only template switch.
+- Generate PPT, download PPTX, test zero-token template switch, and verify Matter/document source refs.
 - Configure email, pull unread messages, start/cancel triage, send a reply draft, and convert email to Matter.
 - Upload/list/delete knowledge documents and check parity status.
 - Preview, rename, download, and delete Artifacts.

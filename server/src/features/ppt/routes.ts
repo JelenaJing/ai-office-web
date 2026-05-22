@@ -39,6 +39,11 @@ router.post('/decks/start', async (req, res) => {
     prompt,
     templateId: typeof req.body?.templateId === 'string' ? req.body.templateId : undefined,
     source: req.body?.source === 'manuscript' || req.body?.source === 'matter' ? req.body.source : 'topic',
+    sourceId: typeof req.body?.matterId === 'string'
+      ? req.body.matterId
+      : typeof req.body?.documentId === 'string'
+        ? req.body.documentId
+        : undefined,
     isCancelled: () => Boolean(getDeckTask(task.taskId)?.cancelRequested),
     onStep: (message, progress) => updateDeckTask(task.taskId, { status: 'running', message, progress }),
   })
@@ -117,9 +122,16 @@ router.post('/decks/:deckId/retemplate', (req, res) => {
     success: true,
     deck,
     tokenUsed: false,
+    retemplatePreview: {
+      deckId: deck.deckId,
+      templateId: deck.templateId,
+      slideCount: deck.slides.length,
+      layouts: deck.templateManifest.layouts,
+      tokenUsed: false,
+    },
     diagnostics: {
       chain: 'web-deck-document-runtime',
-      steps: ['retemplate:metadata-only'],
+      steps: ['retemplate:manifest-inventory', 'retemplate:preview', 'retemplate:metadata-only'],
       partialMissing: deck.diagnostics.partialMissing,
     },
   })

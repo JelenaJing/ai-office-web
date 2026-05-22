@@ -24,6 +24,7 @@ export interface CreateDeckInput {
   prompt: string
   templateId?: string
   source?: 'topic' | 'manuscript' | 'matter'
+  sourceId?: string
   isCancelled?: () => boolean
   onStep?: (message: string, progress: number) => void
 }
@@ -56,6 +57,16 @@ function toDeckSlide(slide: SlidePlanItem, index: number): WebDeckSlide {
       subtitle: slide.subtitle || '',
       body: items,
     },
+    diagnostics: {
+      slotBinding: 'server-bound',
+      layoutMatching: 'heuristic',
+      contentFit: {
+        status: items.length > 6 ? 'overflow-risk' : 'fit',
+        itemCount: items.length,
+        maxRecommendedItems: 6,
+      },
+      partialMissing: [...PPT_PARTIAL_MISSING],
+    },
   }
 }
 
@@ -64,13 +75,30 @@ export function buildDeckDocument(input: {
   plan: GeneratedSlidePlan
   templateId: string
   source: 'topic' | 'manuscript' | 'matter'
+  sourceId?: string
 }): WebDeckDocument {
   const now = new Date().toISOString()
+  const layouts = Array.from(new Set(input.plan.slides.map((slide, index) => toDeckSlide(slide, index).layoutId)))
+  const sourceLabel = input.source === 'matter' ? 'AIOS Matter' : input.source === 'manuscript' ? 'Document manuscript' : input.plan.title
   return {
     deckId: input.deckId,
     title: input.plan.title,
     source: input.source,
     templateId: input.templateId,
+    templateManifest: {
+      templateId: input.templateId,
+      inventoryStatus: 'available',
+      layouts,
+      tokenUsed: false,
+    },
+    sourceRefs: [
+      {
+        type: input.source === 'topic' ? 'topic' : input.source,
+        id: input.sourceId || `${input.source}:${input.plan.title}`,
+        label: sourceLabel,
+      },
+    ],
+    artifactRefs: [],
     slides: input.plan.slides.map(toDeckSlide),
     createdAt: now,
     updatedAt: now,
@@ -98,6 +126,7 @@ export async function createDeckFromPrompt(input: CreateDeckInput): Promise<WebD
     plan,
     templateId,
     source: input.source || 'topic',
+    sourceId: input.sourceId,
   })
 
   assertNotCancelled(input)
@@ -119,6 +148,9 @@ export async function createDeckFromPrompt(input: CreateDeckInput): Promise<WebD
     format: 'pptx',
     content: fs.readFileSync(tmpPath),
   })
+  deck.artifactRefs = [
+    { artifactId: artifact.id, type: artifact.type, relation: 'export' },
+  ]
 
   fs.rmSync(tmpDir, { recursive: true, force: true })
 
@@ -127,6 +159,11 @@ export async function createDeckFromPrompt(input: CreateDeckInput): Promise<WebD
     deck,
     slidePlan: plan,
     artifact,
+    relationships: {
+      deckId,
+      artifactId: artifact.id,
+      sourceRefs: deck.sourceRefs,
+    },
     diagnostics: {
       chain: 'web-deck-document-runtime',
       steps,
@@ -136,9 +173,16 @@ export async function createDeckFromPrompt(input: CreateDeckInput): Promise<WebD
 }
 
 export function retemplateDeck(deck: WebDeckDocument, templateId: string): WebDeckDocument {
+  const layouts = deck.templateManifest.layouts
   return {
     ...deck,
     templateId: templateId.trim() || deck.templateId,
+    templateManifest: {
+      templateId: templateId.trim() || deck.templateId,
+      inventoryStatus: 'available',
+      layouts,
+      tokenUsed: false,
+    },
     updatedAt: new Date().toISOString(),
     diagnostics: {
       chain: 'web-deck-document-runtime',
