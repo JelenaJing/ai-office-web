@@ -1,0 +1,148 @@
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
+import { randomUUID } from 'crypto'
+import { saveSkillArtifact } from '../../../lib/skillArtifact'
+import {
+  buildSlidePlanFromPrompt,
+  writePptxFile,
+  type GeneratedSlidePlan,
+  type SlidePlanItem,
+} from './simplePptx'
+import type { WebDeckDocument, WebDeckSlide, WebDeckTaskResult } from '../types'
+
+export const PPT_PARTIAL_MISSING = [
+  'Electron RetemplateEngine layout matching is only represented as metadata on Web',
+  'external PPT import is not yet ported to Web server',
+  'slotBinder/contentPaginator are not yet used by server PPTX export',
+] as const
+
+export interface CreateDeckInput {
+  userId: string
+  workspacePath: string
+  title: string
+  prompt: string
+  templateId?: string
+  source?: 'topic' | 'manuscript' | 'matter'
+  isCancelled?: () => boolean
+  onStep?: (message: string, progress: number) => void
+}
+
+function assertNotCancelled(input: Pick<CreateDeckInput, 'isCancelled'>): void {
+  if (input.isCancelled?.()) {
+    const error = new Error('PPT 任务已取消')
+    error.name = 'PptDeckTaskCancelledError'
+    throw error
+  }
+}
+
+function normalizeItems(items: SlidePlanItem['items']): string[] {
+  return Array.isArray(items) ? items.map((item) => String(item || '').trim()).filter(Boolean) : []
+}
+
+function toDeckSlide(slide: SlidePlanItem, index: number): WebDeckSlide {
+  const items = normalizeItems(slide.items)
+  const title = String(slide.title || (index === 0 ? '封面' : `第 ${index + 1} 页`)).trim()
+  return {
+    id: `slide-${index + 1}`,
+    index,
+    type: slide.type,
+    title,
+    subtitle: slide.subtitle,
+    items,
+    layoutId: slide.type === 'cover' ? 'cover-title-subtitle' : slide.type === 'toc' ? 'toc-list' : 'title-bullets',
+    slots: {
+      title,
+      subtitle: slide.subtitle || '',
+      body: items,
+    },
+  }
+}
+
+export function buildDeckDocument(input: {
+  deckId: string
+  plan: GeneratedSlidePlan
+  templateId: string
+  source: 'topic' | 'manuscript' | 'matter'
+}): WebDeckDocument {
+  const now = new Date().toISOString()
+  return {
+    deckId: input.deckId,
+    title: input.plan.title,
+    source: input.source,
+    templateId: input.templateId,
+    slides: input.plan.slides.map(toDeckSlide),
+    createdAt: now,
+    updatedAt: now,
+    diagnostics: {
+      chain: 'web-deck-document-runtime',
+      partialMissing: [...PPT_PARTIAL_MISSING],
+    },
+  }
+}
+
+export async function createDeckFromPrompt(input: CreateDeckInput): Promise<WebDeckTaskResult> {
+  const steps: string[] = []
+  const emit = (message: string, progress: number) => {
+    steps.push(message)
+    input.onStep?.(message, progress)
+  }
+
+  assertNotCancelled(input)
+  emit('正在生成 DeckDocument 内容层…', 20)
+  const plan = await buildSlidePlanFromPrompt(input.title, input.prompt)
+  const deckId = randomUUID()
+  const templateId = input.templateId || 'web-default'
+  const deck = buildDeckDocument({
+    deckId,
+    plan,
+    templateId,
+    source: input.source || 'topic',
+  })
+
+  assertNotCancelled(input)
+  emit('正在渲染 DeckDocument 为 PPTX…', 70)
+  const safeName = (deck.title || 'presentation').replace(/[^\w\u4e00-\u9fa5\-]+/g, '_').slice(0, 60) || 'presentation'
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-office-ppt-'))
+  const tmpPath = path.join(tmpDir, `${safeName}.pptx`)
+  await writePptxFile(plan, tmpPath)
+
+  assertNotCancelled(input)
+  emit('正在保存 PPT Artifact…', 90)
+  const artifact = saveSkillArtifact({
+    userId: input.userId,
+    workspacePath: input.workspacePath,
+    skillId: 'web.ppt.deck.create',
+    type: 'presentation',
+    title: deck.title,
+    filename: `${safeName}.pptx`,
+    format: 'pptx',
+    content: fs.readFileSync(tmpPath),
+  })
+
+  fs.rmSync(tmpDir, { recursive: true, force: true })
+
+  return {
+    deckId,
+    deck,
+    slidePlan: plan,
+    artifact,
+    diagnostics: {
+      chain: 'web-deck-document-runtime',
+      steps,
+      partialMissing: [...PPT_PARTIAL_MISSING],
+    },
+  }
+}
+
+export function retemplateDeck(deck: WebDeckDocument, templateId: string): WebDeckDocument {
+  return {
+    ...deck,
+    templateId: templateId.trim() || deck.templateId,
+    updatedAt: new Date().toISOString(),
+    diagnostics: {
+      chain: 'web-deck-document-runtime',
+      partialMissing: [...PPT_PARTIAL_MISSING],
+    },
+  }
+}
