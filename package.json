@@ -103,7 +103,7 @@
     "package:win:with-plot-runtime": "npm run build && node build/package-win.mjs --with-plot-runtime",
     "package:win:full": "npm run package:win:with-plot-runtime",
     "preview": "vite preview",
-    "check:boundaries": "npx tsx scripts/check-module-boundaries.ts"
+    "check:boundaries": "tsx scripts/check-module-boundaries.ts"
   },
   "dependencies": {
     "@tiptap/core": "^2.27.2",
@@ -155,6 +155,7 @@
     "concurrently": "^8.2.2",
     "electron": "^28.1.0",
     "electron-builder": "^24.9.1",
+    "tsx": "^4.22.3",
     "typescript": "^5.2.2",
     "vite": "^5.0.8",
     "vite-plugin-electron": "^0.15.5"
