@@ -204,30 +204,21 @@ async function runWebPaperWorkflow(
   input: RunPaperWorkflowGenerateInput,
 ): Promise<PaperWorkflowGenerateResult> {
   const token = readAuthToken()
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  }
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (token) headers.Authorization = `Bearer ${token}`
 
-  input.onStatus?.(input.paperType === 'review' ? '正在启动综述文章链路…' : '正在启动研究文章链路…')
-  input.onProgress?.({
-    step: 'paper-workflow',
-    message: input.paperType === 'review' ? 'paper workflow / review' : 'paper workflow / research',
-  })
-  input.onProgress?.({
-    step: 'draft-outline',
-    message: input.paperType === 'review' ? '正在生成综述大纲…' : '正在生成论文大纲…',
-  })
+  const label = input.paperType === 'review' ? '综述文章' : '研究文章'
+  input.onStatus?.(`正在启动${label}链路…`)
 
-  const resp = await fetch('/api/document/paper-workflow/generate', {
+  // ── Step 1: start the async task ────────────────────────────────────────────
+  const startResp = await fetch('/api/document/paper-workflow/start', {
     method: 'POST',
     headers,
     body: JSON.stringify({
       topic: input.topic,
       paperType: input.paperType,
       language: input.language ?? 'zh',
-      workspacePath: input.workspacePath,
-      extraContext: input.extraContext,
+      extraContext: [input.extraContext, buildPaperModeExtraContext(input.mode)].filter(Boolean).join('\n\n') || undefined,
       yearFrom: input.yearFrom,
       yearTo: input.yearTo,
       mode: input.mode ?? 'full',
@@ -235,32 +226,84 @@ async function runWebPaperWorkflow(
     signal: input.signal,
   })
 
-  const body = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` })) as
-    | (PaperWorkflowGenerateResult & { success?: boolean })
-    | { error?: string }
+  const startBody = await startResp.json().catch(() => ({ error: `HTTP ${startResp.status}` })) as
+    | { success: boolean; taskId: string; paperType: string; status: string }
+    | { error?: string; message?: string }
 
-  if (!resp.ok || ('error' in body && body.error)) {
-    const serverMsg = ('error' in body && body.error)
-      || ('message' in body && (body as Record<string, unknown>).message)
+  if (!startResp.ok || 'error' in startBody) {
+    const serverMsg = ('error' in startBody && startBody.error)
+      || ('message' in startBody && (startBody as Record<string, unknown>).message)
       || null
-    throw new Error(serverMsg ? `论文工作流失败：${serverMsg}` : `论文工作流失败 (${resp.status})`)
+    throw new Error(serverMsg ? `论文工作流失败：${serverMsg}` : `论文工作流启动失败 (${startResp.status})`)
   }
 
-  const result = body as PaperWorkflowGenerateResult & { success?: boolean }
-  if (!result.html?.trim() || !result.markdown?.trim()) {
-    throw new Error('论文工作流未返回正文')
+  const { taskId } = startBody as { taskId: string }
+  input.onProgress?.({
+    step: 'paper-workflow',
+    message: input.paperType === 'review' ? 'paper workflow / review' : 'paper workflow / research',
+  })
+
+  // ── Step 2: poll task status ─────────────────────────────────────────────────
+  let lastMessage = ''
+  const POLL_INTERVAL_MS = 1500
+  const MAX_POLLS = 200 // 200 × 1.5 s = 5 min hard cap
+
+  for (let i = 0; i < MAX_POLLS; i++) {
+    if (input.signal?.aborted) throw new Error('已停止生成')
+
+    await new Promise<void>((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))
+
+    if (input.signal?.aborted) throw new Error('已停止生成')
+
+    const pollResp = await fetch(`/api/document/paper-workflow/tasks/${taskId}`, {
+      headers,
+      signal: input.signal,
+    })
+
+    const pollBody = await pollResp.json().catch(() => ({ error: '轮询失败' })) as {
+      success?: boolean
+      taskId?: string
+      status?: string
+      progress?: number
+      message?: string
+      partialMarkdown?: string
+      result?: PaperWorkflowGenerateResult & { success?: boolean }
+      error?: string
+    }
+
+    if (!pollResp.ok || pollBody.error) {
+      throw new Error(`论文工作流失败：${pollBody.error || '轮询失败'}`)
+    }
+
+    const { status, message, result, error: taskError } = pollBody
+
+    if (message && message !== lastMessage) {
+      input.onStatus?.(message)
+      input.onProgress?.({ step: 'task-progress', message })
+      lastMessage = message
+    }
+
+    if (status === 'failed') {
+      throw new Error(`论文工作流失败：${taskError || '未知错误'}`)
+    }
+
+    if (status === 'completed' && result) {
+      if (!result.html?.trim() || !result.markdown?.trim()) {
+        throw new Error('论文工作流未返回正文')
+      }
+      input.onContent?.({ html: result.html, markdown: result.markdown })
+      return {
+        html: result.html,
+        markdown: result.markdown,
+        title: result.title,
+        taskId,
+        message: input.paperType === 'review' ? '文献综述链路已完成' : '研究文章链路已完成',
+        diagnostics: result.diagnostics,
+      }
+    }
   }
 
-  input.onProgress?.({
-    step: 'generate-body',
-    message: input.paperType === 'review' ? '正在生成综述正文…' : '正在生成论文正文…',
-  })
-  input.onProgress?.({
-    step: 'prepare-references',
-    message: '正在整理参考文献占位…',
-  })
-  input.onContent?.({ html: result.html, markdown: result.markdown })
-  return result
+  throw new Error('论文工作流超时：生成时间过长，请重试')
 }
 
 export async function runPaperWorkflowGenerate(
