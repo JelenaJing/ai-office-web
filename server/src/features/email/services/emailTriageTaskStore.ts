@@ -12,6 +12,21 @@ export interface EmailTriageResult {
   riskLevel: 'none' | 'low' | 'medium' | 'high'
   tasks: string[]
   replyDraft?: string
+  draftArtifactId?: string
+  salutation?: string
+  attachmentArtifacts: Array<{
+    attachmentId: string
+    filename: string
+    artifactId?: string
+    status: 'saved' | 'failed'
+    error?: string
+  }>
+  relationships: Array<{
+    emailId: string
+    artifactId: string
+    relation: 'email_draft' | 'attachment'
+    filename?: string
+  }>
   status: 'success' | 'skipped' | 'failed'
   partialMissing: string[]
 }
@@ -22,6 +37,9 @@ export interface EmailTriageTaskRecord {
   progress: number
   message: string
   results: EmailTriageResult[]
+  cacheKey?: string
+  unreadOnly: boolean
+  sourceMessageCount: number
   error?: string
   cancelRequested: boolean
   createdAt: number
@@ -46,6 +64,8 @@ export function createEmailTriageTask(): EmailTriageTaskRecord {
     progress: 0,
     message: '任务已排队',
     results: [],
+    unreadOnly: true,
+    sourceMessageCount: 0,
     cancelRequested: false,
     createdAt: now,
     updatedAt: now,

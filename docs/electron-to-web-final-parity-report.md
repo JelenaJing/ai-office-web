@@ -16,6 +16,7 @@ This report summarizes the overnight Electron/public-review to Web parity migrat
 | PPT | `e15fcbb` | pass | partial |
 | Deep PPT E2E hardening | pending | pass | smoke passed; partial |
 | Email | `69d7539` | pass | partial |
+| Deep email E2E hardening | pending | pass | smoke passed; partial |
 | Knowledge | `448ce46` | pass | partial |
 | Artifact / Resource Center | `bfeb069` | pass | partial |
 | Image | `df57dc5` | pass | partial |
@@ -35,7 +36,7 @@ No module is marked full Electron parity in this pass. The Web runtime now has c
 - Document paper workflow: async start/status/cancel, normalized artifact, `artifactId`, `sourceRefs`, `exportRefs`, references sidecar, sections, and citation status.
 - Formal template workflow: async task metadata, preview/commit metadata, artifact-style result with `artifactId`/source/export refs, and OOXML gap diagnostics.
 - PPT: DeckDocument task API, download endpoint, zero-token retemplate preview, template manifest inventory, server-bound slot metadata, slide-level content-fit diagnostics, Matter source refs, and artifact relationship metadata.
-- Email: account/IMAP/SMTP baseline plus async unread triage task API with safe deterministic classification.
+- Email: account/IMAP/SMTP baseline, async unread triage task API with safe deterministic classification, triage cache key, reply draft Artifact, attachment Artifact ingestion, dry-run salutations, and email-to-Matter-to-document/PPT handoff.
 - Knowledge: remote-backed info/list/import/delete plus parity status.
 - Artifact: list/detail/download plus preview, rename, and delete.
 - Image: async text-to-image job API and image Artifact output.
@@ -51,7 +52,7 @@ No module is marked full Electron parity in this pass. The Web runtime now has c
 - Full Electron NFTCORE paper reference/citation verification and final full-paper review.
 - High-fidelity formal template OOXML block write-back, header/footer fidelity, and schema-first replacement.
 - Durable PPT DeckDocument storage, full RetemplateEngine layout matching, external PPT import, full template registry parity, and high-fidelity slotBinder/contentPaginator rendering.
-- LLM-backed email triage, bulk recipient resolver, salutation generation, dry-run bulk send, and attachment-to-artifact opening flow.
+- LLM-backed email triage, manual-approved bulk send execution, high-fidelity attachment preview/open workflow, and Calendar-specific email handoff.
 - Verified end-to-end RAG/vector search with citation propagation across all generators.
 - High-fidelity Office artifact preview and complete cross-module relationship graph.
 - Reference-image/poster image workflow and generated image insertion into document/PPT.
@@ -85,7 +86,7 @@ No module is marked full Electron parity in this pass. The Web runtime now has c
 | --- | --- | --- |
 | Document | yes | yes |
 | PPT | yes with `relationships.artifactId` | yes |
-| Email | partial for drafts/attachments | triage yes |
+| Email | yes for draft and attachment Artifacts | triage yes |
 | Knowledge | no generated Artifact | no |
 | Artifact | manages all Artifacts | no |
 | Image | yes | yes |
@@ -104,7 +105,7 @@ Not yet. Web now has clearer module APIs and safer partial parity markers, but i
 
 - Generate paper and formal template documents and verify partial banners/diagnostics.
 - Generate PPT, download PPTX, test zero-token template switch, and verify Matter/document source refs.
-- Configure email, pull unread messages, start/cancel triage, send a reply draft, and convert email to Matter.
+- Configure email, pull unread messages, start/cancel triage, save a reply draft Artifact, ingest an attachment Artifact, and convert email to Matter/document/PPT.
 - Upload/list/delete knowledge documents and check parity status.
 - Preview, rename, download, and delete Artifacts.
 - Run image, xlsx/csv analysis, and daily report from Web UI.

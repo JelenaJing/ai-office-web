@@ -1,12 +1,12 @@
 {
-  "startedAt": "2026-05-22T17:20:03.402Z",
-  "finishedAt": "2026-05-22T17:20:50.812Z",
+  "startedAt": "2026-05-22T17:27:21.018Z",
+  "finishedAt": "2026-05-22T17:27:54.086Z",
   "baseUrl": "http://127.0.0.1:3001",
   "modules": [
-    "ppt"
+    "email"
   ],
   "totals": {
-    "passed": 11,
+    "passed": 13,
     "failed": 0,
     "skipped": 0
   },
@@ -17,10 +17,10 @@
       "expected": "HTTP 2xx and token",
       "actual": "HTTP 200 with token",
       "status": "passed",
-      "durationMs": 510
+      "durationMs": 564
     },
     {
-      "module": "ppt",
+      "module": "email",
       "endpoint": "GET /api/workspaces/default",
       "expected": "workspace path",
       "actual": "HTTP 200 workspace=web-workspace:7b33dbd9-1a28-48e4-b2a3-226e3b0f6494:32425493-bbc7-481e-8c25-92ff13fbc626",
@@ -28,76 +28,92 @@
       "durationMs": 0
     },
     {
-      "module": "ppt",
-      "endpoint": "POST /api/ppt/decks/start (topic)",
-      "expected": "taskId returned",
-      "actual": "HTTP 200 taskId=4e6941ea-00f2-405a-9854-5eb19ad8ffd7",
+      "module": "email",
+      "endpoint": "GET /api/email/accounts",
+      "expected": "account list endpoint reports configuration status",
+      "actual": "HTTP 200 configured=true",
       "status": "passed",
       "durationMs": 0
     },
     {
-      "module": "ppt",
-      "endpoint": "GET /api/ppt/decks/tasks/:taskId (topic)",
-      "expected": "completed task with deckId and artifact relationship",
-      "actual": "status=completed deckId=04800f77-a847-4c7d-9020-9209a142e9b6 artifact=fb48a8d3-6ee5-4e58-b68d-3d7f5f71498b",
+      "module": "email",
+      "endpoint": "POST /api/email/drafts/dry-run",
+      "expected": "dry-run recipient resolver returns salutations without sending",
+      "actual": "HTTP 200 recipients=2",
+      "status": "passed",
+      "durationMs": 30
+    },
+    {
+      "module": "email",
+      "endpoint": "POST /api/email/drafts/artifact",
+      "expected": "reply draft is saved as email_draft Artifact",
+      "actual": "HTTP 200 artifact=97cfa3fc-f6f7-4473-8089-843b556011ee",
+      "status": "passed",
+      "durationMs": 33
+    },
+    {
+      "module": "email",
+      "endpoint": "POST /api/email/attachments/artifacts",
+      "expected": "attachment payload is saved as Artifact with email relationship",
+      "actual": "HTTP 200 artifacts=1",
+      "status": "passed",
+      "durationMs": 27
+    },
+    {
+      "module": "email",
+      "endpoint": "POST /api/aios/matters/from-email",
+      "expected": "email converts to Matter",
+      "actual": "HTTP 201 matterId=4e9d0916-d520-4b66-860e-0fde2caf9185",
       "status": "passed",
       "durationMs": 0
     },
     {
-      "module": "ppt",
-      "endpoint": "GET /api/ppt/decks/04800f77-a847-4c7d-9020-9209a142e9b6",
-      "expected": "DeckDocument has slides, template manifest, slide diagnostics",
-      "actual": "HTTP 200 slides=7",
+      "module": "email",
+      "endpoint": "POST /api/aios/matters/4e9d0916-d520-4b66-860e-0fde2caf9185/generate-document",
+      "expected": "mail Matter can generate document Artifact",
+      "actual": "HTTP 200 artifact=3f341f29-2315-4a3a-94bf-57108bc30e22",
       "status": "passed",
-      "durationMs": 7
+      "durationMs": 9631
     },
     {
-      "module": "ppt",
-      "endpoint": "GET /api/ppt/decks/04800f77-a847-4c7d-9020-9209a142e9b6/download",
-      "expected": "download returns PPTX artifact/file",
-      "actual": "HTTP 200 bytes=74487",
+      "module": "email",
+      "endpoint": "POST /api/aios/matters/4e9d0916-d520-4b66-860e-0fde2caf9185/generate-ppt",
+      "expected": "mail Matter can generate PPT Artifact",
+      "actual": "HTTP 200 artifact=67e3b156-b551-4bb4-9a6f-7509018d9899",
       "status": "passed",
-      "durationMs": 97
+      "durationMs": 7485
     },
     {
-      "module": "ppt",
-      "endpoint": "POST /api/ppt/decks/04800f77-a847-4c7d-9020-9209a142e9b6/retemplate",
-      "expected": "retemplate preview is zero-token",
-      "actual": "HTTP 200 tokenUsed=false",
-      "status": "passed",
-      "durationMs": 10
-    },
-    {
-      "module": "ppt",
-      "endpoint": "POST /api/aios/matters",
-      "expected": "matter fixture created for Matter -> PPT",
-      "actual": "HTTP 201 matterId=783b8a3c-5f4a-476b-bad0-5459e627078b",
+      "module": "email",
+      "endpoint": "GET /api/email/messages?folder=inbox",
+      "expected": "inbox fetch succeeds when account is configured",
+      "actual": "HTTP 200 messages=30",
       "status": "passed",
       "durationMs": 0
     },
     {
-      "module": "ppt",
-      "endpoint": "POST /api/ppt/decks/start (matter)",
-      "expected": "taskId returned",
-      "actual": "HTTP 200 taskId=c96c71f9-7f0c-4d8f-946f-25b8734c68bf",
+      "module": "email",
+      "endpoint": "POST /api/email/triage/start",
+      "expected": "triage task starts for unread-only messages",
+      "actual": "HTTP 200 taskId=a008317d-395f-4c6c-bc85-07ab5554f782",
       "status": "passed",
       "durationMs": 0
     },
     {
-      "module": "ppt",
-      "endpoint": "GET /api/ppt/decks/tasks/:taskId (matter)",
-      "expected": "completed task with deckId and artifact relationship",
-      "actual": "status=completed deckId=5d8c0482-24e4-4f53-9e96-def9cc8d6a8b artifact=3cef93b3-bbaa-497d-a5d6-573b62d367b2",
+      "module": "email",
+      "endpoint": "GET /api/email/triage/tasks/:taskId",
+      "expected": "completed triage with categories, summaries, priorities, draft relationships, unread guard, and cache key",
+      "actual": "status=completed results=10 cacheKey=email-triage:1779470862582",
       "status": "passed",
       "durationMs": 0
     },
     {
-      "module": "ppt",
-      "endpoint": "src/bridges/document-to-ppt/convertDocumentToDeckInput",
-      "expected": "document-to-ppt bridge returns deck input without importing PPT internals",
-      "actual": "sourceFeature=document slides=2",
+      "module": "email",
+      "endpoint": "POST /api/email/messages/828/attachments/0/artifact",
+      "expected": "real email attachment converts to Artifact",
+      "actual": "HTTP 200 artifact=4ab8483a-18cc-4b3f-b767-fb53da0e8ace",
       "status": "passed",
-      "durationMs": 0
+      "durationMs": 721
     }
   ]
 }

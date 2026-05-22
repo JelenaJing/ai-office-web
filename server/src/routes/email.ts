@@ -3,13 +3,18 @@ import { requireAccountUser } from '../lib/authUser'
 import {
   fetchInbox,
   fetchMessage,
+  fetchMessageAttachment,
   getEmailAccount,
   maskAccount,
+  createEmailAttachmentArtifact,
+  createEmailDraftArtifact,
+  resolveDryRunRecipients,
   saveEmailAccount,
   sendPlainEmail,
   testEmailAccount,
   type StoredEmailAccount,
 } from '../modules/email'
+import type { Artifact } from '../artifacts/ArtifactStore'
 import {
   createEmailTriageTask,
   getEmailTriageTask,
@@ -20,10 +25,31 @@ import { runEmailUnreadTriage } from '../features/email/services/emailTriageServ
 
 const router = Router()
 
+interface EmailSavedArtifact {
+  artifact: Artifact
+  relationship: {
+    emailId: string
+    artifactId: string
+    relation: 'email_draft' | 'attachment'
+    filename?: string
+  }
+}
+
 router.get('/account', async (req, res) => {
   const userId = await requireAccountUser(req, res)
   if (!userId) return
   res.json(maskAccount(getEmailAccount(userId)))
+})
+
+router.get('/accounts', async (req, res) => {
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+  const account = maskAccount(getEmailAccount(userId))
+  res.json({
+    configured: account.configured,
+    accounts: account.configured ? [account] : [],
+    manualSetupNeeded: !account.configured,
+  })
 })
 
 router.post('/account', async (req, res) => {
@@ -101,6 +127,68 @@ router.get('/messages/:id', async (req, res) => {
   }
 })
 
+router.post('/messages/:id/attachments/:attachmentId/artifact', async (req, res) => {
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+  const account = getEmailAccount(userId)
+  if (!account) {
+    return res.status(400).json({ success: false, error: '请先配置邮箱账号' })
+  }
+  const workspacePath = String(req.body?.workspacePath || '').trim()
+  if (!workspacePath) {
+    return res.status(400).json({ success: false, error: 'workspacePath 不能为空' })
+  }
+  try {
+    const attachment = await fetchMessageAttachment(account, req.params.id, req.params.attachmentId)
+    const saved = createEmailAttachmentArtifact({
+      userId,
+      workspacePath,
+      emailId: req.params.id,
+      filename: attachment.filename,
+      contentType: attachment.contentType,
+      content: attachment.content,
+    })
+    res.json({ success: true, artifact: saved.artifact, relationship: saved.relationship })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    res.status(502).json({ success: false, error: msg })
+  }
+})
+
+router.post('/attachments/artifacts', async (req, res) => {
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+  const workspacePath = String(req.body?.workspacePath || '').trim()
+  const emailId = String(req.body?.emailId || 'manual').trim()
+  const attachments = Array.isArray(req.body?.attachments) ? req.body.attachments : []
+  if (!workspacePath) {
+    return res.status(400).json({ success: false, error: 'workspacePath 不能为空' })
+  }
+  if (attachments.length === 0) {
+    return res.status(400).json({ success: false, error: 'attachments 不能为空' })
+  }
+  const saved: EmailSavedArtifact[] = attachments.map((attachment: unknown, index: number) => {
+    const item = attachment && typeof attachment === 'object' ? attachment as Record<string, unknown> : {}
+    const filename = String(item.filename || `email-attachment-${index + 1}.txt`)
+    const content = typeof item.contentBase64 === 'string'
+      ? Buffer.from(item.contentBase64, 'base64')
+      : Buffer.from(String(item.textContent || ''), 'utf-8')
+    return createEmailAttachmentArtifact({
+      userId,
+      workspacePath,
+      emailId,
+      filename,
+      contentType: typeof item.contentType === 'string' ? item.contentType : undefined,
+      content,
+    })
+  })
+  res.json({
+    success: true,
+    artifacts: saved.map((item) => item.artifact),
+    relationships: saved.map((item) => item.relationship),
+  })
+})
+
 router.post('/send', async (req, res) => {
   const userId = await requireAccountUser(req, res)
   if (!userId) return
@@ -125,6 +213,46 @@ router.post('/send', async (req, res) => {
   }
 })
 
+router.post('/drafts/dry-run', async (req, res) => {
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+  const recipients = resolveDryRunRecipients(req.body?.recipients ?? req.body?.rawRecipients)
+  res.json({
+    success: true,
+    dryRun: true,
+    recipients,
+    partialMissing: ['bulk send execution remains manual approval only on Web'],
+  })
+})
+
+router.post('/drafts/artifact', async (req, res) => {
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+  const workspacePath = String(req.body?.workspacePath || '').trim()
+  const to = String(req.body?.to || '').trim()
+  const subject = String(req.body?.subject || '').trim()
+  const body = String(req.body?.body || '')
+  if (!workspacePath) {
+    return res.status(400).json({ success: false, error: 'workspacePath 不能为空' })
+  }
+  if (!to || !subject) {
+    return res.status(400).json({ success: false, error: 'to 和 subject 不能为空' })
+  }
+  const saved = createEmailDraftArtifact({
+    userId,
+    workspacePath,
+    emailId: typeof req.body?.emailId === 'string' ? req.body.emailId : undefined,
+    to,
+    subject,
+    body,
+  })
+  res.json({
+    success: true,
+    artifact: saved.artifact,
+    relationship: saved.relationship,
+  })
+})
+
 router.post('/triage/start', async (req, res) => {
   const userId = await requireAccountUser(req, res)
   if (!userId) return
@@ -142,23 +270,28 @@ router.post('/triage/start', async (req, res) => {
 
   void runEmailUnreadTriage({
     account,
+    userId,
+    workspacePath: typeof req.body?.workspacePath === 'string' ? req.body.workspacePath : undefined,
     limit: Number(req.body?.limit) || 20,
     isCancelled: () => Boolean(getEmailTriageTask(task.taskId)?.cancelRequested),
-    onStep: (message, progress, results) => updateEmailTriageTask(task.taskId, {
+    onStep: (message, progress, results, metadata) => updateEmailTriageTask(task.taskId, {
       status: 'running',
       message,
       progress,
       results,
+      cacheKey: metadata?.cacheKey,
+      sourceMessageCount: metadata?.sourceMessageCount ?? results.length,
     }),
   })
     .then((results) => {
       if (getEmailTriageTask(task.taskId)?.cancelRequested) return
       updateEmailTriageTask(task.taskId, {
         status: 'completed',
-        progress: 100,
-        message: '未读邮件整理完成',
-        results,
-      })
+          progress: 100,
+          message: '未读邮件整理完成',
+          results,
+          sourceMessageCount: results.length,
+        })
     })
     .catch((error) => {
       const message = error instanceof Error ? error.message : String(error)
@@ -187,6 +320,9 @@ router.get('/triage/tasks/:taskId', async (req, res) => {
     progress: task.progress,
     message: task.message,
     results: task.results,
+    cacheKey: task.cacheKey,
+    unreadOnly: task.unreadOnly,
+    sourceMessageCount: task.sourceMessageCount,
     error: task.error,
   })
 })

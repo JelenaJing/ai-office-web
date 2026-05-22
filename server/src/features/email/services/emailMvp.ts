@@ -24,6 +24,34 @@ export interface MailSummary {
   timestamp: string
   unread: boolean
   preview: string
+  attachmentCount: number
+}
+
+export interface MailAttachmentSummary {
+  id: string
+  filename: string
+  contentType: string
+  size: number
+}
+
+export interface MailAttachmentContent extends MailAttachmentSummary {
+  content: Buffer
+}
+
+interface ParsedMailAttachment {
+  contentId?: string
+  cid?: string
+  filename?: string
+  contentType?: string
+  size?: number
+  content: Buffer
+}
+
+function parsedAttachments(parsed: unknown): ParsedMailAttachment[] {
+  const record = parsed && typeof parsed === 'object' ? parsed as { attachments?: unknown } : {}
+  return Array.isArray(record.attachments)
+    ? record.attachments.filter((item): item is ParsedMailAttachment => Boolean(item && typeof item === 'object' && Buffer.isBuffer((item as ParsedMailAttachment).content)))
+    : []
 }
 
 export async function fetchInbox(
@@ -49,11 +77,22 @@ export async function fetchInbox(
       const msg = await client.fetchOne(uid, { envelope: true, source: true }, { uid: true })
       if (!msg) continue
       let preview = ''
+      const env = msg.envelope
       if (msg.source) {
         const parsed = await simpleParser(msg.source)
         preview = (parsed.text || parsed.html || '').slice(0, 200)
+        const attachments = parsedAttachments(parsed)
+        out.push({
+          id: String(uid),
+          from: env?.from?.[0]?.address || env?.from?.[0]?.name || '',
+          subject: env?.subject || '(无主题)',
+          timestamp: env?.date?.toISOString() || new Date().toISOString(),
+          unread: !msg.flags?.has('\\Seen'),
+          preview,
+          attachmentCount: attachments.length,
+        })
+        continue
       }
-      const env = msg.envelope
       out.push({
         id: String(uid),
         from: env?.from?.[0]?.address || env?.from?.[0]?.name || '',
@@ -61,6 +100,7 @@ export async function fetchInbox(
         timestamp: env?.date?.toISOString() || new Date().toISOString(),
         unread: !msg.flags?.has('\\Seen'),
         preview,
+        attachmentCount: 0,
       })
     }
   } finally {
@@ -73,7 +113,7 @@ export async function fetchInbox(
 export async function fetchMessage(
   account: StoredEmailAccount,
   uid: string,
-): Promise<{ id: string; from: string; to: string; subject: string; body: string; timestamp: string }> {
+): Promise<{ id: string; from: string; to: string; subject: string; body: string; timestamp: string; attachments: MailAttachmentSummary[] }> {
   const client = new ImapFlow({
     host: account.imapHost,
     port: account.imapPort,
@@ -95,6 +135,12 @@ export async function fetchMessage(
     }
     const parsed = await simpleParser(msg.source)
     const env = msg.envelope
+    const attachments = parsedAttachments(parsed).map((attachment, index) => ({
+      id: attachment.contentId || attachment.cid || String(index),
+      filename: attachment.filename || `attachment-${index + 1}`,
+      contentType: attachment.contentType || 'application/octet-stream',
+      size: attachment.size || attachment.content.length,
+    }))
     return {
       id: uid,
       from: env?.from?.[0]?.address || '',
@@ -102,6 +148,54 @@ export async function fetchMessage(
       subject: env?.subject || '',
       body: parsed.text || parsed.html || '',
       timestamp: env?.date?.toISOString() || new Date().toISOString(),
+      attachments,
+    }
+  } finally {
+    lock.release()
+    await client.logout()
+  }
+}
+
+export async function fetchMessageAttachment(
+  account: StoredEmailAccount,
+  uid: string,
+  attachmentId: string,
+): Promise<MailAttachmentContent> {
+  const client = new ImapFlow({
+    host: account.imapHost,
+    port: account.imapPort,
+    secure: account.imapSecure,
+    auth: { user: account.user, pass: account.password },
+    logger: false,
+    tls: { rejectUnauthorized: !account.allowSelfSignedCerts },
+  })
+  await client.connect()
+  const lock = await client.getMailboxLock('INBOX')
+  try {
+    const msg = await client.fetchOne(
+      Number(uid),
+      { source: true },
+      { uid: true },
+    )
+    if (!msg || !msg.source) {
+      throw new Error('邮件不存在')
+    }
+    const parsed = await simpleParser(msg.source)
+    const attachment = parsedAttachments(parsed).find((item, index) => (
+      item.contentId === attachmentId
+        || item.cid === attachmentId
+        || String(index) === attachmentId
+        || item.filename === attachmentId
+    ))
+    if (!attachment) {
+      throw new Error('附件不存在')
+    }
+    return {
+      id: attachment.contentId || attachment.cid || attachmentId,
+      filename: attachment.filename || 'attachment.bin',
+      contentType: attachment.contentType || 'application/octet-stream',
+      size: attachment.size || attachment.content.length,
+      content: attachment.content,
     }
   } finally {
     lock.release()

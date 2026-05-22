@@ -1,18 +1,29 @@
 import type { StoredEmailAccount } from './emailStore'
-import { fetchInbox, fetchMessage } from './emailMvp'
+import { fetchInbox, fetchMessage, fetchMessageAttachment } from './emailMvp'
 import type { EmailTriageResult } from './emailTriageTaskStore'
+import {
+  buildSalutation,
+  createEmailAttachmentArtifact,
+  createEmailDraftArtifact,
+} from './emailArtifacts'
 
 export const EMAIL_TRIAGE_PARTIAL_MISSING = [
   'Electron/public-review LLM batch triage prompt is not yet ported to Web server',
-  'attachment to Artifact conversion is not yet handled by this triage task',
-  'bulk recipient resolver and salutation generation are not yet ported',
+  'bulk send execution remains manual approval only on Web',
 ] as const
 
 export interface RunEmailTriageInput {
   account: StoredEmailAccount
+  userId?: string
+  workspacePath?: string
   limit?: number
   isCancelled?: () => boolean
-  onStep?: (message: string, progress: number, results: EmailTriageResult[]) => void
+  onStep?: (
+    message: string,
+    progress: number,
+    results: EmailTriageResult[],
+    metadata?: { cacheKey?: string; sourceMessageCount?: number },
+  ) => void
 }
 
 function assertNotCancelled(input: Pick<RunEmailTriageInput, 'isCancelled'>): void {
@@ -55,6 +66,7 @@ function classifyMessage(input: {
   const replyDraft = needsReply && !risk
     ? `您好：\n\n已收到您的邮件。关于“${input.subject || '相关事项'}”，我会尽快确认并回复进一步信息。\n\n祝好！`
     : undefined
+  const salutation = replyDraft ? buildSalutation(input.from) : undefined
 
   return {
     messageId: input.id,
@@ -68,6 +80,9 @@ function classifyMessage(input: {
     riskLevel: risk ? 'high' : 'none',
     tasks,
     replyDraft,
+    salutation,
+    attachmentArtifacts: [],
+    relationships: [],
     status: 'success',
     partialMissing: [...EMAIL_TRIAGE_PARTIAL_MISSING],
   }
@@ -75,7 +90,8 @@ function classifyMessage(input: {
 
 export async function runEmailUnreadTriage(input: RunEmailTriageInput): Promise<EmailTriageResult[]> {
   assertNotCancelled(input)
-  input.onStep?.('正在拉取未读邮件…', 10, [])
+  const cacheKey = `email-triage:${Date.now()}`
+  input.onStep?.('正在拉取未读邮件…', 10, [], { cacheKey, sourceMessageCount: 0 })
   const inbox = await fetchInbox(input.account, input.limit ?? 20)
   const unread = inbox.filter((mail) => mail.unread)
   const results: EmailTriageResult[] = []
@@ -83,16 +99,61 @@ export async function runEmailUnreadTriage(input: RunEmailTriageInput): Promise<
   for (let i = 0; i < unread.length; i++) {
     assertNotCancelled(input)
     const summary = unread[i]
-    input.onStep?.(`正在分析邮件：${summary.subject}`, 15 + Math.round((i / Math.max(unread.length, 1)) * 75), results)
+    input.onStep?.(`正在分析邮件：${summary.subject}`, 15 + Math.round((i / Math.max(unread.length, 1)) * 75), results, {
+      cacheKey,
+      sourceMessageCount: unread.length,
+    })
     const detail = await fetchMessage(input.account, summary.id)
-    results.push(classifyMessage({
+    const result = classifyMessage({
       id: detail.id,
       from: detail.from,
       subject: detail.subject,
       body: detail.body,
-    }))
+    })
+    if (input.userId && input.workspacePath && result.replyDraft) {
+      const saved = createEmailDraftArtifact({
+        userId: input.userId,
+        workspacePath: input.workspacePath,
+        emailId: detail.id,
+        to: detail.from,
+        subject: `Re: ${detail.subject || '邮件回复'}`,
+        body: result.replyDraft,
+      })
+      result.draftArtifactId = saved.artifact.id
+      result.relationships.push(saved.relationship)
+    }
+    if (input.userId && input.workspacePath && detail.attachments.length > 0) {
+      for (const attachment of detail.attachments) {
+        try {
+          const content = await fetchMessageAttachment(input.account, detail.id, attachment.id)
+          const saved = createEmailAttachmentArtifact({
+            userId: input.userId,
+            workspacePath: input.workspacePath,
+            emailId: detail.id,
+            filename: content.filename,
+            contentType: content.contentType,
+            content: content.content,
+          })
+          result.attachmentArtifacts.push({
+            attachmentId: attachment.id,
+            filename: content.filename,
+            artifactId: saved.artifact.id,
+            status: 'saved',
+          })
+          result.relationships.push(saved.relationship)
+        } catch (error) {
+          result.attachmentArtifacts.push({
+            attachmentId: attachment.id,
+            filename: attachment.filename,
+            status: 'failed',
+            error: error instanceof Error ? error.message : String(error),
+          })
+        }
+      }
+    }
+    results.push(result)
   }
 
-  input.onStep?.('未读邮件整理完成', 100, results)
+  input.onStep?.('未读邮件整理完成', 100, results, { cacheKey, sourceMessageCount: unread.length })
   return results
 }
