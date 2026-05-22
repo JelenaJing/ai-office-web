@@ -64,17 +64,26 @@ async function request<T>(
   // is visible and returns '' for same-origin routing.
   const baseUrl = getAccountCenterBaseUrl()
   const url = `${baseUrl}${path}`
-  const response = await fetchWithTimeout(
-    url,
-    {
-      headers: {
-        'Content-Type': 'application/json',
-        ...(options.headers || {}),
+  const isLoginEndpoint = path === '/api/auth/login'
+  let response: Response
+  try {
+    response = await fetchWithTimeout(
+      url,
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          ...(options.headers || {}),
+        },
+        ...options,
       },
-      ...options,
-    },
-    timeoutMs,
-  )
+      timeoutMs,
+    )
+  } catch (err) {
+    if (isLoginEndpoint && !baseUrl) {
+      throw new Error('无法连接 Web 后端，请确认 server 3001 已启动')
+    }
+    throw err
+  }
 
   if (!response.ok) {
     let errorBody: { message?: string; error?: string } = {}
@@ -84,8 +93,18 @@ async function request<T>(
       // ignore parse failure
     }
     const msg = errorBody.message || errorBody.error || response.statusText
+    if (isLoginEndpoint) {
+      if (response.status === 401 || response.status === 403) {
+        throw new Error('账号或密码错误')
+      }
+      if (response.status === 502 || msg.includes('AccountCenter 不可达')) {
+        throw new Error('AccountCenter 不可达')
+      }
+      if (response.status >= 500) {
+        throw new Error('无法连接 Web 后端，请确认 server 3001 已启动')
+      }
+    }
     if (response.status === 401) {
-      const isLoginEndpoint = path === '/api/auth/login'
       if (!isLoginEndpoint && typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('account:session-expired'))
       }

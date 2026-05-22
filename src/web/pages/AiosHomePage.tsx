@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { platformApi } from '../../platform'
+import { useInternalAccount } from '../../contexts/InternalAccountContext'
 
 const APP_ENTRIES = [
   { id: 'writer', name: '文稿助手', icon: '📝' },
@@ -14,10 +14,13 @@ const APP_ENTRIES = [
 export default function AiosHomePage() {
   const [query, setQuery] = useState('')
   const navigate = useNavigate()
-  const user = platformApi.auth.getCurrentUser()
+  const { state, logout } = useInternalAccount()
+  const user = state.phase === 'logged_in' || state.phase === 'must_change_password'
+    ? state.session.user
+    : null
 
-  async function handleLogout() {
-    await platformApi.auth.logout()
+  function handleLogout() {
+    logout()
     navigate('/login')
   }
 
@@ -33,7 +36,7 @@ export default function AiosHomePage() {
       <header style={s.header}>
         <span style={s.brand}>AIOS</span>
         <div style={s.userBar}>
-          <span style={s.userName}>{user?.name ?? user?.email ?? '用户'}</span>
+          <span style={s.userName}>{user?.displayName ?? user?.email ?? '用户'}</span>
           <button onClick={handleLogout} style={s.logoutBtn}>
             退出
           </button>
@@ -45,7 +48,7 @@ export default function AiosHomePage() {
         {/* Agent input */}
         <section style={s.agentSection}>
           <h2 style={s.greeting}>
-            你好，{user?.name ?? '同学'}，今天要做什么？
+            你好，{user?.displayName ?? user?.username ?? '同学'}，今天要做什么？
           </h2>
           <form onSubmit={handleAgentSubmit} style={s.agentForm}>
             <input

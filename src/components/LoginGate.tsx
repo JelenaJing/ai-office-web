@@ -205,7 +205,7 @@ export default function LoginGate() {
 
         <form onSubmit={handleSubmit} autoComplete="on">
           <Field>
-            <Label htmlFor="lg-username">AI Office 邮箱</Label>
+            <Label htmlFor="lg-username">用户名或邮箱</Label>
             <Input
               id="lg-username"
               ref={usernameRef}
@@ -213,7 +213,7 @@ export default function LoginGate() {
               autoComplete="username"
               value={username}
               onChange={e => setUsername(e.target.value)}
-              placeholder="请输入 AI Office 邮箱（aiEmail）"
+              placeholder="请输入用户名或 AI Office 邮箱"
               disabled={submitting}
               $error={!!errorMsg && !isExpiredMsg}
             />

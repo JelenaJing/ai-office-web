@@ -34,8 +34,11 @@ import {
 } from '../accountCenterConfig'
 import { isForcePasswordChangeRequired } from '../config'
 
-/* ---- legacy localStorage key — migrate once then clear ---- */
+/* ---- web token persistence keys ---- */
+const PRIMARY_TOKEN_KEY = 'aios_auth_token'
+const SHIM_TOKEN_KEY = 'aios_itoken'
 const LEGACY_TOKEN_KEY = 'ai_office_internal_token'
+const USER_KEY = 'aios_auth_user'
 const FORCE_PASSWORD_CHANGE_STORAGE_KEYS = [
   'mustChangePassword',
   'requirePasswordChange',
@@ -49,36 +52,79 @@ const electronAPI = () =>
     ? (window as typeof window & { electronAPI?: typeof window['electronAPI'] }).electronAPI
     : undefined
 
+function readLocalStorage(key: string): string | null {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function writeLocalStorage(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    // ignore storage failures
+  }
+}
+
+function removeLocalStorage(key: string): void {
+  try {
+    localStorage.removeItem(key)
+  } catch {
+    // ignore storage failures
+  }
+}
+
+function toPlatformUser(user: InternalAccountUser): { id: string; email: string; name: string } {
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.displayName || user.username || user.email,
+  }
+}
+
+function persistWebAuthSession(token: string, user?: InternalAccountUser): void {
+  writeLocalStorage(PRIMARY_TOKEN_KEY, token)
+  writeLocalStorage(SHIM_TOKEN_KEY, token)
+  writeLocalStorage(LEGACY_TOKEN_KEY, token)
+  if (user) {
+    writeLocalStorage(USER_KEY, JSON.stringify(toPlatformUser(user)))
+  }
+}
+
+function clearWebAuthSession(): void {
+  removeLocalStorage(PRIMARY_TOKEN_KEY)
+  removeLocalStorage(SHIM_TOKEN_KEY)
+  removeLocalStorage(LEGACY_TOKEN_KEY)
+  removeLocalStorage(USER_KEY)
+}
+
 async function readStoredToken(): Promise<string | null> {
+  const storedToken =
+    readLocalStorage(PRIMARY_TOKEN_KEY)
+    ?? readLocalStorage(SHIM_TOKEN_KEY)
+    ?? readLocalStorage(LEGACY_TOKEN_KEY)
   const api = electronAPI()
   if (api?.internalAccountGetToken) {
-    // Migrate legacy localStorage token once: write to main process first, delete only on success
-    const legacy = (() => {
-      try { return localStorage.getItem(LEGACY_TOKEN_KEY) || null } catch { return null }
-    })()
-    if (legacy) {
+    if (storedToken) {
       try {
-        await api.internalAccountSetToken(legacy)
-        // Only remove after confirmed write — preserves token if write fails
-        try { localStorage.removeItem(LEGACY_TOKEN_KEY) } catch { /* ignore */ }
+        await api.internalAccountSetToken(storedToken)
       } catch {
-        // Write failed: keep localStorage token so next startup can retry migration
         console.warn('[InternalAccount] token migration to main process failed; will retry on next launch')
       }
     }
     const res = await api.internalAccountGetToken()
-    return res?.token ?? null
+    return res?.token ?? storedToken ?? null
   }
-  // fallback for non-Electron (should not happen in production)
-  try { return localStorage.getItem(LEGACY_TOKEN_KEY) || null } catch { return null }
+  return storedToken
 }
 
-async function storeToken(token: string): Promise<void> {
+async function storeToken(token: string, user?: InternalAccountUser): Promise<void> {
+  persistWebAuthSession(token, user)
   const api = electronAPI()
   if (api?.internalAccountSetToken) {
     await api.internalAccountSetToken(token)
-  } else {
-    try { localStorage.setItem(LEGACY_TOKEN_KEY, token) } catch { /* ignore */ }
   }
 }
 
@@ -87,7 +133,7 @@ async function clearStoredToken(): Promise<void> {
   if (api?.internalAccountClearToken) {
     await api.internalAccountClearToken()
   }
-  try { localStorage.removeItem(LEGACY_TOKEN_KEY) } catch { /* ignore */ }
+  clearWebAuthSession()
 }
 
 function clearForcePasswordChangeStorage(): void {
@@ -224,9 +270,10 @@ export function InternalAccountProvider({ children }: { children: ReactNode }) {
       }
 
       // Stay in 'restoring' while validating — App shows startup splash
-      client
+        client
         .me(token)
         .then((user) => {
+          persistWebAuthSession(token, user)
           clearForcePasswordChangeStorage()
           // Mark bindings as loading immediately so UI shows spinner, not infinite "loading"
           setState({ phase: 'logged_in', session: { token, user, bindingsPhase: 'loading' } })
@@ -297,7 +344,7 @@ export function InternalAccountProvider({ children }: { children: ReactNode }) {
       // NOT updated on AccountCenter password change — mailcow has separate credentials.
       mailboxPasswordRef.current = password
 
-      await storeToken(token)
+      await storeToken(token, user)
 
       clearForcePasswordChangeStorage()
 

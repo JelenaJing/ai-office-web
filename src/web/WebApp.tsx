@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import LoginPage from './pages/LoginPage'
+import LoginGate from '../components/LoginGate'
 import RegisterPage from './pages/RegisterPage'
 import AiosHomePage from './pages/AiosHomePage'
 import RequireAuth from './components/RequireAuth'
@@ -8,7 +8,7 @@ export default function WebApp() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/login" element={<LoginPage />} />
+        <Route path="/login" element={<LoginGate />} />
         <Route path="/register" element={<RegisterPage />} />
         <Route
           path="/"
