@@ -136,6 +136,29 @@ export function getArtifact(artifactId: string): Artifact | null {
   }
 }
 
+export function updateArtifact(artifactId: string, patch: Partial<Pick<Artifact, 'title' | 'type' | 'editable'>>): Artifact | null {
+  const current = getArtifact(artifactId)
+  if (!current) return null
+  const updated: Artifact = {
+    ...current,
+    ...patch,
+  }
+  saveArtifactMetadata(updated)
+  return updated
+}
+
+export function deleteArtifact(artifactId: string): boolean {
+  const index = readArtifactIndex()
+  const entry = index.artifacts.find((e) => e.artifactId === artifactId)
+  if (!entry) return false
+  const dir = artifactDir(entry.userId, entry.workspaceId, artifactId)
+  fs.rmSync(dir, { recursive: true, force: true })
+  writeArtifactIndex({
+    artifacts: index.artifacts.filter((e) => e.artifactId !== artifactId),
+  })
+  return true
+}
+
 export function getArtifactFilePath(artifactId: string, filename: string): string {
   const index = readArtifactIndex()
   const entry = index.artifacts.find((e) => e.artifactId === artifactId)

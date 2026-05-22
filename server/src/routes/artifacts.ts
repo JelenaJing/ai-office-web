@@ -12,7 +12,7 @@
 import { Router } from 'express'
 import path from 'path'
 import fs from 'fs'
-import { getArtifact, getArtifactFilePath, listArtifactsByUser } from '../artifacts/ArtifactStore'
+import { deleteArtifact, getArtifact, getArtifactFilePath, listArtifactsByUser, updateArtifact } from '../artifacts/ArtifactStore'
 import { requireAccountUser } from '../lib/authUser'
 
 const router = Router()
@@ -26,6 +26,12 @@ const CONTENT_TYPES: Record<string, string> = {
   pdf: 'application/pdf',
   md: 'text/markdown; charset=utf-8',
   csv: 'text/csv; charset=utf-8',
+  txt: 'text/plain; charset=utf-8',
+  json: 'application/json; charset=utf-8',
+  html: 'text/html; charset=utf-8',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
 }
 
 // ── GET /api/artifacts ────────────────────────────────────────────────────────
@@ -92,6 +98,77 @@ router.get('/:artifactId/download', async (req, res) => {
   res.setHeader('Content-Type', contentType)
   res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodedName}`)
   res.sendFile(filePath)
+})
+
+router.get('/:artifactId/preview', async (req, res) => {
+  const { artifactId } = req.params
+  const artifact = getArtifact(artifactId)
+  if (!artifact) {
+    return res.status(404).json({ message: 'Artifact not found', artifactId })
+  }
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+  if (artifact.userId && artifact.userId !== userId) {
+    return res.status(403).json({ message: 'Access denied' })
+  }
+
+  const exportEntry = artifact.exports[0]
+  if (!exportEntry) {
+    return res.status(404).json({ message: 'No previewable export found', artifactId })
+  }
+  const filePath = getArtifactFilePath(artifactId, exportEntry.filename)
+  if (!filePath || !fs.existsSync(filePath)) {
+    return res.status(404).json({ message: 'Artifact file missing on disk', artifactId })
+  }
+
+  const ext = path.extname(exportEntry.filename).slice(1).toLowerCase()
+  const previewable = ['md', 'txt', 'json', 'html', 'png', 'jpg', 'jpeg'].includes(ext)
+  if (!previewable) {
+    return res.json({
+      artifact,
+      preview: null,
+      previewStatus: 'download-only',
+      downloadUrl: `/api/artifacts/${artifactId}/download`,
+    })
+  }
+
+  const contentType = CONTENT_TYPES[ext] ?? 'application/octet-stream'
+  res.setHeader('Content-Type', contentType)
+  return res.sendFile(filePath)
+})
+
+router.patch('/:artifactId', async (req, res) => {
+  const { artifactId } = req.params
+  const artifact = getArtifact(artifactId)
+  if (!artifact) {
+    return res.status(404).json({ message: 'Artifact not found', artifactId })
+  }
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+  if (artifact.userId && artifact.userId !== userId) {
+    return res.status(403).json({ message: 'Access denied' })
+  }
+  const title = typeof req.body?.title === 'string' ? req.body.title.trim() : undefined
+  if (!title) {
+    return res.status(400).json({ message: 'title 不能为空' })
+  }
+  const updated = updateArtifact(artifactId, { title })
+  return res.json({ artifact: updated })
+})
+
+router.delete('/:artifactId', async (req, res) => {
+  const { artifactId } = req.params
+  const artifact = getArtifact(artifactId)
+  if (!artifact) {
+    return res.status(404).json({ message: 'Artifact not found', artifactId })
+  }
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+  if (artifact.userId && artifact.userId !== userId) {
+    return res.status(403).json({ message: 'Access denied' })
+  }
+  deleteArtifact(artifactId)
+  return res.json({ success: true, artifactId })
 })
 
 export default router
