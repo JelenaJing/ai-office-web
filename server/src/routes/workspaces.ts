@@ -19,8 +19,8 @@ import { Router } from 'express'
 import fs from 'fs'
 import path from 'path'
 import { randomUUID } from 'crypto'
+import { requireAccountUser } from '../lib/authUser'
 import {
-  resolveUserId,
   getOrCreateDefaultWorkspace,
   hasDocument,
   readIndex,
@@ -37,7 +37,8 @@ const router = Router()
 // Must be registered before dynamic routes.
 
 router.get('/default', async (req, res) => {
-  const userId = await resolveUserId(req)
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
   const entry = getOrCreateDefaultWorkspace(userId)
   return res.json({
     success: true,
@@ -54,7 +55,8 @@ router.get('/default', async (req, res) => {
 // ── GET /api/workspaces ───────────────────────────────────────────────────────
 
 router.get('/', async (req, res) => {
-  const userId = await resolveUserId(req)
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
   const store = readIndex(userId)
   const valid = store.workspaces.filter((ws) =>
     fs.existsSync(workspaceDir(userId, ws.id)),
@@ -78,7 +80,8 @@ router.post('/', async (req, res) => {
     return res.status(400).json({ success: false, error: '工作区名称不能为空' })
   }
 
-  const userId = await resolveUserId(req)
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
   const safeName = toSafeName(name)
   if (!safeName) {
     return res.status(400).json({ success: false, error: '工作区名称包含非法字符' })
@@ -119,7 +122,8 @@ router.delete('/', async (req, res) => {
   const parsed = parseClientPath(p)
   if (!parsed) return res.status(400).json({ success: false, error: 'Invalid workspace path' })
 
-  const userId = await resolveUserId(req)
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
   if (parsed.userId !== userId) {
     return res.status(403).json({ success: false, error: 'Forbidden' })
   }
@@ -146,7 +150,8 @@ router.get('/tree', async (req, res) => {
   const parsed = parseClientPath(p)
   if (!parsed) return res.json([])
 
-  const userId = await resolveUserId(req)
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
   if (parsed.userId !== userId) return res.status(403).json({ success: false, error: 'Forbidden' })
 
   const filesDir = path.join(workspaceDir(userId, parsed.wsId), 'files')
@@ -178,7 +183,8 @@ router.post('/rename', async (req, res) => {
   const parsed = parseClientPath(p)
   if (!parsed) return res.status(400).json({ success: false, error: 'Invalid workspace path' })
 
-  const userId = await resolveUserId(req)
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
   if (parsed.userId !== userId) return res.status(403).json({ success: false, error: 'Forbidden' })
 
   const store = readIndex(userId)
@@ -201,7 +207,8 @@ router.post('/register', async (req, res) => {
   const parsed = parseClientPath(p)
   if (!parsed) return res.status(400).json({ success: false, error: 'Invalid workspace path' })
 
-  const userId = await resolveUserId(req)
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
   if (parsed.userId !== userId) return res.status(403).json({ success: false, error: 'Forbidden' })
 
   const store = readIndex(userId)

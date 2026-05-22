@@ -1,4 +1,5 @@
 import type { MaterializeKnowledgeWorkspaceInput, MaterializeKnowledgeWorkspaceResult } from '../../../types/knowledge'
+import { isWebShim } from '../../../platform/detect'
 
 interface OpenKnowledgeWorkspaceParams extends MaterializeKnowledgeWorkspaceInput {
   departmentId: string
@@ -13,6 +14,9 @@ export function stripDocxExtension(value: string): string {
 }
 
 export async function openKnowledgeWorkspaceDraft(params: OpenKnowledgeWorkspaceParams): Promise<MaterializeKnowledgeWorkspaceResult> {
+  if (isWebShim()) {
+    throw new Error('Web 版暂未开放：知识库工作区需要桌面端支持')
+  }
   const result = await window.electronAPI.materializeKnowledgeWorkspace(params.departmentId, {
     workspaceName: stripDocxExtension(params.workspaceName || params.fileName || ''),
     fileName: stripDocxExtension(params.fileName || params.workspaceName || ''),

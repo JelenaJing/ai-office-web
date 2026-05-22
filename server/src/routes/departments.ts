@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { resolveUserId } from '../lib/authUser'
+import { requireAccountUser } from '../lib/authUser'
 import {
   applyPresetHierarchy,
   listKnowledgeBases,
@@ -9,7 +9,8 @@ const router = Router()
 
 /** GET /api/departments — remote knowledge base partitions as departments */
 router.get('/', async (req, res) => {
-  const userId = await resolveUserId(req)
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
 
   try {
     const list = await listKnowledgeBases()

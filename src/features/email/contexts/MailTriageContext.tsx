@@ -63,6 +63,7 @@ import { ensureTentativeCalendarEventFromEmail } from '../../../calendar/emailCa
 import { listCalendarEvents } from '../../../calendar/calendarService'
 import { detectCalendarConflicts } from '../../../calendar/calendarConflict'
 import type { CalendarEventType } from '../../../calendar/types'
+import { isWebShim } from '../../../platform/detect'
 
 /* ------------------------------------------------------------------ */
 /*  Context shape                                                      */
@@ -298,7 +299,7 @@ async function generateDraftForMail(
   bodyHash: string,
   triage: AiMailTriageResult,
 ): Promise<AiMailReplyDraft | null> {
-  if (!window.electronAPI?.writingAssistant) return null
+  if (isWebShim() || !window.electronAPI?.writingAssistant) return null
   const responder = (mail.toName || mail.to || '收件人').trim()
   const sender = (mail.fromName || mail.from || '发件人').trim()
   const bodySnippet = mail.body.slice(0, 800)

@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { resolveUserId } from '../lib/authUser'
+import { requireAccountUser } from '../lib/authUser'
 import {
   fetchInbox,
   fetchMessage,
@@ -14,12 +14,14 @@ import {
 const router = Router()
 
 router.get('/account', async (req, res) => {
-  const userId = await resolveUserId(req)
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
   res.json(maskAccount(getEmailAccount(userId)))
 })
 
 router.post('/account', async (req, res) => {
-  const userId = await resolveUserId(req)
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
   const body = req.body as StoredEmailAccount
   if (!body?.user || !body?.password || !body?.imapHost || !body?.smtpHost) {
     return res.status(400).json({ message: '请填写邮箱账号、密码、IMAP/SMTP 主机' })
@@ -41,7 +43,8 @@ router.post('/account', async (req, res) => {
 })
 
 router.post('/test', async (req, res) => {
-  const userId = await resolveUserId(req)
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
   const account = getEmailAccount(userId)
   if (!account) {
     return res.status(400).json({ ok: false, message: '请先保存邮箱配置' })
@@ -56,7 +59,8 @@ router.post('/test', async (req, res) => {
 })
 
 router.get('/messages', async (req, res) => {
-  const userId = await resolveUserId(req)
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
   const account = getEmailAccount(userId)
   if (!account) {
     return res.status(400).json({ message: '请先配置邮箱账号' })
@@ -75,7 +79,8 @@ router.get('/messages', async (req, res) => {
 })
 
 router.get('/messages/:id', async (req, res) => {
-  const userId = await resolveUserId(req)
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
   const account = getEmailAccount(userId)
   if (!account) {
     return res.status(400).json({ message: '请先配置邮箱账号' })
@@ -90,7 +95,8 @@ router.get('/messages/:id', async (req, res) => {
 })
 
 router.post('/send', async (req, res) => {
-  const userId = await resolveUserId(req)
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
   const account = getEmailAccount(userId)
   if (!account) {
     return res.status(400).json({ ok: false, message: '请先配置邮箱账号' })

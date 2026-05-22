@@ -2,6 +2,7 @@ import { useState } from 'react'
 import styled from 'styled-components'
 import { FolderOpen, FolderPlus, ChevronDown } from 'lucide-react'
 import { useWorkspace } from '../../../contexts/WorkspaceContext'
+import { isWebShim } from '../../../platform/detect'
 
 // ---------------------------------------------------------------------------
 // Styled components
@@ -93,6 +94,10 @@ export default function SaveLocationSelector({
   const [newName, setNewName] = useState('')
 
   const handleChangeWorkspace = async () => {
+    if (isWebShim()) {
+      alert('Web 版暂未开放：选择本地工作区需要桌面端支持')
+      return
+    }
     try {
       const wsPath = await window.electronAPI.openDirectoryDialog?.()
       if (!wsPath) return

@@ -27,6 +27,7 @@ import type {
 import { computeBodyHash } from './mailTriageCache'
 import { stripThinkTags } from '../../../utils/StreamThinkFilter'
 import { inferRelativeChineseDateTimeFromText } from '../../../calendar/chineseDateTimeParser'
+import { isWebShim } from '../../../platform/detect'
 export { stripThinkTags }
 
 export const BATCH_SIZE = 5
@@ -1202,7 +1203,7 @@ export async function classifyMailsBatch(
   if (mails.length === 0) return []
 
   // Web mode: writingAssistant IPC is Electron-only; triage is not available.
-  if (!window.electronAPI?.writingAssistant) {
+  if (isWebShim() || !window.electronAPI?.writingAssistant) {
     console.info('[mail-triage] AI triage requires Electron; skipping batch classify in web mode')
     return []
   }

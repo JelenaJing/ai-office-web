@@ -7,7 +7,7 @@
  */
 
 import { Router } from 'express'
-import { resolveUserId } from '../lib/authUser'
+import { requireAccountUser } from '../lib/authUser'
 import { runCreateDocxSkill, type CreateDocxInput } from '../skills/docx/createDocxSkill'
 import { runExportDocxSkill, type ExportDocxInput } from '../skills/docx/exportDocxSkill'
 import { runExportMarkdownSkillFromRequest } from '../skills/document/exportMarkdownSkill'
@@ -375,7 +375,8 @@ router.post('/:skillId/run', skillRunRateLimit, async (req, res) => {
   }
 
   if (skillId === 'web.markdown.export') {
-    const userId = await resolveUserId(req)
+    const userId = await requireAccountUser(req, res)
+  if (!userId) return
     const result = await runExportMarkdownSkillFromRequest(userId, req.body as Record<string, unknown>)
     if (result.success) {
       return res.json({ success: true, artifact: result.artifact, artifactId: result.artifact.id })
@@ -391,7 +392,8 @@ router.post('/:skillId/run', skillRunRateLimit, async (req, res) => {
   }
 
   if (skillId === 'web.xlsx.analyze') {
-    const userId = await resolveUserId(req)
+    const userId = await requireAccountUser(req, res)
+  if (!userId) return
     const body = req.body as {
       fileId?: string
       prompt?: string
@@ -433,7 +435,8 @@ router.post('/:skillId/run', skillRunRateLimit, async (req, res) => {
     return res.status(status).json({ success: false, error: result.error })
   }
 
-  const userId = await resolveUserId(req)
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
   const body = req.body as {
     prompt?: string
     workspacePath?: string

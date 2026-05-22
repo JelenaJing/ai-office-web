@@ -6,38 +6,16 @@
  *
  * Ownership check: the requesting user must match artifact.userId.
  * userId is resolved from Bearer token via AccountCenter /api/auth/me.
- * Falls back to 'web-demo-user' when no token is present (dev only).
+ * In production: missing/invalid token → 401. In dev: falls back to web-demo-user.
  */
 
 import { Router } from 'express'
-import type { Request } from 'express'
 import path from 'path'
 import fs from 'fs'
 import { getArtifact, getArtifactFilePath, listArtifactsByUser } from '../artifacts/ArtifactStore'
+import { requireAccountUser } from '../lib/authUser'
 
 const router = Router()
-
-const AC_URL = process.env.ACCOUNT_CENTER_URL ?? 'http://10.20.5.61:13100'
-const DEV_FALLBACK_USER = 'web-demo-user'
-
-// ── userId resolution (mirrors workspaces.ts) ─────────────────────────────────
-
-async function resolveUserId(req: Request): Promise<string> {
-  const auth = req.headers['authorization']
-  if (!auth || !auth.startsWith('Bearer ')) return DEV_FALLBACK_USER
-  try {
-    const resp = await fetch(`${AC_URL}/api/auth/me`, {
-      headers: { Authorization: auth },
-      signal: AbortSignal.timeout(5000),
-    })
-    if (!resp.ok) return DEV_FALLBACK_USER
-    const data = await resp.json() as { id?: string; userId?: string; user?: { id?: string } }
-    const uid = data.id ?? data.userId ?? data.user?.id
-    return uid ? String(uid) : DEV_FALLBACK_USER
-  } catch {
-    return DEV_FALLBACK_USER
-  }
-}
 
 // ── Content-Type map ──────────────────────────────────────────────────────────
 
@@ -54,7 +32,8 @@ const CONTENT_TYPES: Record<string, string> = {
 // Returns the current user's artifacts, sorted newest-first.
 
 router.get('/', async (req, res) => {
-  const userId = await resolveUserId(req)
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
   const artifacts = listArtifactsByUser(userId)
   return res.json({ artifacts })
 })
@@ -67,7 +46,8 @@ router.get('/:artifactId', async (req, res) => {
     return res.status(404).json({ message: 'Artifact not found', artifactId: req.params.artifactId })
   }
   // Ownership check
-  const userId = await resolveUserId(req)
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
   if (artifact.userId && artifact.userId !== userId) {
     return res.status(403).json({ message: 'Access denied' })
   }
@@ -85,7 +65,8 @@ router.get('/:artifactId/download', async (req, res) => {
   }
 
   // Ownership check — reject cross-user downloads
-  const userId = await resolveUserId(req)
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
   if (artifact.userId && artifact.userId !== userId) {
     return res.status(403).json({ message: 'Access denied: artifact belongs to another user' })
   }

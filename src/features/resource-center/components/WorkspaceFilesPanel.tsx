@@ -3,6 +3,7 @@ import styled from 'styled-components'
 import { Folder, FolderOpen, FolderPlus } from 'lucide-react'
 import { useWorkspace } from '../../../contexts/WorkspaceContext'
 import FileExplorer from '../FileExplorer'
+import { isWebShim } from '../../../platform/detect'
 
 // ---------------------------------------------------------------------------
 // Styled components – compact empty state only
@@ -107,6 +108,10 @@ export default function WorkspaceFilesPanel({ onFileOpen }: WorkspaceFilesPanelP
   const [busy, setBusy] = useState(false)
 
   const handleOpenDir = async () => {
+    if (isWebShim()) {
+      alert('Web 版暂未开放：选择本地工作区需要桌面端支持')
+      return
+    }
     try {
       const wsPath = await window.electronAPI.openDirectoryDialog?.()
       if (!wsPath) return

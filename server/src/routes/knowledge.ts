@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import multer from 'multer'
-import { resolveUserId } from '../lib/authUser'
+import { requireAccountUser } from '../lib/authUser'
 import {
   deleteFile,
   getBaseInfo,
@@ -22,7 +22,8 @@ async function resolvePartition(departmentId: string): Promise<string> {
 
 /** GET /api/knowledge/:departmentId/info */
 router.get('/:departmentId/info', async (req, res) => {
-  const userId = await resolveUserId(req)
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
   const departmentId = String(req.params.departmentId || '').trim()
 
   try {
@@ -38,7 +39,8 @@ router.get('/:departmentId/info', async (req, res) => {
 
 /** GET /api/knowledge/:departmentId/documents */
 router.get('/:departmentId/documents', async (req, res) => {
-  const userId = await resolveUserId(req)
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
   const departmentId = String(req.params.departmentId || '').trim()
 
   try {
@@ -62,7 +64,8 @@ router.get('/:departmentId/documents', async (req, res) => {
 
 /** POST /api/knowledge/:departmentId/import — multipart upload (Web) or 501 without files */
 router.post('/:departmentId/import', upload.array('files', 20), async (req, res) => {
-  const userId = await resolveUserId(req)
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
   const departmentId = String(req.params.departmentId || '').trim()
   const files = (req.files as Express.Multer.File[] | undefined) ?? []
 
@@ -98,7 +101,8 @@ router.post('/:departmentId/import', upload.array('files', 20), async (req, res)
 
 /** DELETE /api/knowledge/:departmentId/documents/:documentId */
 router.delete('/:departmentId/documents/:documentId', async (req, res) => {
-  const userId = await resolveUserId(req)
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
   const departmentId = String(req.params.departmentId || '').trim()
   const documentId = String(req.params.documentId || '').trim()
 

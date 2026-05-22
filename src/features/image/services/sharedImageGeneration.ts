@@ -4,6 +4,7 @@ import {
   summarizeImageReferenceRoles,
 } from './imageGenerationPrompt'
 import { getBackendUrl } from '../../../config'
+import { isWebShim } from '../../../platform/detect'
 import type { KnowledgeDocumentMeta } from '../../../types/knowledge'
 import type {
   GenerateImagePayload,
@@ -115,6 +116,20 @@ export async function resolveStructuredImageReferences(
     const reference = imageReferenceMap.get(item.id)
     const fallbackUrl = toDisplayUrl(absolutePath)
     try {
+      if (isWebShim()) {
+        // Web mode: readImageAsDataUrl is Electron-only; use fallback URL.
+        return {
+          id: item.id,
+          url: fallbackUrl,
+          role: reference?.role || 'style',
+          weight: reference?.weight || 0,
+          name: item.title,
+          thumbnailUrl: fallbackUrl,
+          origin: 'knowledge-base' as const,
+          order: reference?.order ?? index,
+          filePath: absolutePath,
+        }
+      }
       const imageData = await window.electronAPI.readImageAsDataUrl(absolutePath)
       return {
         id: item.id,

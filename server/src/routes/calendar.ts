@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { resolveUserId } from '../lib/authUser'
+import { requireAccountUser } from '../lib/authUser'
 import {
   createEvent,
   deleteEvent,
@@ -10,12 +10,14 @@ import {
 const router = Router()
 
 router.get('/events', async (req, res) => {
-  const userId = await resolveUserId(req)
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
   res.json({ events: listEvents(userId) })
 })
 
 router.post('/events', async (req, res) => {
-  const userId = await resolveUserId(req)
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
   const { title, startAt, endAt, notes } = req.body as {
     title?: string
     startAt?: string
@@ -35,14 +37,16 @@ router.post('/events', async (req, res) => {
 })
 
 router.patch('/events/:id', async (req, res) => {
-  const userId = await resolveUserId(req)
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
   const updated = updateEvent(userId, req.params.id, req.body)
   if (!updated) return res.status(404).json({ message: '事件不存在' })
   res.json({ event: updated })
 })
 
 router.delete('/events/:id', async (req, res) => {
-  const userId = await resolveUserId(req)
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
   if (!deleteEvent(userId, req.params.id)) {
     return res.status(404).json({ message: '事件不存在' })
   }

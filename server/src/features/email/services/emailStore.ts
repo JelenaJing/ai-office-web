@@ -1,5 +1,6 @@
 import fs from 'fs'
 import path from 'path'
+import { encryptPassword, decryptPassword } from '../../../lib/passwordCrypto'
 
 const EMAIL_ROOT = path.resolve(__dirname, '../../../data/email')
 
@@ -21,19 +22,24 @@ function accountPath(userId: string): string {
   return path.join(EMAIL_ROOT, `${safe}.json`)
 }
 
+export function saveEmailAccount(userId: string, account: StoredEmailAccount): void {
+  const toSave: StoredEmailAccount = {
+    ...account,
+    password: encryptPassword(account.password),
+  }
+  fs.mkdirSync(EMAIL_ROOT, { recursive: true })
+  fs.writeFileSync(accountPath(userId), JSON.stringify(toSave, null, 2), 'utf-8')
+}
+
 export function getEmailAccount(userId: string): StoredEmailAccount | null {
   const p = accountPath(userId)
   if (!fs.existsSync(p)) return null
   try {
-    return JSON.parse(fs.readFileSync(p, 'utf-8')) as StoredEmailAccount
+    const stored = JSON.parse(fs.readFileSync(p, 'utf-8')) as StoredEmailAccount
+    return { ...stored, password: decryptPassword(stored.password) }
   } catch {
     return null
   }
-}
-
-export function saveEmailAccount(userId: string, account: StoredEmailAccount): void {
-  fs.mkdirSync(EMAIL_ROOT, { recursive: true })
-  fs.writeFileSync(accountPath(userId), JSON.stringify(account, null, 2), 'utf-8')
 }
 
 export function maskAccount(account: StoredEmailAccount | null) {

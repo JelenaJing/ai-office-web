@@ -17,8 +17,8 @@ import multer from 'multer'
 import fs from 'fs'
 import path from 'path'
 import { randomUUID } from 'crypto'
+import { requireAccountUser } from '../lib/authUser'
 import {
-  resolveUserId,
   getOrCreateDefaultWorkspace,
   workspaceDir,
 } from '../lib/workspaceStore'
@@ -90,7 +90,8 @@ function writeFilesIndex(userId: string, wsId: string, index: FilesIndex): void 
 // ── GET /api/files ────────────────────────────────────────────────────────────
 
 router.get('/', async (req, res) => {
-  const userId = await resolveUserId(req)
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
   const ws = getOrCreateDefaultWorkspace(userId)
   const index = readFilesIndex(userId, ws.id)
   return res.json({ files: index.files })
@@ -133,7 +134,8 @@ router.post('/upload', uploadRateLimit, upload.single('file'), async (req, res) 
     })
   }
 
-  const userId = await resolveUserId(req)
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
   const ws = getOrCreateDefaultWorkspace(userId)
 
   const fileId = randomUUID()
@@ -160,7 +162,8 @@ router.post('/upload', uploadRateLimit, upload.single('file'), async (req, res) 
 // ── GET /api/files/:fileId/download ──────────────────────────────────────────
 
 router.get('/:fileId/download', async (req, res) => {
-  const userId = await resolveUserId(req)
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
   const ws = getOrCreateDefaultWorkspace(userId)
 
   const index = readFilesIndex(userId, ws.id)
@@ -183,7 +186,8 @@ router.get('/:fileId/download', async (req, res) => {
 // ── DELETE /api/files/:fileId ─────────────────────────────────────────────────
 
 router.delete('/:fileId', async (req, res) => {
-  const userId = await resolveUserId(req)
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
   const ws = getOrCreateDefaultWorkspace(userId)
 
   const index = readFilesIndex(userId, ws.id)
