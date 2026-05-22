@@ -170,6 +170,92 @@ export function addEvidence(
   return ev
 }
 
+// ── Email → Matter ────────────────────────────────────────────────────────────
+
+export interface EmailAttachmentInput {
+  id?: string
+  filename: string
+  contentType?: string
+  size?: number
+}
+
+export interface EmailInput {
+  id: string
+  subject: string
+  from: string
+  to?: string
+  body: string
+  timestamp?: string
+  attachments?: EmailAttachmentInput[]
+}
+
+export interface CreateMatterFromEmailInput {
+  workspacePath?: string
+  email: EmailInput
+  priority?: MatterPriority
+}
+
+export function createMatterFromEmail(
+  userId: string,
+  input: CreateMatterFromEmailInput,
+): { matter: Matter; evidence: MatterEvidence[] } {
+  const { email, workspacePath, priority } = input
+
+  const title = email.subject.trim() || '(无主题邮件)'
+  const goal = `处理来自"${email.from}"的邮件事项：${title}`
+
+  const matter = createMatter(userId, {
+    title,
+    goal,
+    sourceType: 'email',
+    status: 'new',
+    priority: priority ?? 'normal',
+    workspacePath,
+  })
+
+  logAudit(userId, matter.id, 'create_matter_from_email', {
+    emailId: email.id,
+    subject: email.subject,
+    from: email.from,
+  })
+
+  const evidenceList: MatterEvidence[] = []
+
+  // Add email body as email-type evidence
+  const emailEv = addEvidence(userId, matter.id, {
+    type: 'email',
+    title: title,
+    content: email.body.slice(0, 2000),
+    sourceRef: email.id,
+  })
+  if (emailEv) {
+    evidenceList.push(emailEv)
+    logAudit(userId, matter.id, 'add_email_evidence', {
+      evidenceId: emailEv.id,
+      emailId: email.id,
+    })
+  }
+
+  // Add attachment placeholders
+  for (const att of email.attachments ?? []) {
+    const attEv = addEvidence(userId, matter.id, {
+      type: 'attachment',
+      title: att.filename,
+      content: '附件已关联，后续接入文件抽取',
+      sourceRef: att.id ?? att.filename,
+    })
+    if (attEv) {
+      evidenceList.push(attEv)
+      logAudit(userId, matter.id, 'add_attachment_evidence', {
+        evidenceId: attEv.id,
+        filename: att.filename,
+      })
+    }
+  }
+
+  return { matter, evidence: evidenceList }
+}
+
 export function deleteEvidence(
   userId: string,
   matterId: string,

@@ -636,6 +636,7 @@ function WriterWorkspaceRuntime({
   const { activeWorkspaceName } = useWorkspace()
   const [primarySection, setPrimarySection] = useState<PrimarySection>(DEFAULT_PRIMARY_SECTION)
   const [returnToScene, setReturnToScene] = useState<PrimarySection>(DEFAULT_PRIMARY_SECTION)
+  const [pendingAiosMatterId, setPendingAiosMatterId] = useState<string | null>(null)
 
   const navigateTo = useCallback((section: PrimarySection) => {
     setPrimarySection(section)
@@ -802,6 +803,17 @@ function WriterWorkspaceRuntime({
     return () => window.removeEventListener('open-calendar-workspace', handler)
   }, [navigateTo])
 
+  // Navigate to AIOS section and optionally open a specific matter.
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ matterId?: string }>).detail
+      navigateTo('aios')
+      if (detail?.matterId) setPendingAiosMatterId(detail.matterId)
+    }
+    window.addEventListener('open-aios-matter', handler)
+    return () => window.removeEventListener('open-aios-matter', handler)
+  }, [navigateTo])
+
   useEffect(() => {
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<{ messageId?: string; subject?: string }>).detail
@@ -865,7 +877,7 @@ function WriterWorkspaceRuntime({
           )}
           {primarySection === 'aios' && (
             <ScenarioArea>
-              <AIOSHome />
+              <AIOSHome initialMatterId={pendingAiosMatterId} />
             </ScenarioArea>
           )}
           {primarySection === 'work' && (

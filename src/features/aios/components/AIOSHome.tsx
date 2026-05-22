@@ -297,12 +297,17 @@ const STATUS_FILTER_OPTIONS: Array<{ value: MatterStatus | 'all'; label: string 
   { value: 'done', label: '已完成' },
 ]
 
-export default function AIOSHome() {
+export default function AIOSHome({ initialMatterId }: { initialMatterId?: string | null } = {}) {
   const [matters, setMatters] = useState<Matter[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [filterStatus, setFilterStatus] = useState<MatterStatus | 'all'>('all')
   const [openMatterId, setOpenMatterId] = useState<string | null>(null)
+
+  // Auto-open matter passed from external navigation (e.g. email → matter conversion)
+  useEffect(() => {
+    if (initialMatterId) setOpenMatterId(initialMatterId)
+  }, [initialMatterId])
 
   // Create modal state
   const [showCreate, setShowCreate] = useState(false)

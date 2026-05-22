@@ -9,6 +9,8 @@ import {
   getEvidence,
   addEvidence,
   deleteEvidence,
+  createMatterFromEmail,
+  type EmailInput,
 } from './services/matterService'
 import { generateDecisionPackage } from './services/decisionPackageService'
 import { getAuditTrail } from './services/auditTrailService'
@@ -108,6 +110,26 @@ router.delete('/matters/:id/evidence/:evidenceId', async (req, res) => {
     return res.status(404).json({ message: '证据不存在' })
   }
   res.json({ success: true })
+})
+
+// ── Email → Matter (convenience endpoint) ────────────────────────────────────
+
+router.post('/matters/from-email', async (req, res) => {
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+
+  const { workspacePath, email, priority } = req.body as {
+    workspacePath?: string
+    email?: EmailInput
+    priority?: MatterPriority
+  }
+
+  if (!email?.id || !email?.subject) {
+    return res.status(400).json({ message: '邮件 id 和 subject 必填' })
+  }
+
+  const result = createMatterFromEmail(userId, { workspacePath, email, priority })
+  res.status(201).json(result)
 })
 
 // ── Decision Package ──────────────────────────────────────────────────────────

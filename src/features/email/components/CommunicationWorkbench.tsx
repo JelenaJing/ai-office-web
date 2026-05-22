@@ -43,6 +43,7 @@ import { shouldAutoStartWorkflow, buildAutoWorkflowInput } from '../services/ema
 import { detectMatterScenario, buildEmailMatter, serializeMatterToSummary } from '../services/emailMatterBuilder'
 import { handleCampusCardReplacementMatter, type AgentWorkflowResult } from '../services/cuhkszAgentWorkflow'
 import { emailRuntimeTestConnection } from '../services/emailRuntime'
+import { createMatterFromEmail } from '../../aios/services/matterRuntime'
 
 type ImportedDeckSlide = {
   index?: number
@@ -3036,6 +3037,10 @@ function CommunicationWorkbenchInner() {
 
   const [showAccountModal, setShowAccountModal] = useState(false)
   const [showCompose, setShowCompose] = useState(false)
+  // Email → AIOS Matter conversion state
+  const [emailToMatterState, setEmailToMatterState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
+  const [convertedMatterId, setConvertedMatterId] = useState<string | null>(null)
+  const [emailToMatterNotice, setEmailToMatterNotice] = useState<string | null>(null)
   const [pendingComposeTo, setPendingComposeTo] = useState<
     { email: string; displayName?: string; personId?: string; mailboxStatus?: string; fromDirectory?: boolean }[] | undefined
   >(undefined)
@@ -3528,6 +3533,10 @@ function CommunicationWorkbenchInner() {
   useEffect(() => {
     setShowSuccessHint(false)
     setCalendarNotice(null)
+    // Reset email-to-matter state when navigating to a different email
+    setEmailToMatterState('idle')
+    setEmailToMatterNotice(null)
+    setConvertedMatterId(null)
   }, [selectedMailId])
 
   useEffect(() => {
@@ -3836,6 +3845,50 @@ function CommunicationWorkbenchInner() {
     void handleLoadWorkflowTasks()
   }, [handleLoadWorkflowTasks])
 
+  // ── Email → AIOS Matter conversion ───────────────────────────────────────────
+
+  const handleConvertToMatter = useCallback(async () => {
+    if (!selectedThread || !targetMessage || !selectedMailId) return
+
+    const priority: 'urgent' | 'important' | 'normal' =
+      selectedTriage?.urgency === 'urgent' ? 'urgent'
+      : (selectedTriage?.urgency === 'soon' || selectedTriage?.priority === 'high') ? 'important'
+      : 'normal'
+
+    setEmailToMatterState('loading')
+    setEmailToMatterNotice(null)
+    setConvertedMatterId(null)
+
+    try {
+      const result = await createMatterFromEmail({
+        workspacePath: activeWorkspacePath ?? undefined,
+        email: {
+          id: selectedMailId,
+          subject: selectedThread.subject || '(无主题)',
+          from: targetMessage.from || targetMessage.fromName || 'unknown',
+          to: targetMessage.to || targetMessage.toName || '',
+          body: targetMessage.body || '',
+          timestamp: targetMessage.timestamp,
+          attachments: allIncomingAttachments.map(a => ({
+            id: a.id,
+            filename: a.filename,
+            contentType: a.contentType,
+            size: a.size,
+          })),
+        },
+        priority,
+      })
+      setConvertedMatterId(result.matter.id)
+      setEmailToMatterState('done')
+      setEmailToMatterNotice(
+        `✅ 已转为事项「${result.matter.title}」，创建了 ${result.evidence.length} 条证据。`
+      )
+    } catch (err) {
+      setEmailToMatterState('error')
+      setEmailToMatterNotice(`⚠ 转为事项失败：${err instanceof Error ? err.message : String(err)}`)
+    }
+  }, [selectedThread, targetMessage, selectedMailId, selectedTriage, activeWorkspacePath, allIncomingAttachments])
+
   const handleCompleteTask = useCallback(async (taskId: string, decision: 'approve' | 'reject') => {
     setCompletingTaskId(taskId)
     try {
@@ -4038,9 +4091,49 @@ function CommunicationWorkbenchInner() {
                   </div>
                   <ThreadHeaderActions>
                     <Btn $variant="muted" onClick={handleForwardSelectedMail}>转发</Btn>
+                    <Btn
+                      $variant="muted"
+                      onClick={() => void handleConvertToMatter()}
+                      disabled={emailToMatterState === 'loading' || emailToMatterState === 'done'}
+                      title="将此邮件转为 AIOS 事项，自动创建事项和证据"
+                    >
+                      {emailToMatterState === 'loading' ? '⏳ 转为事项…' : emailToMatterState === 'done' ? '✅ 已转为事项' : '📋 转为事项'}
+                    </Btn>
                   </ThreadHeaderActions>
                 </ThreadHeaderTop>
               </ThreadHeader>
+
+              {emailToMatterNotice && (
+                <div style={{
+                  margin: '0 0 8px',
+                  padding: '8px 14px',
+                  borderRadius: 8,
+                  background: emailToMatterState === 'error' ? '#fff5f5' : '#f0fff4',
+                  border: `1px solid ${emailToMatterState === 'error' ? '#fc8181' : '#68d391'}`,
+                  color: emailToMatterState === 'error' ? '#c53030' : '#276749',
+                  fontSize: 13,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                }}>
+                  <span style={{ flex: 1 }}>{emailToMatterNotice}</span>
+                  {emailToMatterState === 'done' && convertedMatterId && (
+                    <button
+                      type="button"
+                      onClick={() => window.dispatchEvent(new CustomEvent('open-aios-matter', { detail: { matterId: convertedMatterId } }))}
+                      style={{ padding: '3px 10px', background: '#38a169', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontSize: 12 }}
+                    >
+                      打开事项
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => { setEmailToMatterNotice(null); setEmailToMatterState('idle') }}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#718096', fontSize: 14, padding: '0 2px' }}
+                    title="关闭"
+                  >✕</button>
+                </div>
+              )}
 
               <EmailBodyView message={targetMessage} />
 

@@ -46,6 +46,9 @@ export interface AuditEvent {
     | 'generate_decision_package'
     | 'change_status'
     | 'delete_matter'
+    | 'create_matter_from_email'
+    | 'add_email_evidence'
+    | 'add_attachment_evidence'
   detail: Record<string, unknown>
   createdAt: string
 }

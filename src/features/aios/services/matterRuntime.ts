@@ -59,9 +59,39 @@ export async function createMatter(input: {
   sourceType?: MatterSourceType
   status?: MatterStatus
   priority?: MatterPriority
+  workspacePath?: string
 }): Promise<Matter> {
   const data = await request<{ matter: Matter }>('POST', '/matters', input)
   return data.matter
+}
+
+// ── Email → Matter ────────────────────────────────────────────────────────────
+
+export interface EmailAttachmentInput {
+  id?: string
+  filename: string
+  contentType?: string
+  size?: number
+}
+
+export interface CreateMatterFromEmailInput {
+  workspacePath?: string
+  email: {
+    id: string
+    subject: string
+    from: string
+    to?: string
+    body: string
+    timestamp?: string
+    attachments?: EmailAttachmentInput[]
+  }
+  priority?: MatterPriority
+}
+
+export async function createMatterFromEmail(
+  input: CreateMatterFromEmailInput,
+): Promise<{ matter: Matter; evidence: MatterEvidence[] }> {
+  return request('POST', '/matters/from-email', input)
 }
 
 export async function updateMatter(
