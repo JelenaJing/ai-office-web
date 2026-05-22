@@ -14,21 +14,22 @@ This report summarizes the overnight Electron/public-review to Web parity migrat
 | Document formal template P0 | `bf0d4b7` | pass | partial |
 | Deep document E2E hardening | `19fbe7e` | pass | smoke passed; partial |
 | PPT | `e15fcbb` | pass | partial |
-| Deep PPT E2E hardening | pending | pass | smoke passed; partial |
+| Deep PPT E2E hardening | `36c117f` | pass | smoke passed; partial |
 | Email | `69d7539` | pass | partial |
-| Deep email E2E hardening | pending | pass | smoke passed; partial |
+| Deep email E2E hardening | `08790bc` | pass | smoke passed; partial |
 | Knowledge | `448ce46` | pass | partial |
 | Artifact / Resource Center | `bfeb069` | pass | partial |
-| Deep artifact/knowledge E2E hardening | pending | pass | smoke passed with knowledge import partial |
+| Deep artifact/knowledge E2E hardening | `2e43ddf` | pass | smoke passed with knowledge import partial |
 | Image | `df57dc5` | pass | partial |
 | Data analysis | `f01d6c8` | pass | partial |
 | Daily report | `d8dd304` | pass | partial |
-| Deep image/data/report E2E hardening | pending | pass | image provider partial; data/report smoke passed |
+| Deep image/data/report E2E hardening | `d011482` | pass | image provider partial; data/report smoke passed |
 | Communication / IM | `020eb9a` | pass | partial |
 | Skill runtime / store | `3ecae04` | pass | partial |
 | Settings / account / model | `ab4eb06` | pass | partial |
 | AIOS / Matter / OA | `ff8640a` | pass | partial |
-| Deep AIOS E2E hardening | pending | pass | smoke passed; partial |
+| Deep AIOS E2E hardening | `1243b17` | pass | smoke passed; partial |
+| Deep communication/skill/settings E2E hardening | pending | pass | smoke passed; partial |
 
 ## Full parity features
 
@@ -45,9 +46,9 @@ No module is marked full Electron parity in this pass. The Web runtime now has c
 - Image: async text-to-image job API, cancel/status smoke, explicit provider partial handling, and prompt source refs when image Artifacts are created.
 - Data analysis: async xlsx/csv analysis job API, CSV smoke upload, Markdown Artifact output, preview, and source file relationship metadata.
 - Daily report: work-report event/daily/subordinates/summary API, Matter/Artifact/email event ingestion, and report Artifact output with source refs.
-- Communication: chat room/message/attachment and directory API contracts.
-- Skill Center: built-in skill list/run plus selected built-in async jobs and runtime status.
-- Settings: feature-owned settings routes, AI connection test, and parity status.
+- Communication: chat room/message/attachment and directory API contracts, plus chat-to-Matter evidence handoff.
+- Skill Center: built-in skill list/run plus selected built-in async jobs, report Artifact outputs, and runtime status.
+- Settings: feature-owned settings routes, AI connection test, masked model settings, and parity status.
 - AIOS: Matter/Evidence/DecisionPackage/AuditTrail, email-to-Matter, generated Artifacts with relationship metadata, route types, source references, knowledge verification status, lifecycle smoke, parity status, and audit replay full events.
 
 ## Missing or unsupported Web features
@@ -95,8 +96,8 @@ No module is marked full Electron parity in this pass. The Web runtime now has c
 | Image | provider-dependent image Artifact with prompt source refs | yes |
 | Data analysis | yes with source file ref | yes |
 | Report | yes with Matter/Artifact source refs | no |
-| Communication | attachment references only | no |
-| Skill | skill-dependent | selected built-ins |
+| Communication | chat-to-Matter evidence references; attachment references only | no |
+| Skill | yes for report skill output | selected built-ins |
 | Settings | no | no |
 | AIOS | yes for reply/document/PPT with `matterId`/source refs | no |
 

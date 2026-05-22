@@ -14,7 +14,7 @@ import {
 } from './smoke-utils'
 
 const ROOT_DIR = path.resolve(__dirname, '..', '..')
-const ALL_MODULES = ['document', 'ppt', 'email', 'artifact-knowledge', 'aios', 'image', 'data-analysis', 'report'] as const
+const ALL_MODULES = ['document', 'ppt', 'email', 'artifact-knowledge', 'aios', 'image', 'data-analysis', 'report', 'communication', 'skill', 'settings'] as const
 type SmokeModuleName = typeof ALL_MODULES[number]
 
 async function fallbackSmoke(moduleName: SmokeModuleName, ctx: SmokeContext): Promise<void> {
@@ -51,6 +51,18 @@ async function fallbackSmoke(moduleName: SmokeModuleName, ctx: SmokeContext): Pr
   }
   if (moduleName === 'report') {
     await smokeHttp(ctx, 'report', 'GET', '/api/work-report/summary', 'report summary endpoint exists')
+    return
+  }
+  if (moduleName === 'communication') {
+    await smokeHttp(ctx, 'communication', 'GET', '/api/chat/rooms', 'chat rooms endpoint exists')
+    return
+  }
+  if (moduleName === 'skill') {
+    await smokeHttp(ctx, 'skill', 'GET', '/api/skills', 'skills endpoint exists')
+    return
+  }
+  if (moduleName === 'settings') {
+    await smokeHttp(ctx, 'settings', 'GET', '/api/settings/parity-status', 'settings parity endpoint exists')
   }
 }
 

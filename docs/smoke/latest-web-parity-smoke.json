@@ -1,14 +1,14 @@
 {
-  "startedAt": "2026-05-22T17:38:28.022Z",
-  "finishedAt": "2026-05-22T17:38:29.605Z",
+  "startedAt": "2026-05-22T17:42:03.180Z",
+  "finishedAt": "2026-05-22T17:42:04.876Z",
   "baseUrl": "http://127.0.0.1:3001",
   "modules": [
-    "image"
+    "skill"
   ],
   "totals": {
-    "passed": 5,
+    "passed": 7,
     "failed": 0,
-    "skipped": 1
+    "skipped": 0
   },
   "steps": [
     {
@@ -17,10 +17,10 @@
       "expected": "HTTP 2xx and token",
       "actual": "HTTP 200 with token",
       "status": "passed",
-      "durationMs": 409
+      "durationMs": 522
     },
     {
-      "module": "image",
+      "module": "skill",
       "endpoint": "GET /api/workspaces/default",
       "expected": "workspace path",
       "actual": "HTTP 200 workspace=web-workspace:7b33dbd9-1a28-48e4-b2a3-226e3b0f6494:32425493-bbc7-481e-8c25-92ff13fbc626",
@@ -28,36 +28,44 @@
       "durationMs": 0
     },
     {
-      "module": "image",
-      "endpoint": "POST /api/image/jobs/start",
-      "expected": "image job starts",
-      "actual": "HTTP 200 jobId=93cfc83b-8e4a-4016-ab57-bc9748476dec",
+      "module": "skill",
+      "endpoint": "GET /api/skills",
+      "expected": "built-in skills list contains daily report skill",
+      "actual": "HTTP 200 skills=16",
+      "status": "passed",
+      "durationMs": 7
+    },
+    {
+      "module": "skill",
+      "endpoint": "POST /api/skills/web.daily.report/run",
+      "expected": "direct skill run returns report Artifact",
+      "actual": "HTTP 200 artifact=2f56ab0c-a370-4d62-88ad-a8311af341f7",
+      "status": "passed",
+      "durationMs": 80
+    },
+    {
+      "module": "skill",
+      "endpoint": "GET /api/skill-center/status",
+      "expected": "skill center status exposes partial AOSKIN gap",
+      "actual": "HTTP 200 status=partial",
+      "status": "passed",
+      "durationMs": 15
+    },
+    {
+      "module": "skill",
+      "endpoint": "POST /api/skill-center/jobs/start",
+      "expected": "async skill-center job starts",
+      "actual": "HTTP 200 jobId=dcc7f89b-0318-4675-9ec9-06e390f888f7",
       "status": "passed",
       "durationMs": 0
     },
     {
-      "module": "image",
-      "endpoint": "GET /api/image/jobs/:jobId",
-      "expected": "image provider unavailable is explicit partial, not fake success",
-      "actual": "status=failed error=图片生成失败 (404)：",
-      "status": "skipped",
-      "durationMs": 0
-    },
-    {
-      "module": "image",
-      "endpoint": "POST /api/image/jobs/start (cancel)",
-      "expected": "cancel target job starts",
-      "actual": "HTTP 200 jobId=dd9057e6-7145-4170-9b95-a542f0916b63",
+      "module": "skill",
+      "endpoint": "GET /api/skill-center/jobs/:jobId",
+      "expected": "async skill-center job completes with Artifact or no-artifact reason",
+      "actual": "status=completed artifact=c58d9e27-8bad-44e5-b5c1-31d954682400",
       "status": "passed",
       "durationMs": 0
-    },
-    {
-      "module": "image",
-      "endpoint": "POST /api/image/jobs/dd9057e6-7145-4170-9b95-a542f0916b63/cancel",
-      "expected": "image job cancel endpoint returns cancelled",
-      "actual": "HTTP 200 status=cancelled",
-      "status": "passed",
-      "durationMs": 18
     }
   ]
 }
