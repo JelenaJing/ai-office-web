@@ -9,6 +9,7 @@ import {
 import {
   MvpBtn, MvpCard, MvpError, MvpHint, MvpInput, MvpLabel, MvpPage, MvpTitle,
 } from '../../../components/web/WebMvpLayout'
+import { generateDailyReport } from '../services/reportRuntime'
 
 export default function WebDailyReportPanel() {
   const { activeWorkspacePath } = useWorkspace()
@@ -23,14 +24,10 @@ export default function WebDailyReportPanel() {
     setError(null)
     setArtifact(null)
     try {
-      const result = await platformApi.skills.run('web.daily.report', {
+      const result = await generateDailyReport({
+        date,
         workspacePath: activeWorkspacePath,
-        params: { date },
       })
-      if (!result.success || !result.artifact) {
-        setError(result.error ?? '生成失败')
-        return
-      }
       setArtifact(result.artifact)
     } catch (e) {
       setError(e instanceof Error ? e.message : '生成失败')

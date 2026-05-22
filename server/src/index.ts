@@ -16,6 +16,7 @@ import documentRouter from './features/document/routes'
 import pptRouter from './features/ppt/routes'
 import imageRouter from './features/image/routes'
 import dataAnalysisRouter from './features/data-analysis/routes'
+import reportRouter from './features/report/routes'
 import {
   globalRateLimit,
   authRateLimit,
@@ -72,6 +73,7 @@ app.use('/api/document', timeoutMiddleware(SKILL_TIMEOUT_MS), documentRouter)
 app.use('/api/ppt', timeoutMiddleware(SKILL_TIMEOUT_MS), pptRouter)
 app.use('/api/image', timeoutMiddleware(SKILL_TIMEOUT_MS), imageRouter)
 app.use('/api/data-analysis', timeoutMiddleware(SKILL_TIMEOUT_MS), dataAnalysisRouter)
+app.use('/api/work-report', timeoutMiddleware(SKILL_TIMEOUT_MS), reportRouter)
 
 app.use('/api', timeoutMiddleware(REQUEST_TIMEOUT_MS))
 
