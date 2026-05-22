@@ -63,6 +63,10 @@ app.use('/api', globalRateLimit)
 app.use('/api/skills/store', storeRouter)
 app.use('/api/skills', timeoutMiddleware(SKILL_TIMEOUT_MS), skillsRouter)
 
+// Document routes include LLM-heavy operations (paper workflow) — give them
+// the same long timeout as skills.  Must be registered BEFORE the 30 s catch-all.
+app.use('/api/document', timeoutMiddleware(SKILL_TIMEOUT_MS), documentRouter)
+
 app.use('/api', timeoutMiddleware(REQUEST_TIMEOUT_MS))
 
 app.use('/api/auth', authRateLimit, authRouter)
@@ -75,7 +79,6 @@ app.use('/api/email', emailRouter)
 app.use('/api/calendar', calendarRouter)
 app.use('/api/settings', settingsRouter)
 app.use('/api/aios', aiosRouter)
-app.use('/api/document', documentRouter)
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() })
