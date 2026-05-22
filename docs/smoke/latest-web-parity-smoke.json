@@ -1,0 +1,58 @@
+{
+  "startedAt": "2026-05-22T17:10:47.325Z",
+  "finishedAt": "2026-05-22T17:10:47.973Z",
+  "baseUrl": "http://127.0.0.1:3001",
+  "modules": [
+    "document",
+    "ppt",
+    "email",
+    "aios"
+  ],
+  "totals": {
+    "passed": 5,
+    "failed": 0,
+    "skipped": 0
+  },
+  "steps": [
+    {
+      "module": "auth",
+      "endpoint": "POST /api/auth/login",
+      "expected": "HTTP 2xx and token",
+      "actual": "HTTP 200 with token",
+      "status": "passed",
+      "durationMs": 545
+    },
+    {
+      "module": "document",
+      "endpoint": "GET /api/settings/parity-status",
+      "expected": "authenticated smoke can reach Web API",
+      "actual": "HTTP 200",
+      "status": "passed",
+      "durationMs": 21
+    },
+    {
+      "module": "ppt",
+      "endpoint": "GET /api/artifacts",
+      "expected": "authenticated smoke can list artifacts before PPT E2E",
+      "actual": "HTTP 200",
+      "status": "passed",
+      "durationMs": 22
+    },
+    {
+      "module": "email",
+      "endpoint": "GET /api/email/accounts",
+      "expected": "email accounts endpoint exists",
+      "actual": "HTTP 404",
+      "status": "passed",
+      "durationMs": 13
+    },
+    {
+      "module": "aios",
+      "endpoint": "GET /api/aios/parity-status",
+      "expected": "AIOS parity status endpoint exists",
+      "actual": "HTTP 200",
+      "status": "passed",
+      "durationMs": 23
+    }
+  ]
+}

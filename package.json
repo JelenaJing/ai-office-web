@@ -93,6 +93,7 @@
     "smoke:ppt-ui": "rm -rf .tmp-smoke && npx tsc --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck --outDir .tmp-smoke build/run-ppt-generation-ui-smoke.ts electron/main/services/knowledgeService.ts electron/main/services/pptxGenerator.ts && xvfb-run -a ./node_modules/.bin/electron .tmp-smoke/build/run-ppt-generation-ui-smoke.js && rm -rf .tmp-smoke",
     "smoke:email-ui": "rm -rf .tmp-smoke && npx tsc --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck --outDir .tmp-smoke build/run-email-generation-ui-smoke.ts electron/main/services/knowledgeService.ts && xvfb-run -a ./node_modules/.bin/electron .tmp-smoke/build/run-email-generation-ui-smoke.js && rm -rf .tmp-smoke",
     "smoke:email-demo-loopback": "npm exec --yes --package tsx tsx build/run-email-demo-loopback-smoke.ts",
+    "smoke:web-parity": "tsx scripts/smoke/run-web-parity-smoke.ts all",
     "smoke:imap": "npm exec --yes --package tsx -- tsx build/run-imap-smoke.ts",
     "smoke:image-reference-chain": "npm exec --yes --package tsx tsx build/run-image-reference-chain-smoke.ts",
     "smoke:intro-package": "rm -rf .tmp-smoke && npx tsc --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck --jsx react-jsx --rootDir .. --outDir .tmp-smoke build/run-packaged-introduction-remake-smoke.ts && xvfb-run -a ./node_modules/.bin/electron .tmp-smoke/ai_writer3.0/build/run-packaged-introduction-remake-smoke.js && rm -rf .tmp-smoke",
