@@ -31,13 +31,14 @@ export interface UseDocumentPatchActionsReturn {
   canUndo: boolean
   lastMessage: string
   lastMessageTone: 'ok' | 'err' | undefined
+  captureUndoSnapshot: () => void
   applyPatchWithUndo: (patch: WebDocumentPatch, statusOverride?: string) => void
   undoLastPatch: () => void
   runAiEditAction: (
     instruction: string,
     mode: DocumentEditMode,
     statusWhileRunning?: string,
-  ) => Promise<void>
+  ) => Promise<boolean>
 }
 
 export function useDocumentPatchActions(
@@ -92,6 +93,13 @@ export function useDocumentPatchActions(
     [editorRef, syncSessionHtml, onStatus],
   )
 
+  const captureUndoSnapshot = useCallback(() => {
+    const html = editorRef.current?.getHtml()
+    if (typeof html === 'string') {
+      setUndoHtml(html)
+    }
+  }, [editorRef])
+
   const undoLastPatch = useCallback(() => {
     if (!undoHtml) return
     const ed = editorRef.current
@@ -109,14 +117,14 @@ export function useDocumentPatchActions(
       instruction: string,
       mode: DocumentEditMode,
       statusWhileRunning = 'AI 正在修改文稿…',
-    ) => {
+    ): Promise<boolean> => {
       const ed = editorRef.current
       if (!workspacePath) {
         const msg = '请先打开工作区'
         setLastMessage(msg)
         setLastMessageTone('err')
         onStatus?.(msg, 'err')
-        return
+        return false
       }
 
       setRunning(true)
@@ -146,7 +154,7 @@ export function useDocumentPatchActions(
           setLastMessage(msg)
           setLastMessageTone('err')
           onStatus?.(msg, 'err')
-          return
+          return false
         }
         const patch = result.data?.patch
         if (!patch) {
@@ -154,14 +162,16 @@ export function useDocumentPatchActions(
           setLastMessage(msg)
           setLastMessageTone('err')
           onStatus?.(msg, 'err')
-          return
+          return false
         }
         applyPatchWithUndo(patch)
+        return true
       } catch (e) {
         const msg = e instanceof Error ? e.message : '编辑失败'
         setLastMessage(msg)
         setLastMessageTone('err')
         onStatus?.(msg, 'err')
+        return false
       } finally {
         setRunning(false)
       }
@@ -184,6 +194,7 @@ export function useDocumentPatchActions(
     canUndo: Boolean(undoHtml),
     lastMessage,
     lastMessageTone,
+    captureUndoSnapshot,
     applyPatchWithUndo,
     undoLastPatch,
     runAiEditAction,

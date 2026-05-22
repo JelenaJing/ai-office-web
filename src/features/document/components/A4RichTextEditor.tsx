@@ -434,7 +434,7 @@ export const A4RichTextEditor = forwardRef<A4EditorHandle, A4RichTextEditorProps
               onContextMenu={(e) => {
                 if (!onContextMenu) return
                 e.preventDefault()
-                const hasSel = (editor?.state.selection.empty === false) ?? false
+                const hasSel = editor?.state.selection.empty === false
                 onContextMenu(e.clientX, e.clientY, hasSel)
               }}
             >
