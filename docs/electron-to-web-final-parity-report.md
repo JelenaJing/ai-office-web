@@ -29,7 +29,27 @@ This report summarizes the overnight Electron/public-review to Web parity migrat
 | Settings / account / model | `ab4eb06` | pass | partial |
 | AIOS / Matter / OA | `ff8640a` | pass | partial |
 | Deep AIOS E2E hardening | `1243b17` | pass | smoke passed; partial |
-| Deep communication/skill/settings E2E hardening | pending | pass | smoke passed; partial |
+| Deep communication/skill/settings E2E hardening | `5bbebad` | pass | smoke passed; partial |
+| Final E2E smoke report | this commit | pass | all smoke passed with explicit partial skips |
+
+## Final E2E smoke summary
+
+`npx tsx scripts/smoke/run-web-parity-smoke.ts all` completed with 97 passed, 0 failed, and 4 skipped checks. The skipped checks are explicit partials, not fake successes: missing DOCX fixture, remote Knowledge import/delete unavailability, and upstream image provider 404.
+
+| Module | API contract | Smoke | Artifact | Async task | UI | Remaining partialMissing |
+| --- | --- | --- | --- | --- | --- | --- |
+| Document | yes | pass; DOCX fixture skipped | paper/formal/export artifact metadata | yes | yes | OOXML write-back, header/footer fidelity, final NFTCORE citation/review |
+| PPT | yes | pass | deck/download artifacts with source refs | yes | yes | durable DeckDocument storage, full layout matching, external PPT import |
+| Email | yes | pass | reply draft and attachment artifacts | triage yes | yes | full LLM triage, approved bulk send, high-fidelity attachment open, Calendar handoff |
+| Artifact | yes | pass | core store and relationship graph | no | yes | high-fidelity Office preview, full graph UI |
+| Knowledge | yes | pass with import/delete skipped | knowledge refs propagate into artifacts | no | yes | remote import availability, vector/RAG verification |
+| AIOS | yes | pass | reply/document/PPT artifacts with matter refs | no | yes | OA approval engine, fully verified RAG status, Electron-equivalent replay side effects |
+| Image | yes | pass with provider skipped | provider-dependent image artifact | yes | yes | upstream image provider 404, reference-image/poster workflows |
+| Data analysis | yes | pass | Markdown analysis artifact | yes | yes | Python runtime, chart artifacts, Electron parser parity |
+| Report | yes | pass | daily report artifact | no | yes | supervisor hierarchy, durable external activity ingestion |
+| Communication | yes | pass | chat-to-Matter evidence; attachment refs only | no | yes | Matrix/internal IM provider, organization directory provider |
+| Skill Center | yes | pass | report skill artifact | selected built-ins | yes | remote Skill Store, AOSKIN runtime, generalized job runtime |
+| Settings | yes | pass | no artifact expected | no | yes | editable admin/provider settings, role/permission matrix |
 
 ## Full parity features
 
@@ -66,6 +86,15 @@ No module is marked full Electron parity in this pass. The Web runtime now has c
 - Remote Skill Store install, AOSKIN package execution, and generalized skill job runtime.
 - Editable model/provider settings, full role/permission matrix, and full Electron settings-store migration.
 - OA approval workflow, fully verified knowledge/RAG status, and Electron-equivalent replay side effects.
+
+## Manually testable E2E chains
+
+- Document paper: start academic paper/review tasks, inspect title/abstract/keywords/outline/references, diagnostics chain, and export refs.
+- Document formal template: start formal-template task, inspect analyze/confirm/preview/commit phases and artifact-style metadata.
+- PPT: generate deck, download PPTX, switch template with zero-token retemplate preview, and inspect Matter/document source refs.
+- Email: run unread triage, generate reply draft Artifact, ingest attachment Artifact, convert email to Matter, then generate document/PPT.
+- AIOS: create Matter, add evidence, generate DecisionPackage, replay audit, generate reply/document/PPT Artifacts, complete lifecycle.
+- Artifact: create, preview, rename, download, delete, and inspect `/relationships`.
 
 ## Module source mapping and Web APIs
 
