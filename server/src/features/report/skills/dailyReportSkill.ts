@@ -82,6 +82,10 @@ export async function runDailyReportSkill(
     filename: 'daily-report.md',
     format: 'md',
     content: markdown,
+    sourceRefs: [
+      ...matters.slice(0, 20).map((matter) => ({ type: 'matter', id: matter.id, label: matter.title })),
+      ...dayArtifacts.slice(0, 20).map((artifact) => ({ type: 'artifact', id: artifact.id, label: artifact.title })),
+    ],
   })
 
   return { success: true, artifactId: artifact.id, artifact }

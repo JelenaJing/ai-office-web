@@ -1,14 +1,14 @@
 {
-  "startedAt": "2026-05-22T17:33:59.748Z",
-  "finishedAt": "2026-05-22T17:34:44.173Z",
+  "startedAt": "2026-05-22T17:38:28.022Z",
+  "finishedAt": "2026-05-22T17:38:29.605Z",
   "baseUrl": "http://127.0.0.1:3001",
   "modules": [
-    "aios"
+    "image"
   ],
   "totals": {
-    "passed": 19,
+    "passed": 5,
     "failed": 0,
-    "skipped": 0
+    "skipped": 1
   },
   "steps": [
     {
@@ -17,10 +17,10 @@
       "expected": "HTTP 2xx and token",
       "actual": "HTTP 200 with token",
       "status": "passed",
-      "durationMs": 504
+      "durationMs": 409
     },
     {
-      "module": "aios",
+      "module": "image",
       "endpoint": "GET /api/workspaces/default",
       "expected": "workspace path",
       "actual": "HTTP 200 workspace=web-workspace:7b33dbd9-1a28-48e4-b2a3-226e3b0f6494:32425493-bbc7-481e-8c25-92ff13fbc626",
@@ -28,140 +28,36 @@
       "durationMs": 0
     },
     {
-      "module": "aios",
-      "endpoint": "POST /api/aios/matters",
-      "expected": "Matter created as draft with point_to_many route type",
-      "actual": "HTTP 201 matterId=f8571f09-e378-4b89-a5b5-6006cdccb0f0 status=draft",
+      "module": "image",
+      "endpoint": "POST /api/image/jobs/start",
+      "expected": "image job starts",
+      "actual": "HTTP 200 jobId=93cfc83b-8e4a-4016-ab57-bc9748476dec",
       "status": "passed",
       "durationMs": 0
     },
     {
-      "module": "aios",
-      "endpoint": "POST /api/artifacts (evidence)",
-      "expected": "evidence attachment Artifact created",
-      "actual": "HTTP 201 artifact=4c294946-a042-4e03-b429-75444e2a2139",
+      "module": "image",
+      "endpoint": "GET /api/image/jobs/:jobId",
+      "expected": "image provider unavailable is explicit partial, not fake success",
+      "actual": "status=failed error=图片生成失败 (404)：",
+      "status": "skipped",
+      "durationMs": 0
+    },
+    {
+      "module": "image",
+      "endpoint": "POST /api/image/jobs/start (cancel)",
+      "expected": "cancel target job starts",
+      "actual": "HTTP 200 jobId=dd9057e6-7145-4170-9b95-a542f0916b63",
       "status": "passed",
       "durationMs": 0
     },
     {
-      "module": "aios",
-      "endpoint": "POST /api/aios/matters/f8571f09-e378-4b89-a5b5-6006cdccb0f0/evidence",
-      "expected": "email evidence added",
-      "actual": "HTTP 201 evidence=a7c06a04-b98c-4591-ac18-24047a7ed5f9",
+      "module": "image",
+      "endpoint": "POST /api/image/jobs/dd9057e6-7145-4170-9b95-a542f0916b63/cancel",
+      "expected": "image job cancel endpoint returns cancelled",
+      "actual": "HTTP 200 status=cancelled",
       "status": "passed",
-      "durationMs": 17
-    },
-    {
-      "module": "aios",
-      "endpoint": "POST /api/aios/matters/f8571f09-e378-4b89-a5b5-6006cdccb0f0/evidence",
-      "expected": "attachment evidence links an Artifact",
-      "actual": "HTTP 201 artifactId=4c294946-a042-4e03-b429-75444e2a2139",
-      "status": "passed",
-      "durationMs": 17
-    },
-    {
-      "module": "aios",
-      "endpoint": "POST /api/aios/matters/f8571f09-e378-4b89-a5b5-6006cdccb0f0/evidence",
-      "expected": "knowledge evidence carries verification status",
-      "actual": "HTTP 201 verification=partial",
-      "status": "passed",
-      "durationMs": 17
-    },
-    {
-      "module": "aios",
-      "endpoint": "GET /api/aios/matters/f8571f09-e378-4b89-a5b5-6006cdccb0f0",
-      "expected": "Matter lifecycle moved to collecting_evidence after evidence",
-      "actual": "HTTP 200 status=collecting_evidence",
-      "status": "passed",
-      "durationMs": 14
-    },
-    {
-      "module": "aios",
-      "endpoint": "POST /api/aios/matters/f8571f09-e378-4b89-a5b5-6006cdccb0f0/decision-package",
-      "expected": "DecisionPackage includes source references and knowledge verification status",
-      "actual": "HTTP 200 refs=3",
-      "status": "passed",
-      "durationMs": 25
-    },
-    {
-      "module": "aios",
-      "endpoint": "GET /api/aios/matters/f8571f09-e378-4b89-a5b5-6006cdccb0f0",
-      "expected": "Matter lifecycle moved to decision_package_ready",
-      "actual": "HTTP 200 status=decision_package_ready",
-      "status": "passed",
-      "durationMs": 17
-    },
-    {
-      "module": "aios",
-      "endpoint": "POST /api/aios/matters/f8571f09-e378-4b89-a5b5-6006cdccb0f0/generate-reply",
-      "expected": "reply draft Artifact generated with matter relationship",
-      "actual": "HTTP 200 artifact=e683509b-cfd8-4cbe-aaf5-d10a8769ab6d",
-      "status": "passed",
-      "durationMs": 0
-    },
-    {
-      "module": "aios",
-      "endpoint": "GET /api/artifacts/e683509b-cfd8-4cbe-aaf5-d10a8769ab6d/relationships",
-      "expected": "reply Artifact carries matter/source relationship",
-      "actual": "HTTP 200 matterId=f8571f09-e378-4b89-a5b5-6006cdccb0f0",
-      "status": "passed",
-      "durationMs": 46
-    },
-    {
-      "module": "aios",
-      "endpoint": "POST /api/aios/matters/f8571f09-e378-4b89-a5b5-6006cdccb0f0/generate-document",
-      "expected": "document Artifact generated with matter relationship",
-      "actual": "HTTP 200 artifact=20d5b2de-2a49-4084-aac3-707cd1dc1ab6",
-      "status": "passed",
-      "durationMs": 0
-    },
-    {
-      "module": "aios",
-      "endpoint": "GET /api/artifacts/20d5b2de-2a49-4084-aac3-707cd1dc1ab6/relationships",
-      "expected": "document Artifact carries matter/source relationship",
-      "actual": "HTTP 200 matterId=f8571f09-e378-4b89-a5b5-6006cdccb0f0",
-      "status": "passed",
-      "durationMs": 21
-    },
-    {
-      "module": "aios",
-      "endpoint": "POST /api/aios/matters/f8571f09-e378-4b89-a5b5-6006cdccb0f0/generate-ppt",
-      "expected": "PPT Artifact generated with matter relationship",
-      "actual": "HTTP 200 artifact=7fc1c64f-721a-40a0-893f-0b490779da23",
-      "status": "passed",
-      "durationMs": 0
-    },
-    {
-      "module": "aios",
-      "endpoint": "GET /api/artifacts/7fc1c64f-721a-40a0-893f-0b490779da23/relationships",
-      "expected": "ppt Artifact carries matter/source relationship",
-      "actual": "HTTP 200 matterId=f8571f09-e378-4b89-a5b5-6006cdccb0f0",
-      "status": "passed",
-      "durationMs": 40
-    },
-    {
-      "module": "aios",
-      "endpoint": "GET /api/aios/matters/f8571f09-e378-4b89-a5b5-6006cdccb0f0/audit",
-      "expected": "audit contains lifecycle and generation events",
-      "actual": "HTTP 200 events=10",
-      "status": "passed",
-      "durationMs": 14
-    },
-    {
-      "module": "aios",
-      "endpoint": "GET /api/aios/matters/f8571f09-e378-4b89-a5b5-6006cdccb0f0/audit/replay",
-      "expected": "audit replay returns full events",
-      "actual": "HTTP 200 replay=10",
-      "status": "passed",
-      "durationMs": 15
-    },
-    {
-      "module": "aios",
-      "endpoint": "PATCH /api/aios/matters/f8571f09-e378-4b89-a5b5-6006cdccb0f0",
-      "expected": "Matter lifecycle can complete",
-      "actual": "HTTP 200 status=completed",
-      "status": "passed",
-      "durationMs": 19
+      "durationMs": 18
     }
   ]
 }

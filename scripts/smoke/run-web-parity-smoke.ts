@@ -14,7 +14,7 @@ import {
 } from './smoke-utils'
 
 const ROOT_DIR = path.resolve(__dirname, '..', '..')
-const ALL_MODULES = ['document', 'ppt', 'email', 'artifact-knowledge', 'aios'] as const
+const ALL_MODULES = ['document', 'ppt', 'email', 'artifact-knowledge', 'aios', 'image', 'data-analysis', 'report'] as const
 type SmokeModuleName = typeof ALL_MODULES[number]
 
 async function fallbackSmoke(moduleName: SmokeModuleName, ctx: SmokeContext): Promise<void> {
@@ -39,6 +39,18 @@ async function fallbackSmoke(moduleName: SmokeModuleName, ctx: SmokeContext): Pr
   }
   if (moduleName === 'aios') {
     await smokeHttp(ctx, 'aios', 'GET', '/api/aios/parity-status', 'AIOS parity status endpoint exists')
+    return
+  }
+  if (moduleName === 'image') {
+    await smokeHttp(ctx, 'image', 'GET', '/api/artifacts', 'image smoke can list artifacts before job')
+    return
+  }
+  if (moduleName === 'data-analysis') {
+    await smokeHttp(ctx, 'data-analysis', 'GET', '/api/files', 'data-analysis smoke can list files before upload')
+    return
+  }
+  if (moduleName === 'report') {
+    await smokeHttp(ctx, 'report', 'GET', '/api/work-report/summary', 'report summary endpoint exists')
   }
 }
 

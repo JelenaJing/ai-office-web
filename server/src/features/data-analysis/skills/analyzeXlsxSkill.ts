@@ -99,6 +99,8 @@ export async function runAnalyzeXlsxSkill(
           url: `/api/artifacts/${artifactId}/download`,
         },
       ],
+      sourceRefs: [{ type: 'document', id: fileId, label: resolved.entry.name }],
+      documentId: fileId,
     }
 
     saveArtifactMetadata(artifact)

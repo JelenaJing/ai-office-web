@@ -23,6 +23,7 @@ This report summarizes the overnight Electron/public-review to Web parity migrat
 | Image | `df57dc5` | pass | partial |
 | Data analysis | `f01d6c8` | pass | partial |
 | Daily report | `d8dd304` | pass | partial |
+| Deep image/data/report E2E hardening | pending | pass | image provider partial; data/report smoke passed |
 | Communication / IM | `020eb9a` | pass | partial |
 | Skill runtime / store | `3ecae04` | pass | partial |
 | Settings / account / model | `ab4eb06` | pass | partial |
@@ -41,9 +42,9 @@ No module is marked full Electron parity in this pass. The Web runtime now has c
 - Email: account/IMAP/SMTP baseline, async unread triage task API with safe deterministic classification, triage cache key, reply draft Artifact, attachment Artifact ingestion, dry-run salutations, and email-to-Matter-to-document/PPT handoff.
 - Knowledge: remote-backed info/list/import/delete plus parity status, with remote import failures recorded as partial instead of success.
 - Artifact: create/list/detail/download/preview/rename/delete plus `sourceRefs`, `knowledgeRefs`, matter/email/deck/document ids, and relationship graph endpoint.
-- Image: async text-to-image job API and image Artifact output.
-- Data analysis: async xlsx/csv analysis job API and Markdown Artifact output.
-- Daily report: work-report event/daily/subordinates/summary API and report Artifact output.
+- Image: async text-to-image job API, cancel/status smoke, explicit provider partial handling, and prompt source refs when image Artifacts are created.
+- Data analysis: async xlsx/csv analysis job API, CSV smoke upload, Markdown Artifact output, preview, and source file relationship metadata.
+- Daily report: work-report event/daily/subordinates/summary API, Matter/Artifact/email event ingestion, and report Artifact output with source refs.
 - Communication: chat room/message/attachment and directory API contracts.
 - Skill Center: built-in skill list/run plus selected built-in async jobs and runtime status.
 - Settings: feature-owned settings routes, AI connection test, and parity status.
@@ -57,9 +58,9 @@ No module is marked full Electron parity in this pass. The Web runtime now has c
 - LLM-backed email triage, manual-approved bulk send execution, high-fidelity attachment preview/open workflow, and Calendar-specific email handoff.
 - Verified end-to-end RAG/vector search with citation propagation across all generators; knowledge import depends on remote-service availability.
 - High-fidelity Office artifact preview and complete relationship graph UI browsing.
-- Reference-image/poster image workflow and generated image insertion into document/PPT.
+- Reference-image/poster image workflow, generated image insertion into document/PPT, and current upstream image provider 404.
 - Python execution environment parity, chart Artifact generation, and Electron stdout/result parser parity for data analysis.
-- Supervisor/admin daily report hierarchy and durable activity ingestion.
+- Supervisor/admin daily report hierarchy and durable external activity ingestion.
 - Real-time Matrix/internal IM provider bridge and organization directory provider.
 - Remote Skill Store install, AOSKIN package execution, and generalized skill job runtime.
 - Editable model/provider settings, full role/permission matrix, and full Electron settings-store migration.
@@ -91,9 +92,9 @@ No module is marked full Electron parity in this pass. The Web runtime now has c
 | Email | yes for draft and attachment Artifacts | triage yes |
 | Knowledge | contributes `knowledgeRefs` to Artifacts | no |
 | Artifact | manages all Artifacts and relationship metadata | no |
-| Image | yes | yes |
-| Data analysis | yes | yes |
-| Report | yes | no |
+| Image | provider-dependent image Artifact with prompt source refs | yes |
+| Data analysis | yes with source file ref | yes |
+| Report | yes with Matter/Artifact source refs | no |
 | Communication | attachment references only | no |
 | Skill | skill-dependent | selected built-ins |
 | Settings | no | no |
@@ -110,7 +111,7 @@ Not yet. Web now has clearer module APIs and safer partial parity markers, but i
 - Configure email, pull unread messages, start/cancel triage, save a reply draft Artifact, ingest an attachment Artifact, and convert email to Matter/document/PPT.
 - Upload/list/delete knowledge documents when remote service permits, and check parity status.
 - Create, preview, rename, download, delete Artifacts, and inspect relationship graph/source refs.
-- Run image, xlsx/csv analysis, and daily report from Web UI.
+- Run image job/status/cancel, xlsx/csv analysis upload/preview, and daily report with Matter/Artifact/email events.
 - Exercise chat room/message endpoints and directory status.
 - Check Skill Center status and selected built-in job execution.
 - Verify AI settings, auth token compatibility, and email account settings.

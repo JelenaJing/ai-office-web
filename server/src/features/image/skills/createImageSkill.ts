@@ -42,6 +42,7 @@ export async function runCreateImageSkill(
       filename: 'image.png',
       format: 'png',
       content: png,
+      sourceRefs: [{ type: 'manual', id: 'image-prompt', label: prompt.slice(0, 120) }],
     })
     return { success: true, artifactId: artifact.id, artifact }
   } catch (err) {
