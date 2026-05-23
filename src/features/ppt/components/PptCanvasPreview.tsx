@@ -293,7 +293,7 @@ export default function PptCanvasPreview({ slide, pageNumber }: PptCanvasPreview
                     <Bullet key={`${item}-${index}`}>• {item}</Bullet>
                   ))}
                 </BulletList>
-              ) : (
+              ) : layout.startsWith('cover') || layout.startsWith('toc') || layout.startsWith('section') ? null : (
                 <EmptyState>当前页暂无可预览内容，但 PPTX 已生成，可下载查看。</EmptyState>
               )
             ) : null}

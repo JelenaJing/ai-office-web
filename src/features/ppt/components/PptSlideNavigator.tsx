@@ -163,7 +163,7 @@ const MoveButtons = styled.div`
   gap: 4px;
 `
 
-const MoveButton = styled.button`
+const MoveButton = styled.div`
   width: 24px;
   height: 24px;
   border-radius: 8px;
@@ -171,6 +171,11 @@ const MoveButton = styled.button`
   background: #ffffff;
   color: #94a3b8;
   cursor: not-allowed;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  user-select: none;
 `
 
 function formatLayout(layout?: string, type?: string): string {
@@ -257,8 +262,8 @@ export default function PptSlideNavigator({
                 <StatusTag $tone="modified">已修改</StatusTag>
               ) : (
                 <MoveButtons>
-                  <MoveButton type="button" disabled title="TODO">↑</MoveButton>
-                  <MoveButton type="button" disabled title="TODO">↓</MoveButton>
+                  <MoveButton title="TODO">↑</MoveButton>
+                  <MoveButton title="TODO">↓</MoveButton>
                 </MoveButtons>
               )}
             </CardFooter>
