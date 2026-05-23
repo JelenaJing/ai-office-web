@@ -86,7 +86,12 @@ async function request<T>(
   }
 
   if (!response.ok) {
-    let errorBody: { message?: string; error?: string } = {}
+    let errorBody: {
+      message?: string
+      error?: string
+      accountCenterErrors?: Array<{ login: string; status?: number; message: string }>
+      mailboxFallback?: { candidates?: Array<{ email: string; provider: string; status: string; error?: string; imap?: string; smtp?: string }> }
+    } = {}
     try {
       errorBody = await response.json()
     } catch {
@@ -95,7 +100,13 @@ async function request<T>(
     const msg = errorBody.message || errorBody.error || response.statusText
     if (isLoginEndpoint) {
       if (response.status === 401 || response.status === 403) {
-        throw new Error('账号或密码错误')
+        const candidates = errorBody.mailboxFallback?.candidates?.map((item) => {
+          const detail = item.error || item.imap || item.smtp || item.status
+          return `${item.email}（${item.provider}）：${detail}`
+        }) ?? []
+        const acErrors = errorBody.accountCenterErrors?.map((item) => `${item.login}: ${item.message}`) ?? []
+        const details = [...acErrors, ...candidates]
+        throw new Error(`${msg || '账号或密码错误'}${details.length > 0 ? `\n${details.join('\n')}` : ''}`)
       }
       if (response.status === 502 || msg.includes('AccountCenter 不可达')) {
         throw new Error('AccountCenter 不可达')
@@ -126,6 +137,14 @@ function authHeaders(token: string): Record<string, string> {
 export interface LoginResult {
   token: string
   user: InternalAccountUser
+  authMethod?: 'account_center' | 'email_fallback'
+  autoBoundMailbox?: {
+    email: string
+    provider: string
+    mailboxId: string
+  }
+  diagnostics?: unknown
+  message?: string
 }
 
 /** 登录 AccountCenter，返回 token 和用户信息 */

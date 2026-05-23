@@ -331,7 +331,7 @@ export function InternalAccountProvider({ children }: { children: ReactNode }) {
     console.log(`[InternalAccount] login start requestId=${requestId} user=${username}`)
     setState({ phase: 'loading' })
     try {
-      const { token, user } = await client.login(username, password)
+      const { token, user, authMethod, autoBoundMailbox, message } = await client.login(username, password)
 
       if (user.status === 'disabled') {
         setState({ phase: 'error', message: '该内部账号已被禁用，请联系管理员' })
@@ -354,26 +354,54 @@ export function InternalAccountProvider({ children }: { children: ReactNode }) {
         return
       }
 
-      setState({ phase: 'logged_in', session: { token, user, bindingsPhase: 'loading', emailAutoStatus: 'applying' } })
+      if (authMethod === 'email_fallback') {
+        setState({
+          phase: 'logged_in',
+          session: {
+            token,
+            user,
+            authMethod,
+            autoBoundMailbox,
+            loginMessage: message || (autoBoundMailbox ? `已通过邮箱验证登录，并自动绑定 ${autoBoundMailbox.email}。` : undefined),
+            bindingsPhase: 'loading',
+            emailAutoStatus: 'applied',
+          },
+        })
+      } else {
+        setState({
+          phase: 'logged_in',
+          session: {
+            token,
+            user,
+            authMethod,
+            autoBoundMailbox,
+            loginMessage: autoBoundMailbox ? `已自动绑定邮箱 ${autoBoundMailbox.email}。` : undefined,
+            bindingsPhase: 'loading',
+            emailAutoStatus: 'applying',
+          },
+        })
+      }
 
       // Auto-apply email config in background (non-blocking)
-      ;(async () => {
-        try {
-          await applyEmailConfigToSystem(user, password)
-          setState((prev) =>
-            prev.phase === 'logged_in'
-              ? { phase: 'logged_in', session: { ...prev.session, emailAutoStatus: 'applied' } }
-              : prev,
-          )
-        } catch (err) {
-          const emailAutoError = err instanceof Error ? err.message : '邮箱配置写入失败'
-          setState((prev) =>
-            prev.phase === 'logged_in'
-              ? { phase: 'logged_in', session: { ...prev.session, emailAutoStatus: 'error', emailAutoError } }
-              : prev,
-          )
-        }
-      })()
+      if (authMethod !== 'email_fallback') {
+        ;(async () => {
+          try {
+            await applyEmailConfigToSystem(user, password)
+            setState((prev) =>
+              prev.phase === 'logged_in'
+                ? { phase: 'logged_in', session: { ...prev.session, emailAutoStatus: 'applied' } }
+                : prev,
+            )
+          } catch (err) {
+            const emailAutoError = err instanceof Error ? err.message : '邮箱配置写入失败'
+            setState((prev) =>
+              prev.phase === 'logged_in'
+                ? { phase: 'logged_in', session: { ...prev.session, emailAutoStatus: 'error', emailAutoError } }
+                : prev,
+            )
+          }
+        })()
+      }
 
       client.getBindings(token, user.id).then(
         (bindings) => {

@@ -6,7 +6,11 @@ export {
   fetchMessageAttachment,
   sendPlainEmail,
   testEmailAccount,
+  testMailboxCredential,
 } from './emailMvp'
+export { deriveCandidateMailboxes, presetForDomain } from './emailProviderPresets'
+export type { CandidateMailbox, EmailProviderPreset } from './emailProviderPresets'
+export { autoBindMailboxForUser } from './mailboxAutoBinder'
 export type { MailAttachmentContent, MailAttachmentSummary, MailSummary } from './emailMvp'
 export {
   buildSalutation,

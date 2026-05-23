@@ -61,15 +61,23 @@ router.post('/account', async (req, res) => {
   }
   const account: StoredEmailAccount = {
     user: String(body.user).trim(),
+    email: String(body.email || body.user).trim(),
+    username: String(body.username || body.user).trim(),
     password: String(body.password),
     displayName: String(body.displayName || body.user).trim(),
+    provider: body.provider ? String(body.provider) : undefined,
+    label: body.label ? String(body.label) : undefined,
     imapHost: String(body.imapHost).trim(),
     imapPort: Number(body.imapPort) || 993,
     imapSecure: body.imapSecure !== false,
+    imapTlsMode: body.imapTlsMode,
     smtpHost: String(body.smtpHost).trim(),
     smtpPort: Number(body.smtpPort) || 465,
     smtpSecure: body.smtpSecure !== false,
+    smtpTlsMode: body.smtpTlsMode,
     allowSelfSignedCerts: Boolean(body.allowSelfSignedCerts),
+    isDefaultSend: true,
+    isDefaultReceive: true,
   }
   saveEmailAccount(userId, account)
   res.json(maskAccount(account))

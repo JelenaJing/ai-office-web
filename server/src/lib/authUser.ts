@@ -6,6 +6,7 @@
  */
 
 import type { NextFunction, Request, Response } from 'express'
+import { verifyWebAuthToken } from '../features/auth/services/webAuthToken'
 
 export const ACCOUNT_CENTER_URL =
   process.env.ACCOUNT_CENTER_URL ?? 'http://10.20.5.61:13100'
@@ -26,6 +27,8 @@ function bearerToken(req: Request): string | null {
 export async function resolveUserId(req: Request): Promise<string> {
   const token = bearerToken(req)
   if (!token) return DEV_FALLBACK_USER
+  const localUser = verifyWebAuthToken(token)
+  if (localUser) return localUser.id
   try {
     const resp = await fetch(`${ACCOUNT_CENTER_URL}/api/auth/me`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -61,6 +64,11 @@ export async function requireAccountUser(
     }
     res.status(401).json({ message: '未授权' })
     return null
+  }
+  const localUser = verifyWebAuthToken(token)
+  if (localUser) {
+    next?.()
+    return localUser.id
   }
 
   try {

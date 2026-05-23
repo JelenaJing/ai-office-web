@@ -132,6 +132,7 @@ const ErrorBox = styled.div<{ $warn?: boolean }>`
   color: ${p => p.$warn ? '#7a5a10' : '#b33838'};
   font-size: var(--font-size-xs);
   line-height: 1.6;
+  white-space: pre-line;
 `
 
 const Footer = styled.div`
@@ -194,7 +195,7 @@ export default function LoginGate() {
       <Card>
         <Brand>
           <BrandTitle>AI Office</BrandTitle>
-          <BrandSubtitle>登录内部账号后继续使用</BrandSubtitle>
+          <BrandSubtitle>支持用户名或邮箱登录，用户名会自动尝试学校邮箱</BrandSubtitle>
         </Brand>
 
         {isExpiredMsg && (
@@ -213,7 +214,7 @@ export default function LoginGate() {
               autoComplete="username"
               value={username}
               onChange={e => setUsername(e.target.value)}
-              placeholder="请输入用户名或 AI Office 邮箱"
+              placeholder="请输入用户名或完整邮箱"
               disabled={submitting}
               $error={!!errorMsg && !isExpiredMsg}
             />
@@ -251,7 +252,7 @@ export default function LoginGate() {
           </LoginBtn>
         </form>
 
-        <Footer>AI Office 3.0 · AccountCenter 内部账号</Footer>
+        <Footer>AI Office 3.0 · AccountCenter / 邮箱双重判定登录</Footer>
       </Card>
     </Screen>
   )

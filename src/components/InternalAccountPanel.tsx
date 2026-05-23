@@ -301,7 +301,7 @@ function InternalMailSection() {
   const [smtpResult, setSmtpResult] = useState<{ ok: boolean; message: string } | null>(null)
 
   if (state.phase !== 'logged_in') return null
-  const { user, emailAutoStatus, emailAutoError } = state.session
+  const { user, emailAutoStatus, emailAutoError, autoBoundMailbox, loginMessage } = state.session
 
   const handleRetry = useCallback(async () => {
     setRetrying(true)
@@ -352,6 +352,9 @@ function InternalMailSection() {
       </SectionHeader>
       <SectionBody>
         <InfoRow><InfoLabel>邮箱地址</InfoLabel><InfoValue>{user.email}</InfoValue></InfoRow>
+        {autoBoundMailbox && (
+          <InfoRow><InfoLabel>自动绑定</InfoLabel><InfoValue>{autoBoundMailbox.email} · {autoBoundMailbox.provider}</InfoValue></InfoRow>
+        )}
         <InfoRow><InfoLabel>IMAP</InfoLabel><InfoValue>{INTERNAL_MAIL_HOST}:993 (SSL)</InfoValue></InfoRow>
         <InfoRow><InfoLabel>SMTP</InfoLabel><InfoValue>{INTERNAL_MAIL_HOST}:465 (SSL)</InfoValue></InfoRow>
         <InfoRow>
@@ -363,7 +366,9 @@ function InternalMailSection() {
           </InfoValue>
         </InfoRow>
 
-        {imapResult || smtpResult ? (
+        {loginMessage ? (
+          <StatusBox $ok style={{ marginTop: 10 }}>{loginMessage}</StatusBox>
+        ) : imapResult || smtpResult ? (
           <>
             {imapResult && (
               <StatusBox $ok={imapResult.ok} $error={!imapResult.ok} style={{ marginTop: 10 }}>

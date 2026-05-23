@@ -26,6 +26,13 @@ export interface InternalAccountUser {
 export interface InternalAccountSession {
   token: string
   user: InternalAccountUser
+  authMethod?: 'account_center' | 'email_fallback'
+  autoBoundMailbox?: {
+    email: string
+    provider: string
+    mailboxId: string
+  }
+  loginMessage?: string
   bindings?: {
     mail?: ServiceBinding
     matrix?: ServiceBinding

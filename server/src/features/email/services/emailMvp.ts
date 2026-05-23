@@ -3,18 +3,106 @@ import nodemailer from 'nodemailer'
 import { simpleParser } from 'mailparser'
 import type { StoredEmailAccount } from './emailStore'
 
-export async function testEmailAccount(account: StoredEmailAccount): Promise<string> {
-  const client = new ImapFlow({
+function normalizeMailboxError(err: unknown): string {
+  const raw = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
+  const lower = raw.toLowerCase()
+  if (lower.includes('authenticationfailed') || lower.includes('auth') || lower.includes('invalid login')) {
+    return `AUTHENTICATIONFAILED: ${raw}`
+  }
+  if (lower.includes('econnrefused')) return `ECONNREFUSED: ${raw}`
+  if (lower.includes('etimedout') || lower.includes('timeout')) return `ETIMEDOUT: ${raw}`
+  if (lower.includes('certificate') || lower.includes('self-signed') || lower.includes('unable to verify')) return `certificate: ${raw}`
+  if (lower.includes('wrong version number')) return `SSL wrong version number: ${raw}`
+  if (lower.includes('starttls')) return `STARTTLS unsupported: ${raw}`
+  return raw
+}
+
+function imapOptions(account: StoredEmailAccount) {
+  return {
     host: account.imapHost,
     port: account.imapPort,
     secure: account.imapSecure,
+    doSTARTTLS: account.imapTlsMode === 'starttls' ? true : account.imapTlsMode === 'none' ? false : undefined,
     auth: { user: account.user, pass: account.password },
-    logger: false,
+    logger: false as const,
+    connectionTimeout: Number(process.env.EMAIL_LOGIN_CONNECT_TIMEOUT_MS || 8000),
+    greetingTimeout: Number(process.env.EMAIL_LOGIN_GREETING_TIMEOUT_MS || 8000),
+    socketTimeout: Number(process.env.EMAIL_LOGIN_SOCKET_TIMEOUT_MS || 12000),
     tls: { rejectUnauthorized: !account.allowSelfSignedCerts },
+  }
+}
+
+function smtpOptions(account: StoredEmailAccount) {
+  return {
+    host: account.smtpHost,
+    port: account.smtpPort,
+    secure: account.smtpSecure,
+    requireTLS: account.smtpTlsMode === 'starttls',
+    ignoreTLS: account.smtpTlsMode === 'none',
+    auth: { user: account.user, pass: account.password },
+    connectionTimeout: Number(process.env.EMAIL_LOGIN_CONNECT_TIMEOUT_MS || 8000),
+    greetingTimeout: Number(process.env.EMAIL_LOGIN_GREETING_TIMEOUT_MS || 8000),
+    socketTimeout: Number(process.env.EMAIL_LOGIN_SOCKET_TIMEOUT_MS || 12000),
+    tls: { rejectUnauthorized: !account.allowSelfSignedCerts },
+  }
+}
+
+function createImapClient(account: StoredEmailAccount): ImapFlow {
+  const client = new ImapFlow(imapOptions(account))
+  client.on('error', () => {
+    // ImapFlow may emit after a failed connect even when the promise is caught.
   })
+  return client
+}
+
+export async function testEmailAccount(account: StoredEmailAccount): Promise<string> {
+  const client = createImapClient(account)
   await client.connect()
   await client.logout()
   return 'IMAP 连接成功'
+}
+
+export interface MailboxCredentialTest {
+  ok: boolean
+  imap: { ok: boolean; message: string }
+  smtp: { ok: boolean; message: string }
+  error?: string
+}
+
+export async function testMailboxCredential(
+  account: StoredEmailAccount,
+  password: string,
+): Promise<MailboxCredentialTest> {
+  const testAccount = { ...account, password }
+  const result: MailboxCredentialTest = {
+    ok: false,
+    imap: { ok: false, message: '未测试' },
+    smtp: { ok: false, message: '未测试' },
+  }
+
+  try {
+    const client = createImapClient(testAccount)
+    await client.connect()
+    await client.logout()
+    result.imap = { ok: true, message: 'IMAP 连接成功' }
+  } catch (err) {
+    result.imap = { ok: false, message: normalizeMailboxError(err) }
+    result.error = result.imap.message
+    return result
+  }
+
+  try {
+    const transport = nodemailer.createTransport(smtpOptions(testAccount))
+    await transport.verify()
+    result.smtp = { ok: true, message: 'SMTP 连接成功' }
+  } catch (err) {
+    result.smtp = { ok: false, message: normalizeMailboxError(err) }
+    result.error = result.smtp.message
+    return result
+  }
+
+  result.ok = true
+  return result
 }
 
 export interface MailSummary {
@@ -58,14 +146,7 @@ export async function fetchInbox(
   account: StoredEmailAccount,
   limit = 30,
 ): Promise<MailSummary[]> {
-  const client = new ImapFlow({
-    host: account.imapHost,
-    port: account.imapPort,
-    secure: account.imapSecure,
-    auth: { user: account.user, pass: account.password },
-    logger: false,
-    tls: { rejectUnauthorized: !account.allowSelfSignedCerts },
-  })
+  const client = createImapClient(account)
   await client.connect()
   const lock = await client.getMailboxLock('INBOX')
   const out: MailSummary[] = []
@@ -114,14 +195,7 @@ export async function fetchMessage(
   account: StoredEmailAccount,
   uid: string,
 ): Promise<{ id: string; from: string; to: string; subject: string; body: string; timestamp: string; attachments: MailAttachmentSummary[] }> {
-  const client = new ImapFlow({
-    host: account.imapHost,
-    port: account.imapPort,
-    secure: account.imapSecure,
-    auth: { user: account.user, pass: account.password },
-    logger: false,
-    tls: { rejectUnauthorized: !account.allowSelfSignedCerts },
-  })
+  const client = createImapClient(account)
   await client.connect()
   const lock = await client.getMailboxLock('INBOX')
   try {
@@ -161,14 +235,7 @@ export async function fetchMessageAttachment(
   uid: string,
   attachmentId: string,
 ): Promise<MailAttachmentContent> {
-  const client = new ImapFlow({
-    host: account.imapHost,
-    port: account.imapPort,
-    secure: account.imapSecure,
-    auth: { user: account.user, pass: account.password },
-    logger: false,
-    tls: { rejectUnauthorized: !account.allowSelfSignedCerts },
-  })
+  const client = createImapClient(account)
   await client.connect()
   const lock = await client.getMailboxLock('INBOX')
   try {
@@ -207,13 +274,7 @@ export async function sendPlainEmail(
   account: StoredEmailAccount,
   input: { to: string; subject: string; body: string },
 ): Promise<void> {
-  const transport = nodemailer.createTransport({
-    host: account.smtpHost,
-    port: account.smtpPort,
-    secure: account.smtpSecure,
-    auth: { user: account.user, pass: account.password },
-    tls: { rejectUnauthorized: !account.allowSelfSignedCerts },
-  })
+  const transport = nodemailer.createTransport(smtpOptions(account))
   await transport.sendMail({
     from: account.displayName
       ? `"${account.displayName}" <${account.user}>`

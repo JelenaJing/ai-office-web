@@ -15,11 +15,73 @@
 
 import { Router } from 'express'
 import type { Request, Response } from 'express'
+import {
+  accountCenterLoginCandidates,
+  runEmailLoginFallback,
+} from '../features/auth/services/emailLoginFallback'
+import { verifyWebAuthToken } from '../features/auth/services/webAuthToken'
+import { deriveCandidateMailboxes } from '../features/email/services/emailProviderPresets'
+import { accountFromCandidate, autoBindMailboxForUser } from '../features/email/services/mailboxAutoBinder'
+import { testMailboxCredential } from '../features/email/services/emailMvp'
 
 const router = Router()
 
+interface AccountCenterLoginResponse {
+  token?: string
+  user?: {
+    id: string
+    username: string
+    displayName: string
+    email: string
+    roles: string[]
+    status: string
+    mustChangePassword: boolean
+  }
+  message?: string
+}
+
+interface AccountCenterAttemptError {
+  login: string
+  status?: number
+  message: string
+}
+
 function getAcUrl(): string {
   return process.env.ACCOUNT_CENTER_URL ?? 'http://10.20.5.61:13100'
+}
+
+async function requestAccountCenterLogin(username: string, password: string): Promise<{
+  ok: boolean
+  status: number
+  data: AccountCenterLoginResponse
+}> {
+  const upstream = await fetch(`${getAcUrl()}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+    signal: AbortSignal.timeout(12000),
+  })
+  const ct = upstream.headers.get('content-type') ?? ''
+  const data = ct.includes('application/json')
+    ? await upstream.json() as AccountCenterLoginResponse
+    : { message: await upstream.text() }
+  return { ok: upstream.ok, status: upstream.status, data }
+}
+
+async function tryAutoBindAccountCenterMailbox(
+  userId: string,
+  inputLogin: string,
+  password: string,
+) {
+  if (process.env.EMAIL_ACCOUNT_CENTER_AUTO_BIND !== 'true') return undefined
+  const candidates = deriveCandidateMailboxes(inputLogin)
+  for (const candidate of candidates) {
+    const test = await testMailboxCredential(accountFromCandidate(candidate, password), password)
+    if (test.ok) {
+      return autoBindMailboxForUser(userId, candidate, password)
+    }
+  }
+  return undefined
 }
 
 /**
@@ -75,16 +137,89 @@ router.post('/login', async (req, res) => {
     return res.status(400).json({ message: '请填写用户名和密码' })
   }
 
-  await proxyAC(req, res, 'POST', '/api/auth/login', { username, password })
+  const accountCenterErrors: AccountCenterAttemptError[] = []
+  for (const login of accountCenterLoginCandidates(username)) {
+    try {
+      const ac = await requestAccountCenterLogin(login, password)
+      if (ac.ok && ac.data?.token && ac.data?.user) {
+        let autoBoundMailbox
+        try {
+          autoBoundMailbox = await tryAutoBindAccountCenterMailbox(ac.data.user.id, username, password)
+        } catch (err) {
+          accountCenterErrors.push({
+            login,
+            message: `AccountCenter 登录成功，但邮箱自动绑定失败：${err instanceof Error ? err.message : String(err)}`,
+          })
+        }
+        return res.json({
+          ...ac.data,
+          authMethod: 'account_center',
+          autoBoundMailbox,
+          diagnostics: { accountCenterErrors },
+        })
+      }
+      accountCenterErrors.push({
+        login,
+        status: ac.status,
+        message: ac.data?.message || `AccountCenter 登录失败（HTTP ${ac.status}）`,
+      })
+    } catch (err) {
+      accountCenterErrors.push({
+        login,
+        message: `AccountCenter 不可达：${err instanceof Error ? err.message : String(err)}`,
+      })
+    }
+  }
+
+  const fallback = await runEmailLoginFallback({
+    inputLogin: username,
+    password,
+    accountCenterErrors,
+  })
+  if (fallback.success) {
+    return res.json({
+      token: fallback.token,
+      user: fallback.user,
+      authMethod: 'email_fallback',
+      autoBoundMailbox: fallback.autoBoundMailbox,
+      diagnostics: fallback.diagnostics,
+      message: `已通过邮箱验证登录，并自动绑定 ${fallback.autoBoundMailbox?.email || fallback.candidate?.email}。`,
+    })
+  }
+
+  return res.status(401).json({
+    message: fallback.error || 'AI Office 登录失败，且未能通过候选邮箱完成 IMAP/SMTP 验证。',
+    accountCenterErrors,
+    mailboxFallback: fallback.diagnostics,
+  })
 })
 
 // GET /api/auth/me
 router.get('/me', async (req, res) => {
+  const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '')
+  const localUser = verifyWebAuthToken(token)
+  if (localUser) return res.json(localUser)
   await proxyAC(req, res, 'GET', '/api/auth/me')
 })
 
 // GET /api/auth/me/bindings
 router.get('/me/bindings', async (req, res) => {
+  const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '')
+  const localUser = verifyWebAuthToken(token)
+  if (localUser) {
+    return res.json({
+      bindings: [
+        {
+          service: 'mail',
+          status: 'active',
+          metadata: {
+            source: 'email_fallback',
+            mailboxEmail: localUser.email,
+          },
+        },
+      ],
+    })
+  }
   await proxyAC(req, res, 'GET', '/api/auth/me/bindings')
 })
 
