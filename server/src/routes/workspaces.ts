@@ -19,11 +19,13 @@ import { Router } from 'express'
 import fs from 'fs'
 import path from 'path'
 import { randomUUID } from 'crypto'
-import { requireAccountUser } from '../lib/authUser'
+import { requireAccountIdentity, requireAccountUser } from '../lib/authUser'
 import {
   getOrCreateDefaultWorkspace,
+  getOrCreateDefaultWorkspaceWithMeta,
   hasDocument,
   readIndex,
+  resolveWorkspaceOwner,
   writeIndex,
   workspaceDir,
   clientPath,
@@ -37,15 +39,20 @@ const router = Router()
 // Must be registered before dynamic routes.
 
 router.get('/default', async (req, res) => {
-  const userId = await requireAccountUser(req, res)
-  if (!userId) return
-  const entry = getOrCreateDefaultWorkspace(userId)
+  const user = await requireAccountIdentity(req, res)
+  if (!user) return
+  const { entry, created } = getOrCreateDefaultWorkspaceWithMeta(user.id)
+  console.info(`[workspace-default] userId=${user.id}`)
+  console.info(`[workspace-default] username=${user.username}`)
+  console.info(`[workspace-default] workspacePath=${entry.path}`)
+  console.info(`[workspace-default] created=${created}`)
+  console.info(`[workspace-default] owner=${resolveWorkspaceOwner(entry.path) || user.id}`)
   return res.json({
     success: true,
     workspace: {
       name: entry.name,
       path: entry.path,
-      hasDocument: hasDocument(userId, entry.id),
+      hasDocument: hasDocument(user.id, entry.id),
       modifiedAt: entry.modifiedAt,
       isDefault: true,
     },

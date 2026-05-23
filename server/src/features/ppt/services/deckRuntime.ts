@@ -19,6 +19,7 @@ export const PPT_PARTIAL_MISSING = [
 
 export interface CreateDeckInput {
   userId: string
+  username?: string
   workspacePath: string
   title: string
   prompt: string
@@ -99,6 +100,7 @@ export function toGeneratedSlidePlanFromDeck(deck: WebDeckDocument): GeneratedSl
 
 export async function exportDeckWithBuiltin(input: {
   userId: string
+  username?: string
   workspacePath: string
   deck: WebDeckDocument
   skillId?: string
@@ -111,6 +113,7 @@ export async function exportDeckWithBuiltin(input: {
     await writePptxFile(plan, tmpPath)
     const artifact = saveSkillArtifact({
       userId: input.userId,
+      username: input.username,
       workspacePath: input.workspacePath,
       skillId: input.skillId || 'web.ppt.deck.create',
       type: 'presentation',
@@ -209,6 +212,7 @@ export async function createDeckFromPrompt(input: CreateDeckInput): Promise<WebD
   emit('正在保存 PPT Artifact…', 90)
   const artifact = saveSkillArtifact({
     userId: input.userId,
+    username: input.username,
     workspacePath: input.workspacePath,
     skillId: 'web.ppt.deck.create',
     type: 'presentation',

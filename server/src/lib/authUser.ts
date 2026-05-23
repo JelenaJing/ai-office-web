@@ -7,14 +7,25 @@
 
 import type { NextFunction, Request, Response } from 'express'
 import { verifyWebAuthToken } from '../features/auth/services/webAuthToken'
+import {
+  ACCOUNT_CENTER_UNREACHABLE_MESSAGE,
+  buildAccountCenterUrl,
+  getAccountCenterBaseUrl,
+} from './accountCenter'
 
-export const ACCOUNT_CENTER_URL =
-  process.env.ACCOUNT_CENTER_URL ?? 'http://10.20.5.61:13100'
+export const ACCOUNT_CENTER_URL = getAccountCenterBaseUrl()
 
 /** Fallback used only in dev when no token is present or AC is unreachable. */
 export const DEV_FALLBACK_USER = 'web-demo-user'
 
 const IS_PRODUCTION = process.env.NODE_ENV === 'production'
+
+export interface AccountIdentity {
+  id: string
+  username: string
+  displayName?: string
+  email?: string
+}
 
 function bearerToken(req: Request): string | null {
   const auth = req.headers['authorization']
@@ -23,27 +34,138 @@ function bearerToken(req: Request): string | null {
   return token || null
 }
 
-/** Resolve user id from AccountCenter; dev may fall back to DEV_FALLBACK_USER. */
-export async function resolveUserId(req: Request): Promise<string> {
+function fallbackIdentity(): AccountIdentity {
+  return {
+    id: DEV_FALLBACK_USER,
+    username: DEV_FALLBACK_USER,
+    displayName: DEV_FALLBACK_USER,
+  }
+}
+
+function identityFromLocalUser(user: ReturnType<typeof verifyWebAuthToken>): AccountIdentity | null {
+  if (!user?.id) return null
+  return {
+    id: user.id,
+    username: user.username || user.email || user.id,
+    displayName: user.displayName || user.username || user.email || user.id,
+    email: user.email || undefined,
+  }
+}
+
+function identityFromPayload(data: {
+  id?: string
+  userId?: string
+  username?: string
+  email?: string
+  displayName?: string
+  user?: {
+    id?: string
+    username?: string
+    email?: string
+    displayName?: string
+  }
+} | null | undefined): AccountIdentity | null {
+  const id = data?.id ?? data?.userId ?? data?.user?.id
+  if (!id) return null
+  const username = data?.username ?? data?.user?.username ?? data?.email ?? data?.user?.email ?? String(id)
+  return {
+    id: String(id),
+    username: String(username),
+    displayName: data?.displayName ?? data?.user?.displayName ?? String(username),
+    email: data?.email ?? data?.user?.email,
+  }
+}
+
+/** Resolve user identity from AccountCenter; dev may fall back to DEV_FALLBACK_USER. */
+export async function resolveAccountIdentity(req: Request): Promise<AccountIdentity> {
   const token = bearerToken(req)
-  if (!token) return DEV_FALLBACK_USER
-  const localUser = verifyWebAuthToken(token)
-  if (localUser) return localUser.id
+  if (!token) return fallbackIdentity()
+  const localUser = identityFromLocalUser(verifyWebAuthToken(token))
+  if (localUser) return localUser
   try {
-    const resp = await fetch(`${ACCOUNT_CENTER_URL}/api/auth/me`, {
+    const resp = await fetch(buildAccountCenterUrl('/api/auth/me'), {
       headers: { Authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(5000),
     })
-    if (!resp.ok) return DEV_FALLBACK_USER
+    if (!resp.ok) return fallbackIdentity()
     const data = (await resp.json()) as {
       id?: string
       userId?: string
-      user?: { id?: string }
+      username?: string
+      email?: string
+      displayName?: string
+      user?: { id?: string; username?: string; email?: string; displayName?: string }
     }
-    const uid = data.id ?? data.userId ?? data.user?.id
-    return uid ? String(uid) : DEV_FALLBACK_USER
+    return identityFromPayload(data) ?? fallbackIdentity()
   } catch {
-    return DEV_FALLBACK_USER
+    return fallbackIdentity()
+  }
+}
+
+/** Resolve user id from AccountCenter; dev may fall back to DEV_FALLBACK_USER. */
+export async function resolveUserId(req: Request): Promise<string> {
+  return (await resolveAccountIdentity(req)).id
+}
+
+export async function requireAccountIdentity(
+  req: Request,
+  res: Response,
+  next?: NextFunction,
+): Promise<AccountIdentity | null> {
+  const token = bearerToken(req)
+  if (!token) {
+    if (!IS_PRODUCTION) {
+      next?.()
+      return fallbackIdentity()
+    }
+    res.status(401).json({ message: '未授权' })
+    return null
+  }
+  const localUser = identityFromLocalUser(verifyWebAuthToken(token))
+  if (localUser) {
+    next?.()
+    return localUser
+  }
+
+  try {
+    const resp = await fetch(buildAccountCenterUrl('/api/auth/me'), {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(5000),
+    })
+    if (!resp.ok) {
+      if (!IS_PRODUCTION) {
+        next?.()
+        return fallbackIdentity()
+      }
+      res.status(401).json({ message: 'token 无效或已过期' })
+      return null
+    }
+    const data = (await resp.json()) as {
+      id?: string
+      userId?: string
+      username?: string
+      email?: string
+      displayName?: string
+      user?: { id?: string; username?: string; email?: string; displayName?: string }
+    }
+    const identity = identityFromPayload(data)
+    if (identity) {
+      next?.()
+      return identity
+    }
+    if (!IS_PRODUCTION) {
+      next?.()
+      return fallbackIdentity()
+    }
+    res.status(401).json({ message: '无法解析用户信息' })
+    return null
+  } catch {
+    if (!IS_PRODUCTION) {
+      next?.()
+      return fallbackIdentity()
+    }
+    res.status(502).json({ message: ACCOUNT_CENTER_UNREACHABLE_MESSAGE })
+    return null
   }
 }
 
@@ -56,56 +178,6 @@ export async function requireAccountUser(
   res: Response,
   next?: NextFunction,
 ): Promise<string | null> {
-  const token = bearerToken(req)
-  if (!token) {
-    if (!IS_PRODUCTION) {
-      next?.()
-      return DEV_FALLBACK_USER
-    }
-    res.status(401).json({ message: '未授权' })
-    return null
-  }
-  const localUser = verifyWebAuthToken(token)
-  if (localUser) {
-    next?.()
-    return localUser.id
-  }
-
-  try {
-    const resp = await fetch(`${ACCOUNT_CENTER_URL}/api/auth/me`, {
-      headers: { Authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(5000),
-    })
-    if (!resp.ok) {
-      if (!IS_PRODUCTION) {
-        next?.()
-        return DEV_FALLBACK_USER
-      }
-      res.status(401).json({ message: 'token 无效或已过期' })
-      return null
-    }
-    const data = (await resp.json()) as {
-      id?: string
-      userId?: string
-      user?: { id?: string }
-    }
-    const uid = data.id ?? data.userId ?? data.user?.id
-    if (uid) {
-      next?.()
-      return String(uid)
-    }
-    if (!IS_PRODUCTION) {
-      next?.()
-      return DEV_FALLBACK_USER
-    }
-    res.status(401).json({ message: '无法解析用户信息' })
-    return null
-  } catch {
-    if (!IS_PRODUCTION) {
-      next?.()
-      return DEV_FALLBACK_USER
-    }
-    res.status(502).json({ message: 'AccountCenter 不可达' })
-    return null
-  }
+  const identity = await requireAccountIdentity(req, res, next)
+  return identity?.id ?? null
 }

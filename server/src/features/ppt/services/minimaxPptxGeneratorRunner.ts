@@ -67,6 +67,7 @@ interface MinimaxProjectPlan {
 
 export interface RunMinimaxPptxGeneratorInput {
   userId: string
+  username?: string
   workspacePath: string
   prompt: string
   title?: string
@@ -84,6 +85,7 @@ export interface RunMinimaxPptxGeneratorInput {
 
 export interface EditSlideWithMinimaxInput {
   userId: string
+  username?: string
   workspacePath: string
   deck: WebDeckDocument
   deckId?: string
@@ -678,6 +680,7 @@ async function compileProjectPlanToArtifact(input: {
   projectPlan: MinimaxProjectPlan
   deckId: string
   userId: string
+  username?: string
   workspacePath: string
   skillId: string
   sourceRefs: WebDeckDocument['sourceRefs']
@@ -691,6 +694,7 @@ async function compileProjectPlanToArtifact(input: {
     ensureOutputExists(outputPath)
     const artifact = saveSkillArtifact({
       userId: input.userId,
+      username: input.username,
       workspacePath: input.workspacePath,
       skillId: input.skillId,
       type: 'presentation',
@@ -712,6 +716,7 @@ async function compileProjectPlanToArtifact(input: {
 
 export async function exportDeckWithMinimaxPptxGenerator(input: {
   userId: string
+  username?: string
   workspacePath: string
   deck: WebDeckDocument
   skillId?: string
@@ -721,6 +726,7 @@ export async function exportDeckWithMinimaxPptxGenerator(input: {
     projectPlan,
     deckId: input.deck.deckId,
     userId: input.userId,
+    username: input.username,
     workspacePath: input.workspacePath,
     skillId: input.skillId || 'minimax.pptx-generator',
     sourceRefs: input.deck.sourceRefs,
@@ -833,6 +839,7 @@ export async function editSlideWithMinimaxPptxGenerator(input: EditSlideWithMini
   }
   const exported = await exportDeckWithMinimaxPptxGenerator({
     userId: input.userId,
+    username: input.username,
     workspacePath: input.workspacePath,
     deck,
     skillId: 'minimax.pptx-generator',
@@ -893,6 +900,7 @@ export async function runMinimaxPptxGenerator(input: RunMinimaxPptxGeneratorInpu
     const deck = toPreviewDeck(projectPlan, deckId, input)
     const artifact = saveSkillArtifact({
       userId: input.userId,
+      username: input.username,
       workspacePath: input.workspacePath,
       skillId,
       type: 'presentation',

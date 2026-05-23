@@ -12,6 +12,7 @@ import {
 
 export interface SaveSkillArtifactInput {
   userId: string
+  username?: string
   workspacePath: string
   skillId: string
   type: string
@@ -29,10 +30,26 @@ export interface SaveSkillArtifactInput {
 
 export function saveSkillArtifact(input: SaveSkillArtifactInput): Artifact {
   const parsed = parseWorkspacePath(input.workspacePath)
+  const isPptArtifact = Boolean(input.deckId) || /ppt/i.test(input.skillId)
+  const resolvedWorkspaceOwner = parsed?.userId ?? ''
+  const canWrite = Boolean(parsed && parsed.userId === input.userId)
+  const reason = !parsed
+    ? 'workspacePath 格式无效'
+    : canWrite
+      ? 'workspace owner 与当前用户一致'
+      : `workspace owner=${parsed.userId}，当前用户无写入权限`
+  if (isPptArtifact) {
+    console.info(`[ppt-workspace] userId=${input.userId}`)
+    console.info(`[ppt-workspace] username=${input.username || ''}`)
+    console.info(`[ppt-workspace] workspacePath=${input.workspacePath}`)
+    console.info(`[ppt-workspace] resolvedWorkspaceOwner=${resolvedWorkspaceOwner}`)
+    console.info(`[ppt-workspace] canWrite=${canWrite}`)
+    console.info(`[ppt-workspace] reason=${reason}`)
+  }
   if (!parsed) {
     throw new Error(`workspacePath 格式无效：${input.workspacePath}`)
   }
-  if (parsed.userId !== input.userId) {
+  if (!canWrite) {
     throw new Error('无权写入该工作区')
   }
 

@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import { isWebShim } from '../platform/detect'
 import { platformApi } from '../platform'
 import type { WorkspaceInfo as PlatformWorkspaceInfo } from '../platform/types'
+import { useInternalAccount, useInternalSession } from './InternalAccountContext'
 
 export interface FileTreeNode {
   name: string
@@ -55,6 +56,11 @@ function workspaceNameFromToken(wsPath: string, fallback?: string): string {
   return parts[parts.length - 1] || wsPath
 }
 
+function workspaceOwnerFromToken(wsPath: string | null | undefined): string | null {
+  const match = String(wsPath || '').match(/^web-workspace:([^:]+):/)
+  return match?.[1] ?? null
+}
+
 function toWorkspaceInfo(ws: PlatformWorkspaceInfo): WorkspaceInfo {
   return {
     name: ws.name,
@@ -65,6 +71,8 @@ function toWorkspaceInfo(ws: PlatformWorkspaceInfo): WorkspaceInfo {
 }
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
+  const internalSession = useInternalSession()
+  const { state: accountState } = useInternalAccount()
   const [workspaceRoot, setWorkspaceRoot] = useState<string | null>(null)
   const [projectRoot, setProjectRoot] = useState<string | null>(null)
   const [activeWorkspacePath, setActiveWorkspacePath] = useState<string | null>(null)
@@ -254,11 +262,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (isWebShim()) {
-      void initializeDefaultWorkspace()
+      if (accountState.phase === 'restoring' || accountState.phase === 'loading') return
+      const currentUserId = internalSession?.user.id ?? null
+      const activeOwner = workspaceOwnerFromToken(activeWorkspacePath)
+      if (!activeWorkspacePath || (currentUserId && activeOwner !== currentUserId) || (!currentUserId && activeOwner !== null && activeOwner !== 'web-demo-user')) {
+        void initializeDefaultWorkspace()
+      }
       return
     }
     void refreshWorkspaces()
-  }, [initializeDefaultWorkspace, refreshWorkspaces])
+  }, [accountState.phase, activeWorkspacePath, initializeDefaultWorkspace, internalSession?.user.id, refreshWorkspaces])
 
   const contextValue = useMemo<WorkspaceState>(() => ({
     workspaceRoot,

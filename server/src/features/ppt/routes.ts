@@ -1,5 +1,6 @@
 import { Router } from 'express'
-import { requireAccountUser } from '../../lib/authUser'
+import { requireAccountIdentity } from '../../lib/authUser'
+import { resolveWritableWorkspaceForUser } from '../../lib/workspaceStore'
 import {
   createDeckTask,
   getDeck,
@@ -92,19 +93,27 @@ function buildBuiltinEditedSlide(slide: WebDeckSlide, instruction: string): WebD
 }
 
 router.post('/decks/start', async (req, res) => {
-  const userId = await requireAccountUser(req, res)
-  if (!userId) return
+  const user = await requireAccountIdentity(req, res)
+  if (!user) return
 
-  const workspacePath = String(req.body?.workspacePath || '').trim()
+  const requestedWorkspacePath = String(req.body?.workspacePath || '').trim()
   const prompt = String(req.body?.prompt || req.body?.topic || '').trim()
   const title = String(req.body?.title || prompt.slice(0, 40) || '演示文稿').trim()
-  if (!workspacePath) {
-    res.status(400).json({ success: false, error: 'workspacePath 不能为空' })
-    return
-  }
   if (!prompt) {
     res.status(400).json({ success: false, error: 'prompt 不能为空' })
     return
+  }
+  const workspaceAccess = resolveWritableWorkspaceForUser(user.id, requestedWorkspacePath)
+  const workspacePath = workspaceAccess.workspacePath
+  console.info(`[ppt-workspace] userId=${user.id}`)
+  console.info(`[ppt-workspace] username=${user.username}`)
+  console.info(`[ppt-workspace] workspacePath=${workspacePath}`)
+  console.info(`[ppt-workspace] resolvedWorkspaceOwner=${workspaceAccess.resolvedWorkspaceOwner}`)
+  console.info(`[ppt-workspace] canWrite=${workspaceAccess.canWrite}`)
+  console.info(`[ppt-workspace] reason=${workspaceAccess.reason}`)
+  if (workspaceAccess.switchedFrom && workspaceAccess.switchedTo) {
+    console.warn(`[ppt-workspace] switchedFrom=${workspaceAccess.switchedFrom}`)
+    console.warn(`[ppt-workspace] switchedTo=${workspaceAccess.switchedTo}`)
   }
 
   const task = createDeckTask()
@@ -124,7 +133,8 @@ router.post('/decks/start', async (req, res) => {
       console.info('[ppt-runtime] fallback=')
     }
     const result = await createDeckFromPrompt({
-      userId,
+      userId: user.id,
+      username: user.username,
       workspacePath,
       title,
       prompt,
@@ -154,7 +164,8 @@ router.post('/decks/start', async (req, res) => {
     }
     try {
       return await runMinimaxPptxGenerator({
-        userId,
+        userId: user.id,
+        username: user.username,
         workspacePath,
         title,
         prompt,
@@ -200,7 +211,7 @@ router.post('/decks/start', async (req, res) => {
       })
       saveDeckRuntimeMeta({
         deckId: result.deckId,
-        userId,
+        userId: user.id,
         workspacePath,
         engine: result.engine,
         skillId: result.engine === 'minimax_pptx_generator' ? 'minimax.pptx-generator' : 'web.ppt.deck.create',
@@ -293,8 +304,8 @@ router.post('/decks/:deckId/retemplate', (req, res) => {
 })
 
 router.post('/decks/:deckId/slides/:slideId/edit', async (req, res) => {
-  const userId = await requireAccountUser(req, res)
-  if (!userId) return
+  const user = await requireAccountIdentity(req, res)
+  if (!user) return
 
   const deck = getDeck(req.params.deckId)
   if (!deck) {
@@ -306,7 +317,7 @@ router.post('/decks/:deckId/slides/:slideId/edit', async (req, res) => {
     res.status(404).json({ success: false, error: '当前 deck 缺少运行时元数据，无法编辑。' })
     return
   }
-  if (runtimeMeta.userId !== userId) {
+  if (runtimeMeta.userId !== user.id) {
     res.status(403).json({ success: false, error: '无权编辑该 deck' })
     return
   }
@@ -326,7 +337,8 @@ router.post('/decks/:deckId/slides/:slideId/edit', async (req, res) => {
   try {
     if (engine === 'minimax_pptx_generator') {
       const result = await editSlideWithMinimaxPptxGenerator({
-        userId,
+        userId: user.id,
+        username: user.username,
         workspacePath: runtimeMeta.workspacePath,
         deck,
         slideId: req.params.slideId,
@@ -371,7 +383,8 @@ router.post('/decks/:deckId/slides/:slideId/edit', async (req, res) => {
       updatedAt: new Date().toISOString(),
     }
     const exported = await exportDeckWithBuiltin({
-      userId,
+      userId: user.id,
+      username: user.username,
       workspacePath: runtimeMeta.workspacePath,
       deck: nextDeck,
       skillId: 'web.ppt.deck.create',
@@ -405,8 +418,8 @@ router.post('/decks/:deckId/slides/:slideId/edit', async (req, res) => {
 })
 
 router.post('/decks/:deckId/export', async (req, res) => {
-  const userId = await requireAccountUser(req, res)
-  if (!userId) return
+  const user = await requireAccountIdentity(req, res)
+  if (!user) return
 
   const deck = getDeck(req.params.deckId)
   if (!deck) {
@@ -418,7 +431,7 @@ router.post('/decks/:deckId/export', async (req, res) => {
     res.status(404).json({ success: false, error: '当前 deck 缺少运行时元数据，无法导出。' })
     return
   }
-  if (runtimeMeta.userId !== userId) {
+  if (runtimeMeta.userId !== user.id) {
     res.status(403).json({ success: false, error: '无权导出该 deck' })
     return
   }
@@ -431,13 +444,13 @@ router.post('/decks/:deckId/export', async (req, res) => {
   try {
     const exported = engine === 'minimax_pptx_generator'
       ? await exportDeckWithMinimaxPptxGenerator({
-          userId,
+          userId: user.id,
           workspacePath: runtimeMeta.workspacePath,
           deck,
           skillId: 'minimax.pptx-generator',
         })
       : await exportDeckWithBuiltin({
-          userId,
+          userId: user.id,
           workspacePath: runtimeMeta.workspacePath,
           deck,
           skillId: 'web.ppt.deck.create',

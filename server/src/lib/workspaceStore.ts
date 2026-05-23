@@ -32,6 +32,18 @@ export interface WorkspaceIndex {
   workspaces: WorkspaceEntry[]
 }
 
+export interface WorkspaceWriteResolution {
+  workspacePath: string
+  requestedWorkspacePath: string | null
+  requestedWorkspaceOwner: string | null
+  resolvedWorkspaceOwner: string
+  canWrite: boolean
+  reason: string
+  switchedFrom: string | null
+  switchedTo: string | null
+  createdDefault: boolean
+}
+
 // ── Path helpers ──────────────────────────────────────────────────────────────
 
 export function sanitize(s: string, maxLen = 64): string {
@@ -60,6 +72,11 @@ export function parseClientPath(p: string): { userId: string; wsId: string } | n
   return { userId: m[1], wsId: m[2] }
 }
 
+export function resolveWorkspaceOwner(p: string | null | undefined): string | null {
+  if (!p) return null
+  return parseClientPath(p)?.userId ?? null
+}
+
 // ── Index read/write ──────────────────────────────────────────────────────────
 
 export function readIndex(userId: string): WorkspaceIndex {
@@ -82,11 +99,15 @@ export function writeIndex(userId: string, store: WorkspaceIndex): void {
 
 /** Returns existing default workspace or creates one automatically. */
 export function getOrCreateDefaultWorkspace(userId: string): WorkspaceEntry {
+  return getOrCreateDefaultWorkspaceWithMeta(userId).entry
+}
+
+export function getOrCreateDefaultWorkspaceWithMeta(userId: string): { entry: WorkspaceEntry; created: boolean } {
   const store = readIndex(userId)
   const existing = store.workspaces.find(
     (ws) => ws.isDefault && fs.existsSync(workspaceDir(userId, ws.id)),
   )
-  if (existing) return existing
+  if (existing) return { entry: existing, created: false }
 
   const wsId = randomUUID()
   const wsPath = clientPath(userId, wsId)
@@ -112,7 +133,7 @@ export function getOrCreateDefaultWorkspace(userId: string): WorkspaceEntry {
     'utf-8',
   )
 
-  return entry
+  return { entry, created: true }
 }
 
 export function hasDocument(userId: string, wsId: string): boolean {
@@ -125,4 +146,59 @@ export function toSafeName(name: string): string {
     .replace(/[^\u4e00-\u9fa5a-zA-Z0-9 _\-]/g, '_')
     .replace(/\s+/g, '_')
     .slice(0, 80)
+}
+
+export function resolveWritableWorkspaceForUser(userId: string, requestedWorkspacePath?: string | null): WorkspaceWriteResolution {
+  const normalizedRequested = String(requestedWorkspacePath || '').trim()
+  const defaultWorkspace = () => getOrCreateDefaultWorkspaceWithMeta(userId)
+
+  if (!normalizedRequested) {
+    const { entry, created } = defaultWorkspace()
+    return {
+      workspacePath: entry.path,
+      requestedWorkspacePath: null,
+      requestedWorkspaceOwner: null,
+      resolvedWorkspaceOwner: userId,
+      canWrite: true,
+      reason: 'workspacePath 为空，已切换到当前用户默认工作区',
+      switchedFrom: null,
+      switchedTo: entry.path,
+      createdDefault: created,
+    }
+  }
+
+  const parsed = parseClientPath(normalizedRequested)
+  if (parsed && parsed.userId === userId && fs.existsSync(workspaceDir(userId, parsed.wsId))) {
+    return {
+      workspacePath: normalizedRequested,
+      requestedWorkspacePath: normalizedRequested,
+      requestedWorkspaceOwner: parsed.userId,
+      resolvedWorkspaceOwner: parsed.userId,
+      canWrite: true,
+      reason: 'workspacePath 属于当前用户，可直接写入',
+      switchedFrom: null,
+      switchedTo: null,
+      createdDefault: false,
+    }
+  }
+
+  const { entry, created } = defaultWorkspace()
+  const requestedOwner = parsed?.userId ?? null
+  const reason = !parsed
+    ? 'workspacePath 格式无效，已切换到当前用户默认工作区'
+    : parsed.userId !== userId
+      ? `workspacePath 属于 ${parsed.userId}，已切换到当前用户默认工作区`
+      : 'workspacePath 不存在或不可写，已切换到当前用户默认工作区'
+
+  return {
+    workspacePath: entry.path,
+    requestedWorkspacePath: normalizedRequested,
+    requestedWorkspaceOwner: requestedOwner,
+    resolvedWorkspaceOwner: userId,
+    canWrite: true,
+    reason,
+    switchedFrom: normalizedRequested,
+    switchedTo: entry.path,
+    createdDefault: created,
+  }
 }

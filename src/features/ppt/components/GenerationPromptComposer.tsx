@@ -94,6 +94,11 @@ function intentToSlideType(intent: string): string {
   }
 }
 
+function parseWebWorkspaceOwner(workspacePath: string | null | undefined): string | null {
+  const match = String(workspacePath || '').match(/^web-workspace:([^:]+):/)
+  return match?.[1] ?? null
+}
+
 function splitKnowledgeParagraphs(text: string): string[] {
   const normalized = normalizeKnowledgeSourceText(text)
   if (!normalized) return []
@@ -641,7 +646,7 @@ export default function GenerationPromptComposer() {
   // Effective department (knowledge base) for PPT generation: prefer first explicitly selected KB,
   // fall back to the globally active department.
   const effectivePptDepartmentId = (workbench.sessions['ppt']?.selectedKnowledgeBaseIds?.[0]) || knowledge.departmentId
-  const { activeWorkspacePath } = useWorkspace()
+  const { activeWorkspacePath, openWorkspace } = useWorkspace()
   const { setStatusMessage } = useDocument()
   const { commitResult, setCommitResult } = useFormalTemplateSession()
   const { generateDocument, isBusy: documentBusy } = useFormalTemplateGeneration()
@@ -924,9 +929,21 @@ export default function GenerationPromptComposer() {
       }))
       try {
         let workspacePath = activeWorkspacePath
-        if (!workspacePath) {
+        const currentUserId = platformApi.auth.getCurrentUser()?.id ?? null
+        const workspaceOwner = parseWebWorkspaceOwner(workspacePath)
+        if (!workspacePath || (currentUserId && workspaceOwner && workspaceOwner !== currentUserId)) {
           const defaultWorkspace = await platformApi.workspaces.getDefault()
           workspacePath = defaultWorkspace?.path || ''
+          if (workspacePath) {
+            await openWorkspace(workspacePath)
+          }
+          if (activeWorkspacePath && currentUserId && workspaceOwner && workspaceOwner !== currentUserId) {
+            console.warn('[ppt-web] workspace switched for current user', {
+              currentUserId,
+              switchedFrom: activeWorkspacePath,
+              switchedTo: workspacePath,
+            })
+          }
         }
         if (!workspacePath) {
           throw new Error('workspacePath 不能为空，请先创建或打开工作区')
