@@ -968,18 +968,6 @@ function WriterWorkspaceRuntime({
                   onOpenPicker={() => setKbPickerOpen(true)}
                 />
               )}
-              {mode === 'generation' && generationMode === 'document' && (
-                <>
-                  <TopBarLabel>模板</TopBarLabel>
-                  <TopBarDeptSelect value="" onChange={() => {}}>
-                    <option value="">无模板</option>
-                    <option disabled>通知（待接入）</option>
-                    <option disabled>工作报告（待接入）</option>
-                    <option disabled>会议纪要（待接入）</option>
-                    <option disabled>公文（待接入）</option>
-                  </TopBarDeptSelect>
-                </>
-              )}
               <TopBarDivider />
               {activeWorkspaceName && (
                 <TopBarWorkspaceChip title={activeWorkspacePath ?? ''}>

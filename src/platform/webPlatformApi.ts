@@ -114,7 +114,7 @@ export const webPlatformApi: PlatformApi = {
 
   auth: {
     async login(email: string, password: string): Promise<AuthResult> {
-      const result = await apiPost<AuthResult>('/api/auth/login', {
+      const result = await apiPost<AuthResult>('/api/account-center/login', {
         email,
         password,
       })
@@ -495,6 +495,7 @@ export const webPlatformApi: PlatformApi = {
         'files',
         'artifacts',
         'skills',
+        'minimax.docx',
         'docx.create',
         'web.docx.create',
         'web.document.generate',

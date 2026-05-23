@@ -14,6 +14,7 @@ import settingsRouter from './routes/settings'
 import storeRouter from './routes/store'
 import { aiosRouter } from './features/aios'
 import documentRouter from './features/document/routes'
+import documentWorkbenchRouter from './features/document/routes/documents'
 import pptRouter from './features/ppt/routes'
 import imageRouter from './features/image/routes'
 import dataAnalysisRouter from './features/data-analysis/routes'
@@ -80,6 +81,7 @@ app.use('/api/skills', timeoutMiddleware(SKILL_TIMEOUT_MS), skillsRouter)
 // Document routes include LLM-heavy operations (paper workflow) — give them
 // the same long timeout as skills.  Must be registered BEFORE the 30 s catch-all.
 app.use('/api/document', timeoutMiddleware(SKILL_TIMEOUT_MS), documentRouter)
+app.use('/api/documents', timeoutMiddleware(SKILL_TIMEOUT_MS), documentWorkbenchRouter)
 app.use('/api/ppt', timeoutMiddleware(SKILL_TIMEOUT_MS), pptRouter)
 app.use('/api/image', timeoutMiddleware(SKILL_TIMEOUT_MS), imageRouter)
 app.use('/api/data-analysis', timeoutMiddleware(SKILL_TIMEOUT_MS), dataAnalysisRouter)
@@ -153,6 +155,12 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`   AccountCenter proxy → ${AC_URL}\n`)
   const pptEngine = process.env.PPT_ENGINE === 'builtin' ? 'builtin' : 'minimax_pptx_generator'
   const pptFallback = process.env.PPT_ENGINE_FALLBACK === 'none' ? 'none' : 'builtin'
+  const documentEngine = process.env.DOCUMENT_ENGINE === 'builtin' ? 'builtin' : 'minimax_docx'
+  const documentFallback = process.env.DOCUMENT_ENGINE_FALLBACK === 'none' ? 'none' : 'builtin'
+  console.info(`[document-runtime] defaultEngine=${documentEngine}`)
+  console.info(`[document-runtime] fallback=${documentFallback}`)
+  console.info(`[document-runtime] env.DOCUMENT_ENGINE=${process.env.DOCUMENT_ENGINE ?? '(not set, defaults to minimax_docx)'}`)
+  console.info(`[document-runtime] env.DOCUMENT_ENGINE_FALLBACK=${process.env.DOCUMENT_ENGINE_FALLBACK ?? '(not set, defaults to builtin)'}`)
   console.info(`[ppt-runtime] defaultEngine=${pptEngine}`)
   console.info(`[ppt-runtime] fallback=${pptFallback}`)
   console.info(`[ppt-runtime] env.PPT_ENGINE=${process.env.PPT_ENGINE ?? '(not set, defaults to minimax_pptx_generator)'}`)

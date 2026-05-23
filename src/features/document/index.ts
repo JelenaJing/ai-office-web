@@ -6,6 +6,7 @@ export { default as EditorPanel } from './components/EditorPanel'
 export { default as DocumentEngineHost } from './components/DocumentEngineHost'
 export { default as ReadonlyDocumentPreview } from './components/ReadonlyDocumentPreview'
 export { default as DocumentPreviewPane } from './components/DocumentPreviewPane'
+export { default as DocumentWorkbench } from './components/DocumentWorkbench'
 export { default as WordLikeDocumentEditor } from './components/WordLikeDocumentEditor'
 export { default as WebDocumentWorkbench } from './components/WebDocumentWorkbench'
 export { default as WebWritingPanel } from './components/WebWritingPanel' // temporary

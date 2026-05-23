@@ -17,3 +17,13 @@ export const MINIMAX_PPTX_GENERATOR_SKILL: BuiltInSkillDescriptor = {
   version: '1.0.0',
   enabled: true,
 }
+
+export const MINIMAX_DOCX_SKILL: BuiltInSkillDescriptor = {
+  id: 'minimax.docx',
+  name: 'MiniMax DOCX Skill',
+  description: 'Vendored MiniMax minimax-docx skill runner for structured office document generation, editing, and DOCX export.',
+  category: 'document',
+  outputArtifactType: 'document',
+  version: '1.0.0',
+  enabled: true,
+}

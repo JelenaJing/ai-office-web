@@ -1,0 +1,99 @@
+import styled from 'styled-components'
+import { Download, FileDown, Save } from 'lucide-react'
+
+const Toolbar = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid #d8e3ef;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(10px);
+`
+
+const MetaRow = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+`
+
+const MetaChip = styled.div`
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: #f3f7fb;
+  border: 1px solid #d9e3ee;
+  font-size: 12px;
+  color: #36506b;
+  font-weight: 700;
+`
+
+const Actions = styled.div`
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+`
+
+const ActionButton = styled.button`
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 1px solid #c8d5e3;
+  background: #fff;
+  color: #24415d;
+  font-size: 13px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+`
+
+interface DocumentTopToolbarProps {
+  engineLabel: string
+  templateLabel: string
+  knowledgeCount: number
+  onDownloadDocx: () => void
+  onExportPdf: () => void
+  onSave: () => void
+  busy?: boolean
+}
+
+export function DocumentTopToolbar({
+  engineLabel,
+  templateLabel,
+  knowledgeCount,
+  onDownloadDocx,
+  onExportPdf,
+  onSave,
+  busy,
+}: DocumentTopToolbarProps) {
+  return (
+    <Toolbar>
+      <MetaRow>
+        <MetaChip>生成引擎：{engineLabel}</MetaChip>
+        <MetaChip>模板：{templateLabel}</MetaChip>
+        <MetaChip>知识库：已选择 {knowledgeCount} 个</MetaChip>
+      </MetaRow>
+      <Actions>
+        <ActionButton type="button" onClick={onDownloadDocx} disabled={busy}>
+          <Download size={15} />
+          下载 DOCX
+        </ActionButton>
+        <ActionButton type="button" onClick={onExportPdf} disabled={busy}>
+          <FileDown size={15} />
+          导出 PDF
+        </ActionButton>
+        <ActionButton type="button" onClick={onSave} disabled={busy}>
+          <Save size={15} />
+          保存
+        </ActionButton>
+      </Actions>
+    </Toolbar>
+  )
+}

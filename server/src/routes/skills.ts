@@ -22,7 +22,8 @@ import { runGenerateDocumentSkill, type GenerateDocumentInput } from '../skills/
 import { runKnowledgeWritingLegacySkill } from '../skills/document/knowledgeWritingLegacySkill'
 import { runTemplateDocumentGenerateLegacySkill } from '../skills/document/templateDocumentGenerateLegacySkill'
 import { skillRunRateLimit } from '../middleware/rateLimit'
-import { MINIMAX_PPTX_GENERATOR_SKILL } from '../modules/skills'
+import { runCreateMinimaxDocxSkill } from '../features/document/skills/createMinimaxDocxSkill'
+import { MINIMAX_DOCX_SKILL, MINIMAX_PPTX_GENERATOR_SKILL } from '../modules/skills'
 
 const router = Router()
 
@@ -36,6 +37,7 @@ const BUILTIN_SKILLS = [
     version: '1.0.0',
     enabled: true,
   },
+  MINIMAX_DOCX_SKILL,
   {
     id: 'web.document.generate',
     name: 'Web 文稿生成',
@@ -236,6 +238,39 @@ router.post('/:skillId/run', skillRunRateLimit, async (req, res) => {
   if (skillId === 'web.docx.create') {
     const out = await runWebDocxCreateHandler(req.body, false)
     return res.status(out.status).json(out.body)
+  }
+
+  if (skillId === 'minimax.docx') {
+    const userId = await requireAccountUser(req, res)
+    if (!userId) return
+    const body = req.body as Record<string, unknown>
+    const result = await runCreateMinimaxDocxSkill({
+      userId,
+      prompt: String(body.prompt ?? ''),
+      title: typeof body.title === 'string' ? body.title : undefined,
+      workspacePath: String(body.workspacePath ?? ''),
+      templateId: typeof body.templateId === 'string' ? body.templateId : undefined,
+      knowledgeRefs: Array.isArray(body.knowledgeRefs) ? body.knowledgeRefs as import('../features/document/types').DocumentKnowledgeRefInput[] : undefined,
+      documentType: body.documentType as import('../features/document/types').DocumentType | undefined,
+      language: body.language as import('../features/document/types').DocumentLanguage | undefined,
+      fallback: process.env.DOCUMENT_ENGINE_FALLBACK === 'none' ? 'none' : 'builtin',
+    })
+    if (!result.success) {
+      return res.status(result.status ?? 500).json({ success: false, error: result.error })
+    }
+    return res.json({
+      success: true,
+      engine: result.engine,
+      skillId: result.skillId,
+      documentId: result.documentId,
+      artifactId: result.artifactId,
+      exportUrl: result.exportUrl,
+      filename: result.filename,
+      document: result.document,
+      outline: result.outline,
+      fallbackFrom: result.fallbackFrom,
+      fallbackReason: result.fallbackReason,
+    })
   }
 
   if (skillId === 'web.document.generate') {

@@ -1,0 +1,73 @@
+import styled from 'styled-components'
+import type { DocumentTemplateOption } from '../services/documentWorkbenchApi'
+
+const Panel = styled.section`
+  border: 1px solid #d8e3ef;
+  border-radius: 16px;
+  background: #fff;
+  padding: 14px;
+`
+
+const Title = styled.h3`
+  margin: 0 0 10px;
+  font-size: 14px;
+  color: #1e3954;
+`
+
+const TemplateGrid = styled.div`
+  display: grid;
+  gap: 8px;
+`
+
+const TemplateCard = styled.button<{ $active?: boolean }>`
+  text-align: left;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid ${({ $active }) => ($active ? '#77a6dd' : '#d9e4ee')};
+  background: ${({ $active }) => ($active ? '#eef5ff' : '#f8fbfd')};
+  cursor: pointer;
+`
+
+const TemplateName = styled.div`
+  font-size: 13px;
+  font-weight: 800;
+  color: #274865;
+`
+
+const TemplateDesc = styled.div`
+  margin-top: 6px;
+  font-size: 12px;
+  color: #607487;
+  line-height: 1.5;
+`
+
+interface DocumentTemplatePanelProps {
+  templates: DocumentTemplateOption[]
+  selectedTemplateId: string
+  onSelectTemplate: (templateId: string) => void
+}
+
+export function DocumentTemplatePanel({
+  templates,
+  selectedTemplateId,
+  onSelectTemplate,
+}: DocumentTemplatePanelProps) {
+  return (
+    <Panel>
+      <Title>模板选择</Title>
+      <TemplateGrid>
+        {templates.map((template) => (
+          <TemplateCard
+            key={template.id}
+            type="button"
+            $active={selectedTemplateId === template.id}
+            onClick={() => onSelectTemplate(template.id)}
+          >
+            <TemplateName>{template.label}</TemplateName>
+            <TemplateDesc>{template.description}</TemplateDesc>
+          </TemplateCard>
+        ))}
+      </TemplateGrid>
+    </Panel>
+  )
+}
