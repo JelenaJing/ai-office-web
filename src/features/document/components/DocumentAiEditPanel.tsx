@@ -125,6 +125,7 @@ const QUICK_ACTIONS = [
   '改正式',
   '加依据',
   '生成摘要',
+  '检查逻辑',
 ] as const
 
 function quickActionPrompt(action: typeof QUICK_ACTIONS[number]): string {
@@ -141,6 +142,8 @@ function quickActionPrompt(action: typeof QUICK_ACTIONS[number]): string {
       return '请补充这一节的依据表达；如果依据不足，请明确写“需要人工确认依据”。'
     case '生成摘要':
       return '请把这一节整理成一段简明摘要，适合给领导快速浏览。'
+    case '检查逻辑':
+      return '请检查这一节的逻辑是否连贯；如果存在跳跃、重复或论证不足，请直接改写成更严谨的表达。'
     default:
       return ''
   }

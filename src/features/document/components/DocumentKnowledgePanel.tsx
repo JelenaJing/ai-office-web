@@ -81,44 +81,48 @@ export function DocumentKnowledgePanel({
   const departmentNameMap = new Map(departments.map((department) => [department.id, department.name]))
 
   return (
-    <Panel>
-      <div>
-        <Title>知识库选择</Title>
-        <div style={{ marginTop: 10 }}>
-          <ActionButton type="button" onClick={onOpenKnowledgePicker}>
-            <BookOpen size={14} />
-            选择知识库
-          </ActionButton>
+    <>
+      <Panel>
+        <div>
+          <Title>知识库选择</Title>
+          <div style={{ marginTop: 10 }}>
+            <ActionButton type="button" onClick={onOpenKnowledgePicker}>
+              <BookOpen size={14} />
+              选择知识库
+            </ActionButton>
+          </div>
+          <TagList style={{ marginTop: 10 }}>
+            {selectedKnowledgeIds.length > 0
+              ? selectedKnowledgeIds.map((id) => <Tag key={id}>{departmentNameMap.get(id) || id}</Tag>)
+              : <div style={{ fontSize: 12, color: '#6b7f92' }}>未选择知识库</div>}
+          </TagList>
         </div>
-        <TagList style={{ marginTop: 10 }}>
-          {selectedKnowledgeIds.length > 0
-            ? selectedKnowledgeIds.map((id) => <Tag key={id}>{departmentNameMap.get(id) || id}</Tag>)
-            : <div style={{ fontSize: 12, color: '#6b7f92' }}>未选择知识库</div>}
-        </TagList>
-      </div>
+      </Panel>
 
-      <div>
-        <Title>附件引用</Title>
-        <div style={{ marginTop: 10 }}>
-          <ActionButton type="button" onClick={onAddAttachment}>
-            <Plus size={14} />
-            添加附件
-          </ActionButton>
+      <Panel>
+        <div>
+          <Title>附件引用</Title>
+          <div style={{ marginTop: 10 }}>
+            <ActionButton type="button" onClick={onAddAttachment}>
+              <Plus size={14} />
+              添加附件
+            </ActionButton>
+          </div>
+          <TagList style={{ marginTop: 10 }}>
+            {attachments.length > 0
+              ? attachments.map((file) => (
+                <Tag key={file.id}>
+                  <Paperclip size={12} />
+                  {file.name}
+                  <RemoveButton type="button" onClick={() => onRemoveAttachment(file.id)}>
+                    <X size={12} />
+                  </RemoveButton>
+                </Tag>
+              ))
+              : <div style={{ fontSize: 12, color: '#6b7f92' }}>未添加附件引用</div>}
+          </TagList>
         </div>
-        <TagList style={{ marginTop: 10 }}>
-          {attachments.length > 0
-            ? attachments.map((file) => (
-              <Tag key={file.id}>
-                <Paperclip size={12} />
-                {file.name}
-                <RemoveButton type="button" onClick={() => onRemoveAttachment(file.id)}>
-                  <X size={12} />
-                </RemoveButton>
-              </Tag>
-            ))
-            : <div style={{ fontSize: 12, color: '#6b7f92' }}>未添加附件引用</div>}
-        </TagList>
-      </div>
-    </Panel>
+      </Panel>
+    </>
   )
 }

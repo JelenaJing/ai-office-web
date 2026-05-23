@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import styled from 'styled-components'
 import type { DocumentDraft } from '../services/documentWorkbenchApi'
 
@@ -107,6 +108,13 @@ export function DocumentEditorCanvas({
   onSelectSection,
   onSelectParagraph,
 }: DocumentEditorCanvasProps) {
+  const sectionRefs = useRef<Record<string, HTMLElement | null>>({})
+
+  useEffect(() => {
+    if (!selectedSectionId) return
+    sectionRefs.current[selectedSectionId]?.scrollIntoView({ block: 'center', behavior: 'auto' })
+  }, [selectedSectionId])
+
   return (
     <CanvasShell>
       <Paper>
@@ -121,6 +129,10 @@ export function DocumentEditorCanvas({
               return (
                 <SectionBlock
                   key={section.id}
+                  ref={(node) => {
+                    sectionRefs.current[section.id] = node
+                  }}
+                  data-testid={`document-section-${section.id}`}
                   $active={selectedSectionId === section.id}
                   onClick={() => onSelectSection(section.id)}
                 >

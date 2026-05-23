@@ -254,6 +254,10 @@ export default function DocumentWorkbench() {
 
   const activeEngineLabel = engineLabel(result?.engine || defaultEngine)
   const activeTemplateLabel = result?.templateLabel || template?.label || '未选择'
+  const fallbackMessage = useMemo(() => {
+    if (!result?.fallbackFrom) return null
+    return `MiniMax DOCX Skill 失败，已回退内置文稿引擎：${result.fallbackReason || '未提供原因'}`
+  }, [result])
 
   const setHistoryForSection = useCallback((sectionId: string, updater: (history: SectionHistoryEntry[]) => SectionHistoryEntry[]) => {
     setSectionHistory((prev) => ({
@@ -304,6 +308,7 @@ export default function DocumentWorkbench() {
         templateId: template?.id,
         knowledgeRefs: buildKnowledgeRefsFromSelection(workspaceKbIds, attachments, knowledgeNameMap),
         documentType: template?.documentType || 'report',
+        language: 'zh-CN',
       })
       const nextResult = await (async () => {
         for (;;) {
@@ -321,7 +326,7 @@ export default function DocumentWorkbench() {
       setSelectedSectionId(nextResult.document.sections[0]?.id || null)
       setSelectedParagraphKey(null)
       setStatusMessage(nextResult.fallbackFrom
-        ? `${engineLabel(nextResult.engine)} 已完成，已从 MiniMax DOCX Skill 回退。`
+        ? `文稿已完成。MiniMax DOCX Skill 失败，已回退内置文稿引擎：${nextResult.fallbackReason || '未提供原因'}`
         : `${engineLabel(nextResult.engine)} 已完成。`)
       setStatusTone('ok')
     } catch (error) {
@@ -331,6 +336,11 @@ export default function DocumentWorkbench() {
       setBusy(false)
     }
   }, [activeWorkspacePath, attachments, generationPrompt, knowledgeNameMap, template, workspaceKbIds])
+
+  const handleSelectSection = useCallback((sectionId: string) => {
+    setSelectedSectionId(sectionId)
+    setSelectedParagraphKey(null)
+  }, [])
 
   const handleSectionEdit = useCallback(async (instruction: string) => {
     if (!result || !selectedSection) return
@@ -358,6 +368,8 @@ export default function DocumentWorkbench() {
         filename: response.filename,
         document: response.document,
         outline: response.outline,
+        fallbackFrom: response.engine === 'builtin' ? result.fallbackFrom : undefined,
+        fallbackReason: response.engine === 'builtin' ? result.fallbackReason : undefined,
       }
       setResult(nextResult)
       setHistoryForSection(selectedSection.id, (history) => [
@@ -410,25 +422,25 @@ export default function DocumentWorkbench() {
 
   return (
     <Shell data-testid="document-workbench">
-      <DocumentTopToolbar
-        engineLabel={activeEngineLabel}
-        templateLabel={activeTemplateLabel}
-        knowledgeCount={workspaceKbIds.length}
-        onDownloadDocx={() => void downloadArtifact('docx')}
-        onExportPdf={() => void downloadArtifact('pdf')}
-        onSave={handleSave}
-        busy={busy || !result}
-      />
+        <DocumentTopToolbar
+          engineLabel={activeEngineLabel}
+          templateLabel={activeTemplateLabel}
+          knowledgeCount={workspaceKbIds.length}
+          fallbackMessage={fallbackMessage}
+          onDownloadDocx={() => void downloadArtifact('docx')}
+          onExportPdf={() => void downloadArtifact('pdf')}
+          onSave={handleSave}
+          onRegenerate={() => void handleGenerate()}
+          busy={busy || !result}
+          regenerateDisabled={!generationPrompt.trim()}
+        />
 
       <Body>
         <Sidebar>
           <DocumentOutlinePanel
             document={result?.document || null}
             selectedSectionId={selectedSectionId}
-            onSelectSection={(sectionId) => {
-              setSelectedSectionId(sectionId)
-              setSelectedParagraphKey(null)
-            }}
+            onSelectSection={handleSelectSection}
           />
           <DocumentKnowledgePanel
             departments={departments}
@@ -450,10 +462,7 @@ export default function DocumentWorkbench() {
             document={result?.document || null}
             selectedSectionId={selectedSectionId}
             selectedParagraphKey={selectedParagraphKey}
-            onSelectSection={(sectionId) => {
-              setSelectedSectionId(sectionId)
-              setSelectedParagraphKey(null)
-            }}
+            onSelectSection={handleSelectSection}
             onSelectParagraph={(sectionId, paragraphIndex) => {
               setSelectedSectionId(sectionId)
               setSelectedParagraphKey(`${sectionId}:${paragraphIndex}`)

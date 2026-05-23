@@ -1,5 +1,5 @@
 import styled from 'styled-components'
-import { Download, FileDown, Save } from 'lucide-react'
+import { AlertCircle, Download, FileDown, RotateCcw, Save } from 'lucide-react'
 
 const Toolbar = styled.div`
   display: flex;
@@ -18,14 +18,17 @@ const MetaRow = styled.div`
   gap: 10px;
 `
 
-const MetaChip = styled.div`
+const MetaChip = styled.div<{ $tone?: 'warn' }>`
   padding: 8px 12px;
   border-radius: 999px;
-  background: #f3f7fb;
-  border: 1px solid #d9e3ee;
+  background: ${({ $tone }) => ($tone === 'warn' ? '#fff6eb' : '#f3f7fb')};
+  border: 1px solid ${({ $tone }) => ($tone === 'warn' ? '#f2c48d' : '#d9e3ee')};
   font-size: 12px;
-  color: #36506b;
+  color: ${({ $tone }) => ($tone === 'warn' ? '#8a4b08' : '#36506b')};
   font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 `
 
 const Actions = styled.div`
@@ -58,20 +61,26 @@ interface DocumentTopToolbarProps {
   engineLabel: string
   templateLabel: string
   knowledgeCount: number
+  fallbackMessage?: string | null
   onDownloadDocx: () => void
   onExportPdf: () => void
   onSave: () => void
+  onRegenerate: () => void
   busy?: boolean
+  regenerateDisabled?: boolean
 }
 
 export function DocumentTopToolbar({
   engineLabel,
   templateLabel,
   knowledgeCount,
+  fallbackMessage,
   onDownloadDocx,
   onExportPdf,
   onSave,
+  onRegenerate,
   busy,
+  regenerateDisabled,
 }: DocumentTopToolbarProps) {
   return (
     <Toolbar>
@@ -79,6 +88,12 @@ export function DocumentTopToolbar({
         <MetaChip>生成引擎：{engineLabel}</MetaChip>
         <MetaChip>模板：{templateLabel}</MetaChip>
         <MetaChip>知识库：已选择 {knowledgeCount} 个</MetaChip>
+        {fallbackMessage ? (
+          <MetaChip $tone="warn">
+            <AlertCircle size={14} />
+            {fallbackMessage}
+          </MetaChip>
+        ) : null}
       </MetaRow>
       <Actions>
         <ActionButton type="button" onClick={onDownloadDocx} disabled={busy}>
@@ -92,6 +107,10 @@ export function DocumentTopToolbar({
         <ActionButton type="button" onClick={onSave} disabled={busy}>
           <Save size={15} />
           保存
+        </ActionButton>
+        <ActionButton type="button" onClick={onRegenerate} disabled={busy || regenerateDisabled}>
+          <RotateCcw size={15} />
+          重新生成
         </ActionButton>
       </Actions>
     </Toolbar>

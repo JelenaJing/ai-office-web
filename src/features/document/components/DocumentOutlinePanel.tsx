@@ -19,10 +19,10 @@ const OutlineList = styled.div`
   gap: 8px;
 `
 
-const OutlineButton = styled.button<{ $active?: boolean }>`
+const OutlineButton = styled.button<{ $active?: boolean; $level?: number }>`
   width: 100%;
   text-align: left;
-  padding: 10px 12px;
+  padding: 10px 12px 10px ${({ $level }) => 12 + Math.max(0, (($level || 1) - 1) * 18)}px;
   border-radius: 12px;
   border: 1px solid ${({ $active }) => ($active ? '#7aa8dc' : '#dbe5ef')};
   background: ${({ $active }) => ($active ? '#eef5fd' : '#f9fbfd')};
@@ -52,6 +52,7 @@ export function DocumentOutlinePanel({
             key={item.id}
             type="button"
             $active={selectedSectionId === item.id}
+            $level={item.level}
             onClick={() => onSelectSection(item.id)}
           >
             {index + 1}. {item.title}
