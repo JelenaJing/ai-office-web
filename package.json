@@ -6,7 +6,7 @@
   "description": "AI-Office 3.0 - 内置文档引擎重构工作副本",
   "author": "AI-Office Team",
   "scripts": {
-    "dev": "vite --config vite.web.config.ts --host 0.0.0.0",
+    "dev": "npm run dev:web:full",
     "dev:electron": "vite",
     "dev:web": "vite --config vite.web.config.ts --host 0.0.0.0",
     "dev:server": "cd server && npm run dev",
@@ -94,6 +94,9 @@
     "smoke:email-ui": "rm -rf .tmp-smoke && npx tsc --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck --outDir .tmp-smoke build/run-email-generation-ui-smoke.ts electron/main/services/knowledgeService.ts && xvfb-run -a ./node_modules/.bin/electron .tmp-smoke/build/run-email-generation-ui-smoke.js && rm -rf .tmp-smoke",
     "smoke:email-demo-loopback": "npm exec --yes --package tsx tsx build/run-email-demo-loopback-smoke.ts",
     "smoke:web-parity": "tsx scripts/smoke/run-web-parity-smoke.ts all",
+    "e2e:web": "RATE_LIMIT_GLOBAL=5000 RATE_LIMIT_AUTH_MAX=500 playwright test tests/e2e/web-user-flows.spec.ts",
+    "e2e:web:headed": "RATE_LIMIT_GLOBAL=5000 RATE_LIMIT_AUTH_MAX=500 playwright test tests/e2e/web-user-flows.spec.ts --headed",
+    "verify:web:user-flows": "npm run check:boundaries && npm run build:web && cd server && npm run build && cd .. && npx tsx scripts/smoke/run-web-parity-smoke.ts all && npm run e2e:web",
     "smoke:imap": "npm exec --yes --package tsx -- tsx build/run-imap-smoke.ts",
     "smoke:image-reference-chain": "npm exec --yes --package tsx tsx build/run-image-reference-chain-smoke.ts",
     "smoke:intro-package": "rm -rf .tmp-smoke && npx tsc --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck --jsx react-jsx --rootDir .. --outDir .tmp-smoke build/run-packaged-introduction-remake-smoke.ts && xvfb-run -a ./node_modules/.bin/electron .tmp-smoke/ai_writer3.0/build/run-packaged-introduction-remake-smoke.js && rm -rf .tmp-smoke",
@@ -149,6 +152,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@types/node": "^20.11.0",
     "@types/react": "^18.2.43",
     "@types/react-dom": "^18.2.17",

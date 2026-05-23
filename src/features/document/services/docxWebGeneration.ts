@@ -134,8 +134,45 @@ function triggerBrowserDownload(filename: string, content: string, mimeType: str
   const link = document.createElement('a')
   link.href = objectUrl
   link.download = filename
+  document.body.appendChild(link)
   link.click()
-  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0)
+  document.body.removeChild(link)
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000)
+}
+
+async function createHtmlArtifact(input: {
+  workspacePath: string
+  title: string
+  filename: string
+  html: string
+}): Promise<Artifact> {
+  const token = platformApi.auth.getToken()
+  const response = await fetch('/api/artifacts', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({
+      workspacePath: input.workspacePath,
+      type: 'document',
+      title: input.title,
+      filename: input.filename,
+      format: 'html',
+      content: input.html,
+      sourceRefs: [{ type: 'document', id: 'current-editor', label: '当前文稿编辑器' }],
+    }),
+  })
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({ error: response.statusText }))
+    const message = (payload as { error?: string; message?: string }).error
+      ?? (payload as { message?: string }).message
+      ?? response.statusText
+    throw new Error(`HTML 导出失败 (${response.status})：${message}`)
+  }
+  const payload = await response.json() as { artifact?: Artifact }
+  if (!payload.artifact?.id) throw new Error('HTML 已生成但缺少下载文件')
+  return payload.artifact
 }
 
 function exportLabel(format: DocumentExportFormat): string {
@@ -178,7 +215,20 @@ export async function exportAndDownloadCurrentDocument(input: {
 
   if (input.format === 'html') {
     const filename = sanitizeDocumentFilename(session.title, 'html')
-    triggerBrowserDownload(filename, input.bodyHtml, 'text/html;charset=utf-8')
+    try {
+      const artifact = await createHtmlArtifact({
+        workspacePath: input.workspacePath,
+        title: session.title || '文稿',
+        filename,
+        html: input.bodyHtml,
+      })
+      await platformApi.artifacts.download(artifact.id, filename)
+    } catch (error) {
+      if (error instanceof Error) {
+        throw error
+      }
+      triggerBrowserDownload(filename, input.bodyHtml, 'text/html;charset=utf-8')
+    }
     return {
       session,
       message: 'HTML 已下载',

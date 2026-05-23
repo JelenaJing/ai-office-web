@@ -11,8 +11,9 @@ import {
   invokeLlmText,
   isLlmConfigured,
   generateDocumentContent,
+  type GeneratedDocxContent,
 } from '../../../modules/ai-gateway'
-import { buildSlidePlanFromPrompt, writePptxFile } from '../../../modules/ppt'
+import { buildSlidePlanFromPrompt, writePptxFile, type GeneratedSlidePlan } from '../../../modules/ppt'
 import { saveSkillArtifact } from '../../../lib/skillArtifact'
 import { parseWorkspacePath, type Artifact, type ArtifactKnowledgeRef, type ArtifactSourceRef } from '../../../artifacts/ArtifactStore'
 import { getMatter, getEvidence } from './matterService'
@@ -62,6 +63,103 @@ function buildKnowledgeRefs(evidence: ReturnType<typeof getEvidence>): ArtifactK
       title: item.title,
       citationStatus: item.knowledgeVerificationStatus ?? 'partial',
     }))
+}
+
+function buildMatterDocumentFallback(input: {
+  title: string
+  goal?: string
+  evidenceSummary: string
+}): GeneratedDocxContent {
+  return {
+    title: input.title || '事项处理文稿',
+    sections: [
+      {
+        heading: '事项背景',
+        paragraphs: [
+          `本事项围绕「${input.title}」展开，目标是${input.goal || '明确处理目标、梳理相关材料并形成可执行输出'}。`,
+        ],
+      },
+      {
+        heading: '相关材料',
+        paragraphs: [
+          input.evidenceSummary || '当前暂无外部证据材料，后续可继续补充邮件、附件、知识库记录或人工说明。',
+        ],
+      },
+      {
+        heading: '处理建议',
+        paragraphs: [
+          '建议先确认事项边界与责任人，再按材料收集、方案整理、输出确认的顺序推进，避免遗漏关键依据。',
+        ],
+      },
+      {
+        heading: '后续安排',
+        paragraphs: [
+          '下一步可根据该 Matter 继续生成 PPT、回复草稿或决策包，并在 Artifact 中保留来源关系以便追溯。',
+        ],
+      },
+    ],
+  }
+}
+
+async function generateMatterDocumentContent(input: {
+  title: string
+  goal?: string
+  prompt: string
+  evidenceSummary: string
+}): Promise<GeneratedDocxContent> {
+  let timeout: NodeJS.Timeout | undefined
+  const fallback = buildMatterDocumentFallback(input)
+  try {
+    return await Promise.race([
+      generateDocumentContent({ title: input.title, prompt: input.prompt }),
+      new Promise<GeneratedDocxContent>((resolve) => {
+        timeout = setTimeout(() => {
+          console.warn('[aios] Matter document generation timed out; using deterministic fallback')
+          resolve(fallback)
+        }, Number(process.env.AIOS_MATTER_DOCUMENT_TIMEOUT_MS ?? 20_000))
+      }),
+    ])
+  } finally {
+    if (timeout) clearTimeout(timeout)
+  }
+}
+
+function buildMatterPptFallback(input: {
+  title: string
+  prompt: string
+}): GeneratedSlidePlan {
+  return {
+    title: input.title || 'Matter 汇报',
+    slides: [
+      { type: 'cover', title: input.title || 'Matter 汇报', subtitle: 'AIOS Matter 自动生成' },
+      { type: 'toc', title: '目录', items: ['事项背景', '材料依据', '处理建议', '后续安排'] },
+      { type: 'content', title: '事项背景', items: ['围绕当前 Matter 目标整理汇报内容。', input.prompt.slice(0, 120)] },
+      { type: 'content', title: '材料依据', items: ['已关联的邮件、附件、知识库或人工材料将作为来源关系保留。'] },
+      { type: 'content', title: '处理建议', items: ['明确责任人和时间节点。', '持续补充证据材料。', '输出文稿、PPT 或回复草稿。'] },
+      { type: 'summary', title: '后续安排', items: ['继续完善 Matter 决策包并跟踪处理结果。'] },
+    ],
+  }
+}
+
+async function buildMatterSlidePlan(input: {
+  title: string
+  prompt: string
+}): Promise<GeneratedSlidePlan> {
+  let timeout: NodeJS.Timeout | undefined
+  const fallback = buildMatterPptFallback(input)
+  try {
+    return await Promise.race([
+      buildSlidePlanFromPrompt(input.title, input.prompt),
+      new Promise<GeneratedSlidePlan>((resolve) => {
+        timeout = setTimeout(() => {
+          console.warn('[aios] Matter PPT plan generation timed out; using deterministic fallback')
+          resolve(fallback)
+        }, Number(process.env.AIOS_MATTER_PPT_TIMEOUT_MS ?? 18_000))
+      }),
+    ])
+  } finally {
+    if (timeout) clearTimeout(timeout)
+  }
 }
 
 // ── Reply Draft ───────────────────────────────────────────────────────────────
@@ -140,7 +238,12 @@ export async function generateDocumentArtifact(
     `事项：${matter.title}\n目标：${matter.goal || '（未填写）'}\n\n` +
     `相关材料：\n${evidenceSummary || '（暂无证据材料）'}`
 
-  const content = await generateDocumentContent({ title: matter.title, prompt })
+  const content = await generateMatterDocumentContent({
+    title: matter.title,
+    goal: matter.goal,
+    prompt,
+    evidenceSummary,
+  })
 
   let markdown = `# ${content.title}\n\n`
   for (const section of content.sections) {
@@ -190,7 +293,7 @@ export async function generatePptArtifact(
     `事项：${matter.title}\n目标：${matter.goal || '（未填写）'}\n\n` +
     `相关材料：\n${evidenceSummary || '（暂无）'}`
 
-  const plan = await buildSlidePlanFromPrompt(matter.title, prompt)
+  const plan = await buildMatterSlidePlan({ title: matter.title, prompt })
 
   const safeName = matter.title.replace(/[^\w\u4e00-\u9fa5\-]+/g, '_').slice(0, 60) || 'presentation'
   const filename = `${safeName}.pptx`

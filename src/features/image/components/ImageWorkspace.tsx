@@ -90,6 +90,14 @@ function sanitizeFileName(value: string): string {
   return String(value || '').replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '') || `image_${Date.now()}`
 }
 
+function imageGenerationErrorMessage(raw: string): string {
+  const message = String(raw || '').trim() || '图片生成失败'
+  if (/404|未配置|不可用|IMAGE_API_KEY|OPENAI_API_KEY|provider|Provider|not\s*found/i.test(message)) {
+    return `图片服务未配置或不可用：${message}`
+  }
+  return `图片生成失败：${message}`
+}
+
 function joinPath(basePath: string, relativePath: string): string {
   const base = String(basePath || '').replace(/[\\/]+$/, '')
   const relative = String(relativePath || '').replace(/^[\\/]+/, '')
@@ -250,6 +258,7 @@ const ImageWorkspace: React.FC<{ initialPrompt?: string }> = ({ initialPrompt })
 
     setGenerating(true)
     setPreviewUrl('')
+    setWorkspaceStatus('正在生成图片，请稍候...')
     workbench.setModeSession('image', (session) => ({
       ...session,
       generationPrompt: normalizedPrompt,
@@ -299,6 +308,7 @@ const ImageWorkspace: React.FC<{ initialPrompt?: string }> = ({ initialPrompt })
         },
         onStatus: (message) => {
           setStatusMessage(message)
+          setWorkspaceStatus(message)
           workbench.setModeSession('image', (session) => ({
             ...session,
             generationStatus: {
@@ -341,8 +351,9 @@ const ImageWorkspace: React.FC<{ initialPrompt?: string }> = ({ initialPrompt })
           lastUpdatedAt: new Date().toISOString(),
         }))
         setStatusMessage(references.length > 0 ? `图片生成完成，参考链路：${roleSummary.join(' / ')}` : '图片生成完成')
+        setWorkspaceStatus('图片生成完成')
       } else {
-        const errorMessage = result.error || '图片生成失败'
+        const errorMessage = imageGenerationErrorMessage(result.error || '图片生成失败')
         workbench.setModeSession('image', (session) => ({
           ...session,
           generationStatus: {
@@ -352,10 +363,11 @@ const ImageWorkspace: React.FC<{ initialPrompt?: string }> = ({ initialPrompt })
           },
           lastUpdatedAt: new Date().toISOString(),
         }))
-        setStatusMessage(`图片生成失败: ${errorMessage}`)
+        setStatusMessage(errorMessage)
+        setWorkspaceStatus(errorMessage)
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = imageGenerationErrorMessage(error instanceof Error ? error.message : String(error))
       workbench.setModeSession('image', (session) => ({
         ...session,
         generationStatus: {
@@ -366,6 +378,7 @@ const ImageWorkspace: React.FC<{ initialPrompt?: string }> = ({ initialPrompt })
         lastUpdatedAt: new Date().toISOString(),
       }))
       setStatusMessage(message)
+      setWorkspaceStatus(message)
     } finally {
       setGenerating(false)
     }
@@ -638,6 +651,7 @@ const ImageWorkspace: React.FC<{ initialPrompt?: string }> = ({ initialPrompt })
               {history.map((img, index) => <HistoryItem key={index} onClick={() => { setPreviewUrl(img.url); setPreviewFilename(img.filename) }}><img src={img.url} alt={img.prompt.slice(0, 20)} /><div className="prompt">{img.prompt}</div></HistoryItem>)}
             </>
           )}
+          {workspaceStatus && <StatusBox $error={/失败|错误|无法|不可用|未配置/.test(workspaceStatus)}>{workspaceStatus}</StatusBox>}
         </>
       ) : (
         <>

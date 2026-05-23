@@ -1,6 +1,6 @@
 {
-  "startedAt": "2026-05-22T17:43:59.092Z",
-  "finishedAt": "2026-05-22T17:47:12.140Z",
+  "startedAt": "2026-05-23T07:04:56.321Z",
+  "finishedAt": "2026-05-23T07:09:29.829Z",
   "baseUrl": "http://127.0.0.1:3001",
   "modules": [
     "document",
@@ -27,7 +27,7 @@
       "expected": "HTTP 2xx and token",
       "actual": "HTTP 200 with token",
       "status": "passed",
-      "durationMs": 416
+      "durationMs": 536
     },
     {
       "module": "document",
@@ -43,13 +43,13 @@
       "expected": "normal document returns html/session or artifact",
       "actual": "HTTP 200",
       "status": "passed",
-      "durationMs": 4129
+      "durationMs": 10049
     },
     {
       "module": "document",
       "endpoint": "POST /api/document/paper-workflow/start (academic_paper)",
       "expected": "taskId returned",
-      "actual": "HTTP 200 taskId=9510b503-5561-4e30-ad1e-603cfa29461e",
+      "actual": "HTTP 200 taskId=d3f61767-ac0f-4b0b-8138-6bd65b89047c",
       "status": "passed",
       "durationMs": 0
     },
@@ -57,7 +57,7 @@
       "module": "document",
       "endpoint": "GET /api/document/paper-workflow/tasks/:taskId (academic_paper)",
       "expected": "completed structured paper result with artifactId/sourceRefs/exportRefs",
-      "actual": "status=completed paperType=research chain=paper-workflow-web-adapter artifactId=paper-mph7ll56",
+      "actual": "status=completed paperType=research chain=paper-workflow-web-adapter artifactId=paper-mpi082xe",
       "status": "passed",
       "durationMs": 0
     },
@@ -65,7 +65,7 @@
       "module": "document",
       "endpoint": "POST /api/document/paper-workflow/start (literature_review)",
       "expected": "taskId returned",
-      "actual": "HTTP 200 taskId=61a011e5-b2a6-4e68-a118-d481f54517c9",
+      "actual": "HTTP 200 taskId=41602edf-3380-4576-b953-1c10276e4600",
       "status": "passed",
       "durationMs": 0
     },
@@ -73,7 +73,7 @@
       "module": "document",
       "endpoint": "GET /api/document/paper-workflow/tasks/:taskId (literature_review)",
       "expected": "completed structured paper result with artifactId/sourceRefs/exportRefs",
-      "actual": "status=completed paperType=review chain=paper-workflow-web-adapter artifactId=paper-mph7lrw8",
+      "actual": "status=completed paperType=review chain=paper-workflow-web-adapter artifactId=paper-mpi08muc",
       "status": "passed",
       "durationMs": 0
     },
@@ -89,7 +89,7 @@
       "module": "document",
       "endpoint": "POST /api/document/formal-template/start",
       "expected": "taskId returned",
-      "actual": "HTTP 200 taskId=410d5734-ae90-4fe7-977f-f7ac5b64e84c",
+      "actual": "HTTP 200 taskId=45244160-434e-4821-b97f-a1f468f5f29e",
       "status": "passed",
       "durationMs": 0
     },
@@ -97,7 +97,7 @@
       "module": "document",
       "endpoint": "GET /api/document/formal-template/tasks/:taskId",
       "expected": "completed formal template with analyze/confirm/preview/commit and artifact metadata",
-      "actual": "status=completed phases=analyze,confirm,preview,commit,completed artifactId=formal-template-mph7m1xs",
+      "actual": "status=completed phases=analyze,confirm,preview,commit,completed artifactId=formal-template-mpi0956n",
       "status": "passed",
       "durationMs": 0
     },
@@ -107,7 +107,7 @@
       "expected": "Word export returns docx artifact",
       "actual": "HTTP 200",
       "status": "passed",
-      "durationMs": 38
+      "durationMs": 55
     },
     {
       "module": "document",
@@ -130,7 +130,7 @@
       "module": "ppt",
       "endpoint": "POST /api/ppt/decks/start (topic)",
       "expected": "taskId returned",
-      "actual": "HTTP 200 taskId=69b05063-0815-43a4-af8b-ec158fedd287",
+      "actual": "HTTP 200 taskId=3cf88fce-e316-4ec3-9911-207d8b068be5",
       "status": "passed",
       "durationMs": 0
     },
@@ -138,39 +138,39 @@
       "module": "ppt",
       "endpoint": "GET /api/ppt/decks/tasks/:taskId (topic)",
       "expected": "completed task with deckId and artifact relationship",
-      "actual": "status=completed deckId=ed037e4e-49ff-47a3-a94a-1bee56f8d521 artifact=08b506dc-8da9-4f74-8e97-b95dbf04df24",
+      "actual": "status=completed deckId=567b883f-84b7-4ff5-82c7-75aaa069bfcd artifact=6a27942b-7e9b-4013-a842-8bae6ddac02d",
       "status": "passed",
       "durationMs": 0
     },
     {
       "module": "ppt",
-      "endpoint": "GET /api/ppt/decks/ed037e4e-49ff-47a3-a94a-1bee56f8d521",
+      "endpoint": "GET /api/ppt/decks/567b883f-84b7-4ff5-82c7-75aaa069bfcd",
       "expected": "DeckDocument has slides, template manifest, slide diagnostics",
-      "actual": "HTTP 200 slides=6",
+      "actual": "HTTP 200 slides=7",
       "status": "passed",
-      "durationMs": 6
+      "durationMs": 7
     },
     {
       "module": "ppt",
-      "endpoint": "GET /api/ppt/decks/ed037e4e-49ff-47a3-a94a-1bee56f8d521/download",
+      "endpoint": "GET /api/ppt/decks/567b883f-84b7-4ff5-82c7-75aaa069bfcd/download",
       "expected": "download returns PPTX artifact/file",
-      "actual": "HTTP 200 bytes=76264",
+      "actual": "HTTP 200 bytes=78195",
       "status": "passed",
-      "durationMs": 46
+      "durationMs": 57
     },
     {
       "module": "ppt",
-      "endpoint": "POST /api/ppt/decks/ed037e4e-49ff-47a3-a94a-1bee56f8d521/retemplate",
+      "endpoint": "POST /api/ppt/decks/567b883f-84b7-4ff5-82c7-75aaa069bfcd/retemplate",
       "expected": "retemplate preview is zero-token",
       "actual": "HTTP 200 tokenUsed=false",
       "status": "passed",
-      "durationMs": 6
+      "durationMs": 9
     },
     {
       "module": "ppt",
       "endpoint": "POST /api/aios/matters",
       "expected": "matter fixture created for Matter -> PPT",
-      "actual": "HTTP 201 matterId=56743ef5-dd2e-46f4-830e-1418bc04ca32",
+      "actual": "HTTP 201 matterId=29f6d6ec-b3bf-4e87-92f8-d34c77839357",
       "status": "passed",
       "durationMs": 0
     },
@@ -178,7 +178,7 @@
       "module": "ppt",
       "endpoint": "POST /api/ppt/decks/start (matter)",
       "expected": "taskId returned",
-      "actual": "HTTP 200 taskId=9692eb75-06bf-452e-afad-3eb0a8d2e157",
+      "actual": "HTTP 200 taskId=c76712ce-66c1-4b8d-8bcd-b2bd6094715a",
       "status": "passed",
       "durationMs": 0
     },
@@ -186,7 +186,7 @@
       "module": "ppt",
       "endpoint": "GET /api/ppt/decks/tasks/:taskId (matter)",
       "expected": "completed task with deckId and artifact relationship",
-      "actual": "status=completed deckId=5e5a1209-f0ae-45db-9004-4d90b798d06e artifact=59d763d5-f0f3-41c5-8c7b-c01b0ad89bfa",
+      "actual": "status=completed deckId=98fd92bb-81c6-4f22-a8e2-e9fdf539f719 artifact=3754f794-431c-43c8-b2a0-54384675c157",
       "status": "passed",
       "durationMs": 0
     },
@@ -220,15 +220,15 @@
       "expected": "dry-run recipient resolver returns salutations without sending",
       "actual": "HTTP 200 recipients=2",
       "status": "passed",
-      "durationMs": 14
+      "durationMs": 16
     },
     {
       "module": "email",
       "endpoint": "POST /api/email/drafts/artifact",
       "expected": "reply draft is saved as email_draft Artifact",
-      "actual": "HTTP 200 artifact=0646b9a0-baec-4888-9826-762b50401001",
+      "actual": "HTTP 200 artifact=653309d5-1e76-4ab2-b96a-89370f753d42",
       "status": "passed",
-      "durationMs": 15
+      "durationMs": 18
     },
     {
       "module": "email",
@@ -236,31 +236,31 @@
       "expected": "attachment payload is saved as Artifact with email relationship",
       "actual": "HTTP 200 artifacts=1",
       "status": "passed",
-      "durationMs": 13
+      "durationMs": 14
     },
     {
       "module": "email",
       "endpoint": "POST /api/aios/matters/from-email",
       "expected": "email converts to Matter",
-      "actual": "HTTP 201 matterId=a461f92a-8845-4184-9323-5bff98dc91db",
+      "actual": "HTTP 201 matterId=f8a57f4f-2a5b-4911-a662-9b33959cf973",
       "status": "passed",
       "durationMs": 0
     },
     {
       "module": "email",
-      "endpoint": "POST /api/aios/matters/a461f92a-8845-4184-9323-5bff98dc91db/generate-document",
+      "endpoint": "POST /api/aios/matters/f8a57f4f-2a5b-4911-a662-9b33959cf973/generate-document",
       "expected": "mail Matter can generate document Artifact",
-      "actual": "HTTP 200 artifact=708e60bf-cc40-42b1-8dcd-b1f89eab8f25",
+      "actual": "HTTP 200 artifact=fa2878b2-41ef-4034-b1c3-a16671e3ad31",
       "status": "passed",
-      "durationMs": 11381
+      "durationMs": 18405
     },
     {
       "module": "email",
-      "endpoint": "POST /api/aios/matters/a461f92a-8845-4184-9323-5bff98dc91db/generate-ppt",
+      "endpoint": "POST /api/aios/matters/f8a57f4f-2a5b-4911-a662-9b33959cf973/generate-ppt",
       "expected": "mail Matter can generate PPT Artifact",
-      "actual": "HTTP 200 artifact=8f4b814e-9893-4cc2-a620-3a4eb15fcfd9",
+      "actual": "HTTP 200 artifact=7b69c841-38b9-4335-8779-5d8f3a890ea8",
       "status": "passed",
-      "durationMs": 16988
+      "durationMs": 18065
     },
     {
       "module": "email",
@@ -274,7 +274,7 @@
       "module": "email",
       "endpoint": "POST /api/email/triage/start",
       "expected": "triage task starts for unread-only messages",
-      "actual": "HTTP 200 taskId=c5b3e7d4-a0d8-43d4-97d6-321c55d43842",
+      "actual": "HTTP 200 taskId=19cdf25b-b07a-4bbf-82e5-204e0ce80df8",
       "status": "passed",
       "durationMs": 0
     },
@@ -282,7 +282,7 @@
       "module": "email",
       "endpoint": "GET /api/email/triage/tasks/:taskId",
       "expected": "completed triage with categories, summaries, priorities, draft relationships, unread guard, and cache key",
-      "actual": "status=completed results=10 cacheKey=email-triage:1779471982888",
+      "actual": "status=completed results=10 cacheKey=email-triage:1779520097129",
       "status": "passed",
       "durationMs": 0
     },
@@ -290,9 +290,9 @@
       "module": "email",
       "endpoint": "POST /api/email/messages/828/attachments/0/artifact",
       "expected": "real email attachment converts to Artifact",
-      "actual": "HTTP 200 artifact=496a7323-9f75-43a6-99d5-f12e72a6a954",
+      "actual": "HTTP 200 artifact=22b06e9b-5065-44bd-a8d8-d6f08e844055",
       "status": "passed",
-      "durationMs": 725
+      "durationMs": 737
     },
     {
       "module": "artifact-knowledge",
@@ -306,21 +306,21 @@
       "module": "artifact-knowledge",
       "endpoint": "POST /api/artifacts",
       "expected": "document artifact created with source/knowledge/matter/email/deck/document refs",
-      "actual": "HTTP 201 artifact=d6008121-693c-4554-99f2-c09095a5fc37",
+      "actual": "HTTP 201 artifact=c221e0c7-d492-41ff-b184-440275b16207",
       "status": "passed",
       "durationMs": 0
     },
     {
       "module": "artifact-knowledge",
-      "endpoint": "GET /api/artifacts/d6008121-693c-4554-99f2-c09095a5fc37",
+      "endpoint": "GET /api/artifacts/c221e0c7-d492-41ff-b184-440275b16207",
       "expected": "artifact detail includes relationship metadata",
-      "actual": "HTTP 200 artifact=d6008121-693c-4554-99f2-c09095a5fc37",
+      "actual": "HTTP 200 artifact=c221e0c7-d492-41ff-b184-440275b16207",
       "status": "passed",
-      "durationMs": 18
+      "durationMs": 17
     },
     {
       "module": "artifact-knowledge",
-      "endpoint": "GET /api/artifacts/d6008121-693c-4554-99f2-c09095a5fc37/relationships",
+      "endpoint": "GET /api/artifacts/c221e0c7-d492-41ff-b184-440275b16207/relationships",
       "expected": "relationship graph exposes sourceRefs and knowledgeRefs",
       "actual": "HTTP 200 nodes=3",
       "status": "passed",
@@ -328,27 +328,27 @@
     },
     {
       "module": "artifact-knowledge",
-      "endpoint": "GET /api/artifacts/d6008121-693c-4554-99f2-c09095a5fc37/preview",
+      "endpoint": "GET /api/artifacts/c221e0c7-d492-41ff-b184-440275b16207/preview",
       "expected": "markdown preview is available",
       "actual": "HTTP 200 bytes=74",
       "status": "passed",
-      "durationMs": 15
+      "durationMs": 20
     },
     {
       "module": "artifact-knowledge",
-      "endpoint": "PATCH /api/artifacts/d6008121-693c-4554-99f2-c09095a5fc37",
+      "endpoint": "PATCH /api/artifacts/c221e0c7-d492-41ff-b184-440275b16207",
       "expected": "artifact can be renamed",
       "actual": "HTTP 200 title=Artifact Knowledge Smoke Renamed",
       "status": "passed",
-      "durationMs": 14
+      "durationMs": 21
     },
     {
       "module": "artifact-knowledge",
-      "endpoint": "GET /api/artifacts/d6008121-693c-4554-99f2-c09095a5fc37/download",
+      "endpoint": "GET /api/artifacts/c221e0c7-d492-41ff-b184-440275b16207/download",
       "expected": "artifact download returns file",
       "actual": "HTTP 200 bytes=74",
       "status": "passed",
-      "durationMs": 14
+      "durationMs": 18
     },
     {
       "module": "artifact-knowledge",
@@ -356,15 +356,15 @@
       "expected": "knowledge parity status reports partial capability matrix",
       "actual": "HTTP 200 status=partial",
       "status": "passed",
-      "durationMs": 75
+      "durationMs": 63
     },
     {
       "module": "artifact-knowledge",
       "endpoint": "GET /api/knowledge/scientific-papers/documents",
       "expected": "knowledge document list succeeds or reports remote-service partial",
-      "actual": "HTTP 200 documents=52",
+      "actual": "HTTP 200 documents=55",
       "status": "passed",
-      "durationMs": 323
+      "durationMs": 76
     },
     {
       "module": "artifact-knowledge",
@@ -384,11 +384,11 @@
     },
     {
       "module": "artifact-knowledge",
-      "endpoint": "DELETE /api/artifacts/d6008121-693c-4554-99f2-c09095a5fc37",
+      "endpoint": "DELETE /api/artifacts/c221e0c7-d492-41ff-b184-440275b16207",
       "expected": "artifact can be deleted",
       "actual": "HTTP 200",
       "status": "passed",
-      "durationMs": 20
+      "durationMs": 24
     },
     {
       "module": "aios",
@@ -402,7 +402,7 @@
       "module": "aios",
       "endpoint": "POST /api/aios/matters",
       "expected": "Matter created as draft with point_to_many route type",
-      "actual": "HTTP 201 matterId=56a4072e-575d-41bf-9f1d-a9b67b746d7b status=draft",
+      "actual": "HTTP 201 matterId=1d346021-a654-4959-a673-f2bbd98907f5 status=draft",
       "status": "passed",
       "durationMs": 0
     },
@@ -410,117 +410,117 @@
       "module": "aios",
       "endpoint": "POST /api/artifacts (evidence)",
       "expected": "evidence attachment Artifact created",
-      "actual": "HTTP 201 artifact=f4dbdf63-e40f-4092-b363-1f2710ae0719",
+      "actual": "HTTP 201 artifact=5cc049bb-5286-4a9b-aeb5-4b03040db511",
       "status": "passed",
       "durationMs": 0
     },
     {
       "module": "aios",
-      "endpoint": "POST /api/aios/matters/56a4072e-575d-41bf-9f1d-a9b67b746d7b/evidence",
+      "endpoint": "POST /api/aios/matters/1d346021-a654-4959-a673-f2bbd98907f5/evidence",
       "expected": "email evidence added",
-      "actual": "HTTP 201 evidence=dace6996-5ec5-49ab-941f-e7a8c59e910b",
+      "actual": "HTTP 201 evidence=b120c410-886d-445b-814f-d53465970db7",
       "status": "passed",
-      "durationMs": 13
+      "durationMs": 22
     },
     {
       "module": "aios",
-      "endpoint": "POST /api/aios/matters/56a4072e-575d-41bf-9f1d-a9b67b746d7b/evidence",
+      "endpoint": "POST /api/aios/matters/1d346021-a654-4959-a673-f2bbd98907f5/evidence",
       "expected": "attachment evidence links an Artifact",
-      "actual": "HTTP 201 artifactId=f4dbdf63-e40f-4092-b363-1f2710ae0719",
-      "status": "passed",
-      "durationMs": 12
-    },
-    {
-      "module": "aios",
-      "endpoint": "POST /api/aios/matters/56a4072e-575d-41bf-9f1d-a9b67b746d7b/evidence",
-      "expected": "knowledge evidence carries verification status",
-      "actual": "HTTP 201 verification=partial",
-      "status": "passed",
-      "durationMs": 12
-    },
-    {
-      "module": "aios",
-      "endpoint": "GET /api/aios/matters/56a4072e-575d-41bf-9f1d-a9b67b746d7b",
-      "expected": "Matter lifecycle moved to collecting_evidence after evidence",
-      "actual": "HTTP 200 status=collecting_evidence",
-      "status": "passed",
-      "durationMs": 11
-    },
-    {
-      "module": "aios",
-      "endpoint": "POST /api/aios/matters/56a4072e-575d-41bf-9f1d-a9b67b746d7b/decision-package",
-      "expected": "DecisionPackage includes source references and knowledge verification status",
-      "actual": "HTTP 200 refs=3",
-      "status": "passed",
-      "durationMs": 16
-    },
-    {
-      "module": "aios",
-      "endpoint": "GET /api/aios/matters/56a4072e-575d-41bf-9f1d-a9b67b746d7b",
-      "expected": "Matter lifecycle moved to decision_package_ready",
-      "actual": "HTTP 200 status=decision_package_ready",
-      "status": "passed",
-      "durationMs": 14
-    },
-    {
-      "module": "aios",
-      "endpoint": "POST /api/aios/matters/56a4072e-575d-41bf-9f1d-a9b67b746d7b/generate-reply",
-      "expected": "reply draft Artifact generated with matter relationship",
-      "actual": "HTTP 200 artifact=100f54fc-4c01-4ee8-a5b1-4a437462cab6",
-      "status": "passed",
-      "durationMs": 0
-    },
-    {
-      "module": "aios",
-      "endpoint": "GET /api/artifacts/100f54fc-4c01-4ee8-a5b1-4a437462cab6/relationships",
-      "expected": "reply Artifact carries matter/source relationship",
-      "actual": "HTTP 200 matterId=56a4072e-575d-41bf-9f1d-a9b67b746d7b",
+      "actual": "HTTP 201 artifactId=5cc049bb-5286-4a9b-aeb5-4b03040db511",
       "status": "passed",
       "durationMs": 21
     },
     {
       "module": "aios",
-      "endpoint": "POST /api/aios/matters/56a4072e-575d-41bf-9f1d-a9b67b746d7b/generate-document",
+      "endpoint": "POST /api/aios/matters/1d346021-a654-4959-a673-f2bbd98907f5/evidence",
+      "expected": "knowledge evidence carries verification status",
+      "actual": "HTTP 201 verification=partial",
+      "status": "passed",
+      "durationMs": 21
+    },
+    {
+      "module": "aios",
+      "endpoint": "GET /api/aios/matters/1d346021-a654-4959-a673-f2bbd98907f5",
+      "expected": "Matter lifecycle moved to collecting_evidence after evidence",
+      "actual": "HTTP 200 status=collecting_evidence",
+      "status": "passed",
+      "durationMs": 19
+    },
+    {
+      "module": "aios",
+      "endpoint": "POST /api/aios/matters/1d346021-a654-4959-a673-f2bbd98907f5/decision-package",
+      "expected": "DecisionPackage includes source references and knowledge verification status",
+      "actual": "HTTP 200 refs=3",
+      "status": "passed",
+      "durationMs": 26
+    },
+    {
+      "module": "aios",
+      "endpoint": "GET /api/aios/matters/1d346021-a654-4959-a673-f2bbd98907f5",
+      "expected": "Matter lifecycle moved to decision_package_ready",
+      "actual": "HTTP 200 status=decision_package_ready",
+      "status": "passed",
+      "durationMs": 17
+    },
+    {
+      "module": "aios",
+      "endpoint": "POST /api/aios/matters/1d346021-a654-4959-a673-f2bbd98907f5/generate-reply",
+      "expected": "reply draft Artifact generated with matter relationship",
+      "actual": "HTTP 200 artifact=58a5bea4-78a7-42c9-a480-bab138c5a6dd",
+      "status": "passed",
+      "durationMs": 0
+    },
+    {
+      "module": "aios",
+      "endpoint": "GET /api/artifacts/58a5bea4-78a7-42c9-a480-bab138c5a6dd/relationships",
+      "expected": "reply Artifact carries matter/source relationship",
+      "actual": "HTTP 200 matterId=1d346021-a654-4959-a673-f2bbd98907f5",
+      "status": "passed",
+      "durationMs": 19
+    },
+    {
+      "module": "aios",
+      "endpoint": "POST /api/aios/matters/1d346021-a654-4959-a673-f2bbd98907f5/generate-document",
       "expected": "document Artifact generated with matter relationship",
-      "actual": "HTTP 200 artifact=3ef2a26f-e38a-4693-ae0b-557a8b246708",
+      "actual": "HTTP 200 artifact=814a9f4a-1ff6-43dc-9657-be147b4dbe52",
       "status": "passed",
       "durationMs": 0
     },
     {
       "module": "aios",
-      "endpoint": "GET /api/artifacts/3ef2a26f-e38a-4693-ae0b-557a8b246708/relationships",
+      "endpoint": "GET /api/artifacts/814a9f4a-1ff6-43dc-9657-be147b4dbe52/relationships",
       "expected": "document Artifact carries matter/source relationship",
-      "actual": "HTTP 200 matterId=56a4072e-575d-41bf-9f1d-a9b67b746d7b",
+      "actual": "HTTP 200 matterId=1d346021-a654-4959-a673-f2bbd98907f5",
       "status": "passed",
-      "durationMs": 16
+      "durationMs": 36
     },
     {
       "module": "aios",
-      "endpoint": "POST /api/aios/matters/56a4072e-575d-41bf-9f1d-a9b67b746d7b/generate-ppt",
+      "endpoint": "POST /api/aios/matters/1d346021-a654-4959-a673-f2bbd98907f5/generate-ppt",
       "expected": "PPT Artifact generated with matter relationship",
-      "actual": "HTTP 200 artifact=70553893-739c-443f-b21f-4965b0b84fb6",
+      "actual": "HTTP 200 artifact=73995da0-66cf-47f2-a09f-e68f61c5a061",
       "status": "passed",
       "durationMs": 0
     },
     {
       "module": "aios",
-      "endpoint": "GET /api/artifacts/70553893-739c-443f-b21f-4965b0b84fb6/relationships",
+      "endpoint": "GET /api/artifacts/73995da0-66cf-47f2-a09f-e68f61c5a061/relationships",
       "expected": "ppt Artifact carries matter/source relationship",
-      "actual": "HTTP 200 matterId=56a4072e-575d-41bf-9f1d-a9b67b746d7b",
+      "actual": "HTTP 200 matterId=1d346021-a654-4959-a673-f2bbd98907f5",
       "status": "passed",
-      "durationMs": 43
+      "durationMs": 39
     },
     {
       "module": "aios",
-      "endpoint": "GET /api/aios/matters/56a4072e-575d-41bf-9f1d-a9b67b746d7b/audit",
+      "endpoint": "GET /api/aios/matters/1d346021-a654-4959-a673-f2bbd98907f5/audit",
       "expected": "audit contains lifecycle and generation events",
       "actual": "HTTP 200 events=10",
       "status": "passed",
-      "durationMs": 18
+      "durationMs": 46
     },
     {
       "module": "aios",
-      "endpoint": "GET /api/aios/matters/56a4072e-575d-41bf-9f1d-a9b67b746d7b/audit/replay",
+      "endpoint": "GET /api/aios/matters/1d346021-a654-4959-a673-f2bbd98907f5/audit/replay",
       "expected": "audit replay returns full events",
       "actual": "HTTP 200 replay=10",
       "status": "passed",
@@ -528,11 +528,11 @@
     },
     {
       "module": "aios",
-      "endpoint": "PATCH /api/aios/matters/56a4072e-575d-41bf-9f1d-a9b67b746d7b",
+      "endpoint": "PATCH /api/aios/matters/1d346021-a654-4959-a673-f2bbd98907f5",
       "expected": "Matter lifecycle can complete",
       "actual": "HTTP 200 status=completed",
       "status": "passed",
-      "durationMs": 20
+      "durationMs": 19
     },
     {
       "module": "image",
@@ -546,7 +546,7 @@
       "module": "image",
       "endpoint": "POST /api/image/jobs/start",
       "expected": "image job starts",
-      "actual": "HTTP 200 jobId=ee98ad88-e2e8-44d4-b061-936c9cc593ac",
+      "actual": "HTTP 200 jobId=3d3c24c3-7fb3-4c4a-a054-7c7183f3d9b5",
       "status": "passed",
       "durationMs": 0
     },
@@ -562,17 +562,17 @@
       "module": "image",
       "endpoint": "POST /api/image/jobs/start (cancel)",
       "expected": "cancel target job starts",
-      "actual": "HTTP 200 jobId=75ec36cf-4169-4c88-ab22-5f8ad699fe13",
+      "actual": "HTTP 200 jobId=f6b49157-b3c8-4e3b-a543-0e806ba63d22",
       "status": "passed",
       "durationMs": 0
     },
     {
       "module": "image",
-      "endpoint": "POST /api/image/jobs/75ec36cf-4169-4c88-ab22-5f8ad699fe13/cancel",
+      "endpoint": "POST /api/image/jobs/f6b49157-b3c8-4e3b-a543-0e806ba63d22/cancel",
       "expected": "image job cancel endpoint returns cancelled",
       "actual": "HTTP 200 status=cancelled",
       "status": "passed",
-      "durationMs": 21
+      "durationMs": 13
     },
     {
       "module": "data-analysis",
@@ -586,7 +586,7 @@
       "module": "data-analysis",
       "endpoint": "POST /api/files/upload",
       "expected": "CSV fixture uploaded",
-      "actual": "HTTP 200 fileId=80eadeae-b1d4-4773-97d2-2ff6924e275b",
+      "actual": "HTTP 200 fileId=90e7ac48-2827-45b6-a7e9-fe629c0258e1",
       "status": "passed",
       "durationMs": 0
     },
@@ -594,7 +594,7 @@
       "module": "data-analysis",
       "endpoint": "POST /api/data-analysis/jobs/start",
       "expected": "analysis job starts",
-      "actual": "HTTP 200 jobId=7c7afc37-51df-4f98-ab01-70a683f5baf3",
+      "actual": "HTTP 200 jobId=c0b83573-9e34-44fc-99d2-f893654a9753",
       "status": "passed",
       "durationMs": 0
     },
@@ -602,13 +602,13 @@
       "module": "data-analysis",
       "endpoint": "GET /api/data-analysis/jobs/:jobId",
       "expected": "analysis job completes with markdown report Artifact",
-      "actual": "status=completed artifact=7b921328-af96-4838-8b5a-bcaeb7d6a8e9",
+      "actual": "status=completed artifact=940b8df9-4f51-4d1b-8b9c-7dc0eda55784",
       "status": "passed",
       "durationMs": 0
     },
     {
       "module": "data-analysis",
-      "endpoint": "GET /api/data-analysis/jobs/7c7afc37-51df-4f98-ab01-70a683f5baf3/artifacts",
+      "endpoint": "GET /api/data-analysis/jobs/c0b83573-9e34-44fc-99d2-f893654a9753/artifacts",
       "expected": "analysis job exposes Artifact list",
       "actual": "HTTP 200 artifacts=1",
       "status": "passed",
@@ -616,17 +616,17 @@
     },
     {
       "module": "data-analysis",
-      "endpoint": "GET /api/artifacts/7b921328-af96-4838-8b5a-bcaeb7d6a8e9/preview",
+      "endpoint": "GET /api/artifacts/940b8df9-4f51-4d1b-8b9c-7dc0eda55784/preview",
       "expected": "markdown analysis preview is readable",
       "actual": "HTTP 200 bytes=614",
       "status": "passed",
-      "durationMs": 20
+      "durationMs": 19
     },
     {
       "module": "data-analysis",
-      "endpoint": "GET /api/artifacts/7b921328-af96-4838-8b5a-bcaeb7d6a8e9/relationships",
+      "endpoint": "GET /api/artifacts/940b8df9-4f51-4d1b-8b9c-7dc0eda55784/relationships",
       "expected": "analysis Artifact carries source file reference",
-      "actual": "HTTP 200 documentId=80eadeae-b1d4-4773-97d2-2ff6924e275b",
+      "actual": "HTTP 200 documentId=90e7ac48-2827-45b6-a7e9-fe629c0258e1",
       "status": "passed",
       "durationMs": 17
     },
@@ -642,7 +642,7 @@
       "module": "report",
       "endpoint": "POST /api/aios/matters",
       "expected": "Matter fixture created for report",
-      "actual": "HTTP 201 matterId=0c6d3687-6527-4a1b-9838-89cf9e1cad9b",
+      "actual": "HTTP 201 matterId=b2eca368-db10-4208-8bd3-9a3c07d44442",
       "status": "passed",
       "durationMs": 0
     },
@@ -650,7 +650,7 @@
       "module": "report",
       "endpoint": "POST /api/artifacts",
       "expected": "Artifact fixture created for report",
-      "actual": "HTTP 201 artifact=65e23748-40a5-4218-a04c-d36d339a0a2d",
+      "actual": "HTTP 201 artifact=e2d04ff2-a257-42c7-a5b1-3081e808b700",
       "status": "passed",
       "durationMs": 0
     },
@@ -658,41 +658,41 @@
       "module": "report",
       "endpoint": "POST /api/work-report/events",
       "expected": "work report event recorded: matter",
-      "actual": "HTTP 200 event=f48122fb-0275-4222-8b3c-966e173881c4",
-      "status": "passed",
-      "durationMs": 10
-    },
-    {
-      "module": "report",
-      "endpoint": "POST /api/work-report/events",
-      "expected": "work report event recorded: artifact",
-      "actual": "HTTP 200 event=01727af7-f0a9-404d-a35b-8ae65c0899f1",
-      "status": "passed",
-      "durationMs": 9
-    },
-    {
-      "module": "report",
-      "endpoint": "POST /api/work-report/events",
-      "expected": "work report event recorded: email",
-      "actual": "HTTP 200 event=6ce86cab-b0cd-45be-8c44-4de01a34c024",
-      "status": "passed",
-      "durationMs": 11
-    },
-    {
-      "module": "report",
-      "endpoint": "GET /api/work-report/daily?date=2026-05-22&workspacePath=web-workspace%3A7b33dbd9-1a28-48e4-b2a3-226e3b0f6494%3A32425493-bbc7-481e-8c25-92ff13fbc626",
-      "expected": "daily report includes Matter/Artifact/email events and emits Artifact",
-      "actual": "HTTP 200 artifact=490e6a61-6775-4dd7-b35e-c5d3f53e9c69 events=3",
+      "actual": "HTTP 200 event=67d7a53a-afb1-4ff4-b499-13eb5df147c3",
       "status": "passed",
       "durationMs": 18
     },
     {
       "module": "report",
-      "endpoint": "GET /api/work-report/summary?date=2026-05-22",
+      "endpoint": "POST /api/work-report/events",
+      "expected": "work report event recorded: artifact",
+      "actual": "HTTP 200 event=79c36ef8-c4d0-49ad-b31a-9f506ab4a0b7",
+      "status": "passed",
+      "durationMs": 17
+    },
+    {
+      "module": "report",
+      "endpoint": "POST /api/work-report/events",
+      "expected": "work report event recorded: email",
+      "actual": "HTTP 200 event=0dc0b08b-47c0-453f-8e00-b7b05c997be8",
+      "status": "passed",
+      "durationMs": 18
+    },
+    {
+      "module": "report",
+      "endpoint": "GET /api/work-report/daily?date=2026-05-23&workspacePath=web-workspace%3A7b33dbd9-1a28-48e4-b2a3-226e3b0f6494%3A32425493-bbc7-481e-8c25-92ff13fbc626",
+      "expected": "daily report includes Matter/Artifact/email events and emits Artifact",
+      "actual": "HTTP 200 artifact=aa54492c-62fa-46a8-babc-0cc08f05c958 events=3",
+      "status": "passed",
+      "durationMs": 42
+    },
+    {
+      "module": "report",
+      "endpoint": "GET /api/work-report/summary?date=2026-05-23",
       "expected": "summary aggregates modules",
       "actual": "HTTP 200 eventCount=3",
       "status": "passed",
-      "durationMs": 12
+      "durationMs": 18
     },
     {
       "module": "report",
@@ -700,7 +700,7 @@
       "expected": "subordinates endpoint returns partial when hierarchy is unavailable",
       "actual": "HTTP 200 subordinates=0",
       "status": "passed",
-      "durationMs": 12
+      "durationMs": 16
     },
     {
       "module": "communication",
@@ -722,17 +722,17 @@
       "module": "communication",
       "endpoint": "POST /api/chat/rooms/web-internal-general/messages",
       "expected": "send chat message",
-      "actual": "HTTP 200 message=25d20cd2-4a2c-450a-8ca8-08a28640531f",
+      "actual": "HTTP 200 message=53e8eaa0-fda3-4fac-a6be-e3f489a798e0",
       "status": "passed",
-      "durationMs": 13
+      "durationMs": 18
     },
     {
       "module": "communication",
       "endpoint": "GET /api/chat/rooms/web-internal-general/messages",
       "expected": "list chat messages includes smoke message",
-      "actual": "HTTP 200 messages=2",
+      "actual": "HTTP 200 messages=1",
       "status": "passed",
-      "durationMs": 13
+      "durationMs": 16
     },
     {
       "module": "communication",
@@ -740,15 +740,15 @@
       "expected": "directory endpoint returns partial provider status",
       "actual": "HTTP 200 people=1",
       "status": "passed",
-      "durationMs": 13
+      "durationMs": 16
     },
     {
       "module": "communication",
       "endpoint": "POST /api/chat/rooms/web-internal-general/matter",
       "expected": "chat-to-Matter creates real Matter with evidence",
-      "actual": "HTTP 201 matter=d3d3f57d-0ac1-4570-ad31-5de5d38a4f5e",
+      "actual": "HTTP 201 matter=3d26c03f-a14c-4784-a843-da357d322d81",
       "status": "passed",
-      "durationMs": 17
+      "durationMs": 29
     },
     {
       "module": "skill",
@@ -770,9 +770,9 @@
       "module": "skill",
       "endpoint": "POST /api/skills/web.daily.report/run",
       "expected": "direct skill run returns report Artifact",
-      "actual": "HTTP 200 artifact=169897a6-0179-4ef1-bb9f-0f5060818bc6",
+      "actual": "HTTP 200 artifact=7d142a09-de9f-4281-bc7b-b64d010cae45",
       "status": "passed",
-      "durationMs": 23
+      "durationMs": 37
     },
     {
       "module": "skill",
@@ -780,13 +780,13 @@
       "expected": "skill center status exposes partial AOSKIN gap",
       "actual": "HTTP 200 status=partial",
       "status": "passed",
-      "durationMs": 13
+      "durationMs": 18
     },
     {
       "module": "skill",
       "endpoint": "POST /api/skill-center/jobs/start",
       "expected": "async skill-center job starts",
-      "actual": "HTTP 200 jobId=bad0360a-b51e-4e15-a494-35eaa688bdb2",
+      "actual": "HTTP 200 jobId=4962b110-2e75-4b89-85c2-866c78ad1985",
       "status": "passed",
       "durationMs": 0
     },
@@ -794,7 +794,7 @@
       "module": "skill",
       "endpoint": "GET /api/skill-center/jobs/:jobId",
       "expected": "async skill-center job completes with Artifact or no-artifact reason",
-      "actual": "status=completed artifact=754aa835-e4aa-4ab1-92d3-4c0e988e07e0",
+      "actual": "status=completed artifact=7ba36f2c-9850-45f4-8b54-1e2005d07260",
       "status": "passed",
       "durationMs": 0
     },
@@ -804,7 +804,7 @@
       "expected": "auth/me returns current user without exposing secrets",
       "actual": "HTTP 200",
       "status": "passed",
-      "durationMs": 19
+      "durationMs": 16
     },
     {
       "module": "settings",
@@ -820,7 +820,7 @@
       "expected": "AI connection test succeeds or returns explicit provider failure without key leak",
       "actual": "HTTP 200 ok=true",
       "status": "passed",
-      "durationMs": 649
+      "durationMs": 939
     },
     {
       "module": "settings",
@@ -828,7 +828,7 @@
       "expected": "settings parity status returns partial gaps without key leak",
       "actual": "HTTP 200 status=partial",
       "status": "passed",
-      "durationMs": 17
+      "durationMs": 18
     }
   ]
 }

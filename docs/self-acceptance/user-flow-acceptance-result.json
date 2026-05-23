@@ -1,0 +1,165 @@
+{
+  "generatedAt": "2026-05-23T07:14:01.672Z",
+  "baseURL": "http://10.20.5.61:5173/index.web.html",
+  "login": {
+    "usernameLogin": {
+      "status": "passed",
+      "details": "username credential reached the Web workbench"
+    },
+    "tokenPersisted": {
+      "status": "passed",
+      "details": "aios_auth_token persisted after username login"
+    },
+    "authMe": {
+      "status": "passed",
+      "details": "/api/auth/me returned 200 after username login"
+    },
+    "emailLogin": {
+      "status": "passed",
+      "details": "email credential reached the Web workbench"
+    }
+  },
+  "document": {
+    "generalGenerate": {
+      "status": "passed",
+      "details": "generated 1197 chars in A4 editor"
+    },
+    "downloadWord": {
+      "status": "passed",
+      "details": "未命名文稿.docx, 11227 bytes"
+    },
+    "downloadMarkdown": {
+      "status": "passed",
+      "details": "未命名文稿.md, 3531 bytes"
+    },
+    "downloadHtml": {
+      "status": "passed",
+      "details": "未命名文稿.html, 3602 bytes"
+    },
+    "paperWorkflow": {
+      "status": "passed",
+      "details": "paper workflow produced paper-mpi0g195 and Word artifact fb45695f-6652-4949-aa61-e8b3e4c3993d; ordinary generate API not used by this flow"
+    },
+    "reviewWorkflow": {
+      "status": "passed",
+      "details": "review workflow produced paper-mpi0gvsv and Word artifact f84e62d5-737b-47a0-9459-c12ca6bdbfe7; ordinary generate API not used by this flow"
+    },
+    "formalTemplateWorkflow": {
+      "status": "passed",
+      "details": "formal-template produced formal-template-mpi0hdmw and Word artifact e93a6e8e-75f1-4d9e-ab5a-1b60eb207544 with phases analyze, confirm, preview, commit, completed"
+    }
+  },
+  "ppt": {
+    "generate": {
+      "status": "passed",
+      "details": "deckId=d0d12a7f-ac3b-42ea-842d-cbbc90f4ba26, slides=2, artifact=dfcebd5e-6e7c-4d54-b8da-24ed2ed14e8b"
+    },
+    "download": {
+      "status": "passed",
+      "details": "50397 bytes"
+    },
+    "retemplateZeroToken": {
+      "status": "passed",
+      "details": "templateId=web-default-alt, tokenUsed=false, slides preserved=2"
+    }
+  },
+  "image": {
+    "generateOrExplicitPartial": {
+      "status": "skipped",
+      "details": "provider unavailable was shown explicitly in UI"
+    },
+    "providerConfig": {
+      "status": "partial",
+      "details": "IMAGE_PROVIDER / IMAGE_API_BASE_URL / IMAGE_API_KEY or model returned unavailable/404; no fake success shown"
+    }
+  },
+  "email": {
+    "accounts": {
+      "status": "passed",
+      "details": "email account is configured"
+    },
+    "replyDraft": {
+      "status": "passed",
+      "details": "reply draft artifact 14fa5993-5b38-4c68-b108-fd6fc21d1651"
+    },
+    "attachmentArtifact": {
+      "status": "passed",
+      "details": "attachment artifact eb342f5c-6ca4-4dcb-ae2e-a3d7d08d86ba"
+    },
+    "inbox": {
+      "status": "passed",
+      "details": "messages=30"
+    },
+    "unreadTriage": {
+      "status": "passed",
+      "details": "triaged 10 unread messages with category/summary/priority"
+    },
+    "emailToMatter": {
+      "status": "passed",
+      "details": "matter 6338359b-a240-43c3-8b3b-e4ff5673d33b"
+    },
+    "matterGenerateOutputs": {
+      "status": "passed",
+      "details": "Matter generated document/PPT/reply artifacts"
+    }
+  },
+  "report": {
+    "eventsWritten": {
+      "status": "passed",
+      "details": "4 events written"
+    },
+    "dailyGenerated": {
+      "status": "passed",
+      "details": "artifact 3295dab0-f44c-42a7-b181-c817cae464a1"
+    },
+    "containsCoreModules": {
+      "status": "passed",
+      "details": "ppt, aios, email, document, resource-center"
+    },
+    "reportArtifact": {
+      "status": "passed",
+      "details": "report artifact 3295dab0-f44c-42a7-b181-c817cae464a1"
+    }
+  },
+  "artifact": {
+    "typeCoverage": {
+      "status": "partial",
+      "details": "types=document, presentation, email_draft, report, decision_package; image is provider-dependent partial"
+    },
+    "preview": {
+      "status": "passed",
+      "details": "preview 8115cb91-12f7-45a4-aec6-9e860c928226"
+    },
+    "download": {
+      "status": "passed",
+      "details": "46 bytes"
+    },
+    "rename": {
+      "status": "passed",
+      "details": "renamed 8115cb91-12f7-45a4-aec6-9e860c928226"
+    },
+    "relationships": {
+      "status": "passed",
+      "details": "sourceRefs=1, knowledgeRefs=1"
+    },
+    "delete": {
+      "status": "passed",
+      "details": "deleted 52152a32-0b59-4741-9ee7-f2a7823d65d5"
+    }
+  },
+  "conclusion": {
+    "demoReady": [
+      "login",
+      "document",
+      "ppt",
+      "email",
+      "report"
+    ],
+    "notDemoReady": [
+      "image.providerConfig: IMAGE_PROVIDER / IMAGE_API_BASE_URL / IMAGE_API_KEY or model returned unavailable/404; no fake success shown",
+      "artifact.typeCoverage: types=document, presentation, email_draft, report, decision_package; image is provider-dependent partial"
+    ],
+    "mustFixNext": [],
+    "recommendRealUserTest": true
+  }
+}

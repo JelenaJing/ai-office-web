@@ -405,6 +405,11 @@ export function AICommandBox({
     }
   }, [editorState.hasSelection, editorState.isBodyEmpty])
 
+  const selectedFormalTemplatePreset = useMemo(
+    () => formalTemplatePresets.find((preset) => preset.id === formalTemplatePresetId) ?? null,
+    [formalTemplatePresetId, formalTemplatePresets],
+  )
+
   const setInfo = useCallback((message: string, tone: ResultTone = 'info') => {
     setResultMsg(message)
     setResultTone(tone)
@@ -812,10 +817,6 @@ export function AICommandBox({
   // Derive workflow-specific quick actions
   const workflowActions = useMemo(() => getWorkflowQuickActions(workflowId), [workflowId])
   const currentWorkflow = useMemo(() => getWorkflow(workflowId), [workflowId])
-  const selectedFormalTemplatePreset = useMemo(
-    () => formalTemplatePresets.find((preset) => preset.id === formalTemplatePresetId) ?? null,
-    [formalTemplatePresetId, formalTemplatePresets],
-  )
   const supportedFormalTemplatePresets = useMemo(
     () => formalTemplatePresets.filter((preset) => preset.supported),
     [formalTemplatePresets],

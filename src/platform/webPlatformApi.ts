@@ -95,7 +95,7 @@ async function downloadBlob(url: string, filename: string): Promise<void> {
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
-  URL.revokeObjectURL(objectUrl)
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000)
 }
 
 // ── Web PlatformApi implementation ────────────────────────────────────────────
