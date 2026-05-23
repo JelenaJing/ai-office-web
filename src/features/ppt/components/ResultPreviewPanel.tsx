@@ -34,6 +34,7 @@ import { isWebShim } from '../../../platform/detect'
 import { platformApi } from '../../../platform'
 import { artifactDownloadFilename, artifactHasExport } from '../../../utils/artifactDisplay'
 import { webMigrationLabel } from '../../../platform/webMigration'
+import { mergeDeckIntoLiveSlides } from '../services/webDeckSlides'
 
 const Shell = styled.section`
   flex: 1;
@@ -845,6 +846,43 @@ export default function ResultPreviewPanel() {
     return p.length > 0 && !p.includes('/') && !p.includes('\\')
   }
 
+  const isApiDownloadUrl = (path: string) => String(path || '').trim().startsWith('/api/')
+
+  const ensurePptxFilename = (name: string | null | undefined) => {
+    const normalized = String(name || '').trim()
+    if (!normalized) return '演示文稿.pptx'
+    return normalized.toLowerCase().endsWith('.pptx') ? normalized : `${normalized}.pptx`
+  }
+
+  const readWebAuthToken = () => {
+    if (typeof window === 'undefined') return null
+    return (
+      window.localStorage.getItem('aios_auth_token')
+      ?? window.localStorage.getItem('aios_itoken')
+      ?? window.localStorage.getItem('ai_office_internal_token')
+    )
+  }
+
+  const downloadProtectedUrl = async (url: string, filename: string) => {
+    const token = readWebAuthToken()
+    const headers: Record<string, string> = {}
+    if (token) headers.Authorization = `Bearer ${token}`
+    const response = await fetch(url, { headers })
+    if (!response.ok) {
+      const body = await response.json().catch(() => null) as { message?: string; error?: string } | null
+      throw new Error(body?.message || body?.error || `下载失败 (${response.status})`)
+    }
+    const blob = await response.blob()
+    const objectUrl = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = objectUrl
+    anchor.download = filename
+    document.body.appendChild(anchor)
+    anchor.click()
+    document.body.removeChild(anchor)
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000)
+  }
+
   const handleOpenPath = async (targetPath: string, successMessage: string, failurePrefix: string) => {
     if (isWebShim()) {
       setPreviewMessage(webMigrationLabel('用系统程序打开本地文件'))
@@ -905,19 +943,38 @@ export default function ResultPreviewPanel() {
       setPreviewMessage('请先生成 PPT，再下载结果。')
       return
     }
-    if (isWebShim() && isWebArtifactId(pptxPath)) {
+    if (isWebShim()) {
       try {
-        const artifacts = await platformApi.artifacts.list()
-        const artifact = artifacts.find((a) => a.id === pptxPath)
-        const filename = artifact
-          ? (artifactDownloadFilename(artifact) || '演示文稿.pptx')
-          : '演示文稿.pptx'
-        if (artifact && artifactHasExport(artifact)) {
-          await platformApi.artifacts.download(artifact.id, filename)
-          setPreviewMessage(`已下载 ${filename}`)
-        } else {
-          setPreviewMessage('未找到可下载的 PPT 产物')
+        const artifactId = isWebArtifactId(String(workbench.resultAssetId || ''))
+          ? String(workbench.resultAssetId)
+          : (isWebArtifactId(pptxPath) ? pptxPath : '')
+        if (artifactId) {
+          const artifacts = await platformApi.artifacts.list()
+          const artifact = artifacts.find((a) => a.id === artifactId)
+          const filename = artifact
+            ? (artifactDownloadFilename(artifact) || '演示文稿.pptx')
+            : '演示文稿.pptx'
+          if (artifact && artifactHasExport(artifact)) {
+            await platformApi.artifacts.download(artifact.id, filename)
+            setPreviewMessage(`已下载 ${filename}`)
+            return
+          }
         }
+
+        const filename = isApiDownloadUrl(pptxPath)
+          ? ensurePptxFilename(workbench.resultTitle)
+          : (getFileName(pptxPath) || ensurePptxFilename(workbench.resultTitle))
+        if (isApiDownloadUrl(pptxPath)) {
+          await downloadProtectedUrl(pptxPath, filename)
+          setPreviewMessage(`已下载 ${filename}`)
+          return
+        }
+        if (pptDeckDocumentId) {
+          await downloadProtectedUrl(`/api/ppt/decks/${pptDeckDocumentId}/download`, filename)
+          setPreviewMessage(`已下载 ${filename}`)
+          return
+        }
+        setPreviewMessage('未找到可下载的 PPT 产物')
       } catch (e) {
         setPreviewMessage(e instanceof Error ? e.message : '下载失败')
       }
@@ -1141,33 +1198,6 @@ export default function ResultPreviewPanel() {
       pptActiveSkillId: null,
     }))
   }, [workbench])
-
-  const mergeDeckIntoLiveSlides = useCallback((deck: unknown, previousSlides: PptSlidePreview[]): PptSlidePreview[] => {
-    const rawSlides = deck && typeof deck === 'object' && Array.isArray((deck as { slides?: unknown[] }).slides)
-      ? (deck as { slides: Array<Record<string, unknown>> }).slides
-      : []
-    if (rawSlides.length === 0) return previousSlides
-    return rawSlides.map((slide, index) => {
-      const current = previousSlides[index]
-      const items = Array.isArray(slide.items) ? slide.items.map(String) : current?.items
-      return {
-        index: typeof slide.index === 'number' ? slide.index : index,
-        type: String(slide.intent || current?.type || 'content'),
-        title: slide.title != null ? String(slide.title) : current?.title,
-        subtitle: slide.subtitle != null ? String(slide.subtitle) : current?.subtitle,
-        heading: slide.heading != null ? String(slide.heading) : current?.heading,
-        body: slide.body != null ? String(slide.body) : current?.body,
-        items,
-        summary: slide.summary != null ? String(slide.summary) : current?.summary,
-        speakerNotes: slide.speakerNotes != null ? String(slide.speakerNotes) : slide.notes != null ? String(slide.notes) : current?.speakerNotes,
-        notes: slide.notes != null ? String(slide.notes) : slide.speakerNotes != null ? String(slide.speakerNotes) : current?.notes,
-        visualBrief: slide.visualBrief != null ? String(slide.visualBrief) : current?.visualBrief,
-        imagePath: current?.imagePath || null,
-        imageLoading: false,
-        isGenerating: false,
-      }
-    })
-  }, [])
 
   const handleImportPptContent = useCallback(async () => {
     if (!activeWorkspacePath) {
@@ -1935,7 +1965,7 @@ export default function ResultPreviewPanel() {
           packageHistory={pptPackageHistory}
           isApplyingSkill={pptSkillBusy || pptTemplateImporting}
           isResuming={pptIsResuming}
-          templateStatusMessage={pptSkillApplyStatus}
+          templateStatusMessage={pptSkillApplyStatus || workbench.generationStatus.message}
           onStop={handleStopPptGeneration}
           onResume={handleResumePptGeneration}
           onExportPartial={() => void handleExportPartialPptx()}

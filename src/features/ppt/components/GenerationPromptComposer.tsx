@@ -43,8 +43,10 @@ import {
   toDisplayUrl,
 } from './generationWorkbenchUtils'
 import { startChineseVoskVoiceInput, supportsVoskVoiceInput, type VoskVoiceInputSession } from '../../../services/voskVoiceInput'
+import { platformApi } from '../../../platform'
 import { isWebShim } from '../../../platform/detect'
 import { runWebPptxCreate } from '../services/pptWebGeneration'
+import { mergeDeckIntoLiveSlides } from '../services/webDeckSlides'
 import { artifactDownloadFilename } from '../../../utils/artifactDisplay'
 import { assembleDeckDocument } from '../ppt/assembleDeckDocument'
 import { validateDeckDocumentOutput } from '../ppt/validateDeckDocumentOutput'
@@ -885,53 +887,101 @@ export default function GenerationPromptComposer() {
 
   const handleGeneratePpt = async (opts?: { fromManuscriptAutoSubmit?: boolean }) => {
     if (pptRunningRef.current) return
-    if (!activeWorkspacePath) {
-      const message = '请先打开工作区，再生成 PPT。'
+    const rawUserPrompt = workbench.generationPrompt.trim()
+    if (!rawUserPrompt) {
+      const message = 'prompt 不能为空'
       workbench.setGenerationStatus('error', message)
+      workbench.setModeSession('ppt', (session) => ({ ...session, pptTaskStatus: 'failed' }))
       setStatusMessage(message)
+      console.error('[ppt-web] error', { stage: 'input', message })
       return
     }
-
-    const rawUserPrompt = workbench.generationPrompt.trim()
 
     if (isWebShim()) {
       pptRunningRef.current = true
       setSubmitting(true)
       workbench.setGenerationStatus('running', '正在通过服务器生成 PPT...')
       workbench.clearCurrentResult()
+      workbench.setModeSession('ppt', (session) => ({
+        ...session,
+        pptTaskStatus: 'generating_deck',
+        pptLiveSlides: [],
+        pptPreviewSlides: [],
+        pptTotalSlides: 0,
+        pptActiveSlideIndex: 0,
+        pptDeckDocumentId: null,
+      }))
       try {
+        let workspacePath = activeWorkspacePath
+        if (!workspacePath) {
+          const defaultWorkspace = await platformApi.workspaces.getDefault()
+          workspacePath = defaultWorkspace?.path || ''
+        }
+        if (!workspacePath) {
+          throw new Error('workspacePath 不能为空，请先创建或打开工作区')
+        }
+
         const title = rawUserPrompt.slice(0, 40) || '演示文稿'
         const result = await runWebPptxCreate({
-          workspacePath: activeWorkspacePath,
+          workspacePath,
           title,
           prompt: rawUserPrompt,
         })
         if (!result.success || !result.artifact) {
           const err = result.error || 'PPT 生成失败'
           workbench.setGenerationStatus('error', err)
+          workbench.setModeSession('ppt', (session) => ({ ...session, pptTaskStatus: 'failed' }))
           setStatusMessage(err)
           return
         }
         const artifact = result.artifact
+        const deck = result.data?.deck
+        const deckId = typeof result.data?.deckId === 'string' ? result.data.deckId : null
+        const deckTemplateId = deck && typeof deck === 'object' && 'templateId' in deck && typeof deck.templateId === 'string'
+          ? deck.templateId
+          : null
+        const liveSlides = mergeDeckIntoLiveSlides(deck, [])
+        if (liveSlides.length === 0) {
+          throw new Error('PPT 任务已完成，但未返回可预览的 slides')
+        }
+        const downloadUrl = artifact.exports?.[0]?.url || (deckId ? `/api/ppt/decks/${deckId}/download` : null)
         const fn = artifactDownloadFilename(artifact) || `${title}.pptx`
+        console.log('[ppt-web] deck slides count', liveSlides.length)
         workbench.setModeSession('ppt', (session) => ({
           ...session,
           pptTaskStatus: 'completed',
           resultType: 'pptx',
-          resultPath: artifact.id,
+          resultAssetId: artifact.id,
+          resultPath: downloadUrl || artifact.id,
           resultTitle: artifact.title || title,
           resultPreviewText: `已生成 ${fn}，可在资源中心 › 生成记录下载。`,
+          pptLiveSlides: liveSlides,
+          pptPreviewSlides: [],
+          pptTotalSlides: liveSlides.length,
+          pptActiveSlideIndex: 0,
+          pptDeckDocumentId: deckId,
+          pptActiveTemplateManifestId: deckTemplateId || session.pptActiveTemplateManifestId,
+          lastUpdatedAt: new Date().toISOString(),
         }))
         workbench.setGenerationStatus('completed', 'PPT 已生成')
         setStatusMessage(`PPT 已生成（${fn}）。可在资源中心 › 生成记录下载，或点击右侧「下载 PPT」。`)
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'PPT 生成失败'
         workbench.setGenerationStatus('error', msg)
+        workbench.setModeSession('ppt', (session) => ({ ...session, pptTaskStatus: 'failed' }))
         setStatusMessage(msg)
+        console.error('[ppt-web] error', { stage: 'ui', message: msg })
       } finally {
         pptRunningRef.current = false
         setSubmitting(false)
       }
+      return
+    }
+
+    if (!activeWorkspacePath) {
+      const message = '请先打开工作区，再生成 PPT。'
+      workbench.setGenerationStatus('error', message)
+      setStatusMessage(message)
       return
     }
 

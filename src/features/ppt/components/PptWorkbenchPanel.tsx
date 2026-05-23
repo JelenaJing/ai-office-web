@@ -613,6 +613,7 @@ export default function PptWorkbenchPanel({
     : undefined
 
   const statusLabel = getStatusLabel(taskStatus, !!isApplyingSkill, !!isResuming, liveSlides.length, totalSlides)
+  const statusDetail = templateEntryMessage || templateStatusMessage || importWarnings[0] || statusLabel
 
   useEffect(() => {
     setSlideDraft({
@@ -801,6 +802,11 @@ export default function PptWorkbenchPanel({
             <EmptyTitle style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>
               {activeSlide.heading || activeSlide.title}
             </EmptyTitle>
+            {activeSlide.subtitle && (
+              <EmptyDesc style={{ marginBottom: 8, fontSize: 15, color: '#475569' }}>
+                {activeSlide.subtitle}
+              </EmptyDesc>
+            )}
             {activeSlide.body && (
               <EmptyDesc style={{ whiteSpace: 'pre-line', lineHeight: 1.7 }}>{activeSlide.body}</EmptyDesc>
             )}
@@ -855,7 +861,20 @@ export default function PptWorkbenchPanel({
       )
     }
 
-    // 7. Idle / default
+    // 7. Failed
+    if (uiState === 'failed') {
+      return (
+        <CenterArea>
+          <EmptyCard style={{ borderColor: '#fca5a5' }}>
+            <EmptyIcon style={{ color: '#dc2626', fontSize: 28 }}>&#9888;</EmptyIcon>
+            <EmptyTitle style={{ color: '#991b1b' }}>PPT 生成失败</EmptyTitle>
+            <EmptyDesc style={{ whiteSpace: 'pre-line' }}>{statusDetail || '请检查输入内容和服务状态后重试。'}</EmptyDesc>
+          </EmptyCard>
+        </CenterArea>
+      )
+    }
+
+    // 8. Idle / default
     return (
       <CenterArea>
         <EmptyCard>
@@ -964,8 +983,8 @@ export default function PptWorkbenchPanel({
           </StatusBadge>
         )}
         {isSourcePreview && <StatusBadge $status="original">当前查看：原始 PPT</StatusBadge>}
-        <StatusText title={templateEntryMessage || templateStatusMessage || importWarnings[0] || statusLabel}>
-          {templateEntryMessage || templateStatusMessage || importWarnings[0] || statusLabel}
+        <StatusText title={statusDetail}>
+          {statusDetail}
         </StatusText>
         <TemplateSummary
           type="button"
@@ -992,6 +1011,16 @@ export default function PptWorkbenchPanel({
         <ToolBtn onClick={onUploadTemplate} disabled={!canImportPpt}>
           导入 PPT
         </ToolBtn>
+        {liveSlides.length > 0 && (
+          <>
+            <ToolBtn onClick={() => onSelectSlide(Math.max(activeSlideIndex - 1, 0))} disabled={activeSlideIndex <= 0}>
+              上一页
+            </ToolBtn>
+            <ToolBtn onClick={() => onSelectSlide(Math.min(activeSlideIndex + 1, liveSlides.length - 1))} disabled={activeSlideIndex >= liveSlides.length - 1}>
+              下一页
+            </ToolBtn>
+          </>
+        )}
         <Spacer />
         {renderToolbarButtons()}
       </Toolbar>
