@@ -1,6 +1,7 @@
 import express, { type Request, type Response, type NextFunction } from 'express'
 import cors from 'cors'
 import authRouter from './routes/auth'
+import accountCenterRouter from './routes/accountCenter'
 import skillsRouter from './routes/skills'
 import artifactsRouter from './routes/artifacts'
 import workspacesRouter from './routes/workspaces'
@@ -24,6 +25,12 @@ import {
   globalRateLimit,
   authRateLimit,
 } from './middleware/rateLimit'
+import {
+  ACCOUNT_CENTER_UNREACHABLE_CODE,
+  ACCOUNT_CENTER_UNREACHABLE_MESSAGE,
+  buildAccountCenterUrl,
+  getAccountCenterBaseUrl,
+} from './lib/accountCenter'
 
 const app = express()
 const PORT = Number(process.env.PORT ?? 3001)
@@ -83,6 +90,7 @@ app.use('/api', timeoutMiddleware(SKILL_TIMEOUT_MS), communicationRouter)
 
 app.use('/api', timeoutMiddleware(REQUEST_TIMEOUT_MS))
 
+app.use('/api/account-center', accountCenterRouter)
 app.use('/api/auth', authRateLimit, authRouter)
 app.use('/api/artifacts', artifactsRouter)
 app.use('/api/workspaces', workspacesRouter)
@@ -104,10 +112,10 @@ app.get('/api/health', (_req, res) => {
  *
  * The browser never talks to AccountCenter directly; it always goes through here.
  */
-const AC_URL = process.env.ACCOUNT_CENTER_URL ?? 'http://10.20.5.61:13100'
+const AC_URL = getAccountCenterBaseUrl()
 
 app.use('/api', async (req, res) => {
-  const target = `${AC_URL}${req.originalUrl}`
+  const target = buildAccountCenterUrl(req.originalUrl)
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   const auth = req.headers['authorization']
   if (auth) headers['Authorization'] = String(auth)
@@ -133,11 +141,20 @@ app.use('/api', async (req, res) => {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error(`[ac-proxy] ${req.method} ${req.originalUrl} →`, msg)
-    res.status(502).json({ message: `AccountCenter 代理失败：${msg}` })
+    res.status(502).json({
+      code: ACCOUNT_CENTER_UNREACHABLE_CODE,
+      message: ACCOUNT_CENTER_UNREACHABLE_MESSAGE,
+    })
   }
 })
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`\n🚀 AIOS server running on http://0.0.0.0:${PORT}`)
   console.log(`   AccountCenter proxy → ${AC_URL}\n`)
+  const pptEngine = process.env.PPT_ENGINE === 'builtin' ? 'builtin' : 'minimax_pptx_generator'
+  const pptFallback = process.env.PPT_ENGINE_FALLBACK === 'none' ? 'none' : 'builtin'
+  console.info(`[ppt-runtime] defaultEngine=${pptEngine}`)
+  console.info(`[ppt-runtime] fallback=${pptFallback}`)
+  console.info(`[ppt-runtime] env.PPT_ENGINE=${process.env.PPT_ENGINE ?? '(not set, defaults to minimax_pptx_generator)'}`)
+  console.info(`[ppt-runtime] env.PPT_ENGINE_FALLBACK=${process.env.PPT_ENGINE_FALLBACK ?? '(not set, defaults to builtin)'}`)
 })
