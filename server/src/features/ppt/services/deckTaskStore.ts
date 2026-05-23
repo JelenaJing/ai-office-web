@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto'
-import type { WebDeckDocument, WebDeckTaskResult, WebDeckTaskStatus } from '../types'
+import type { WebDeckDocument, WebDeckRuntimeMeta, WebDeckTaskResult, WebDeckTaskStatus } from '../types'
 
 export interface WebDeckTaskRecord {
   taskId: string
@@ -16,6 +16,7 @@ export interface WebDeckTaskRecord {
 
 const tasks = new Map<string, WebDeckTaskRecord>()
 const decks = new Map<string, WebDeckDocument>()
+const deckRuntimeMeta = new Map<string, WebDeckRuntimeMeta>()
 
 const TASK_TTL_MS = 60 * 60 * 1000
 setInterval(() => {
@@ -77,4 +78,13 @@ export function getDeck(deckId: string): WebDeckDocument | undefined {
 export function saveDeck(deck: WebDeckDocument): WebDeckDocument {
   decks.set(deck.deckId, deck)
   return deck
+}
+
+export function getDeckRuntimeMeta(deckId: string): WebDeckRuntimeMeta | undefined {
+  return deckRuntimeMeta.get(deckId)
+}
+
+export function saveDeckRuntimeMeta(meta: WebDeckRuntimeMeta): WebDeckRuntimeMeta {
+  deckRuntimeMeta.set(meta.deckId, meta)
+  return meta
 }

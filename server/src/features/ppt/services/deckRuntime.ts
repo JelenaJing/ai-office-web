@@ -42,9 +42,14 @@ function normalizeItems(items: SlidePlanItem['items']): string[] {
   return Array.isArray(items) ? items.map((item) => String(item || '').trim()).filter(Boolean) : []
 }
 
+function normalizeString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
 function toDeckSlide(slide: SlidePlanItem, index: number): WebDeckSlide {
   const items = normalizeItems(slide.items)
   const title = String(slide.title || (index === 0 ? '封面' : `第 ${index + 1} 页`)).trim()
+  const layoutId = slide.type === 'cover' ? 'cover-title-subtitle' : slide.type === 'toc' ? 'toc-list' : 'title-bullets'
   return {
     id: `slide-${index + 1}`,
     index,
@@ -52,11 +57,18 @@ function toDeckSlide(slide: SlidePlanItem, index: number): WebDeckSlide {
     title,
     subtitle: slide.subtitle,
     items,
-    layoutId: slide.type === 'cover' ? 'cover-title-subtitle' : slide.type === 'toc' ? 'toc-list' : 'title-bullets',
+    layoutId,
     slots: {
       title,
       subtitle: slide.subtitle || '',
       body: items,
+    },
+    notes: undefined,
+    speakerNotes: undefined,
+    layout: layoutId,
+    raw: {
+      layout: layoutId,
+      bullets: items,
     },
     diagnostics: {
       slotBinding: 'server-bound',
@@ -68,6 +80,53 @@ function toDeckSlide(slide: SlidePlanItem, index: number): WebDeckSlide {
       },
       partialMissing: [...PPT_PARTIAL_MISSING],
     },
+  }
+}
+
+export function toGeneratedSlidePlanFromDeck(deck: WebDeckDocument): GeneratedSlidePlan {
+  return {
+    title: deck.title,
+    slides: deck.slides.map((slide, index): SlidePlanItem => ({
+      type: slide.type === 'section' ? 'content' : slide.type,
+      title: slide.title || (index === 0 ? deck.title : `第 ${index + 1} 页`),
+      subtitle: normalizeString(slide.subtitle),
+      items: normalizeItems(slide.items?.length ? slide.items : (
+        Array.isArray(slide.slots?.body) ? slide.slots.body : []
+      )),
+    })),
+  }
+}
+
+export async function exportDeckWithBuiltin(input: {
+  userId: string
+  workspacePath: string
+  deck: WebDeckDocument
+  skillId?: string
+}): Promise<{ artifact: WebDeckTaskResult['artifact']; exportUrl: string; deck: WebDeckDocument }> {
+  const plan = toGeneratedSlidePlanFromDeck(input.deck)
+  const safeName = (input.deck.title || 'presentation').replace(/[^\w\u4e00-\u9fa5\-]+/g, '_').slice(0, 60) || 'presentation'
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-office-ppt-export-'))
+  const tmpPath = path.join(tmpDir, `${safeName}.pptx`)
+  try {
+    await writePptxFile(plan, tmpPath)
+    const artifact = saveSkillArtifact({
+      userId: input.userId,
+      workspacePath: input.workspacePath,
+      skillId: input.skillId || 'web.ppt.deck.create',
+      type: 'presentation',
+      title: input.deck.title,
+      filename: `${safeName}.pptx`,
+      format: 'pptx',
+      content: fs.readFileSync(tmpPath),
+      deckId: input.deck.deckId,
+      sourceRefs: input.deck.sourceRefs.map((ref) => ({ type: ref.type, id: ref.id, label: ref.label })),
+    })
+    const exportUrl = artifact.exports?.[0]?.url || `/api/ppt/decks/${input.deck.deckId}/download`
+    input.deck.artifactRefs = [{ artifactId: artifact.id, type: artifact.type, relation: 'export' }]
+    input.deck.updatedAt = new Date().toISOString()
+    return { artifact, exportUrl, deck: input.deck }
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true })
   }
 }
 

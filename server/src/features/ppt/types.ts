@@ -10,6 +10,23 @@ export interface WebDeckSlide {
   items: string[]
   layoutId: string
   slots: Record<string, string | string[]>
+  notes?: string
+  speakerNotes?: string
+  layout?: string
+  previewImageUrl?: string
+  table?: {
+    headers: string[]
+    rows: string[][]
+  }
+  timeline?: Array<{ title: string; detail?: string }>
+  columns?: Array<{ title: string; items: string[] }>
+  quote?: {
+    text: string
+    author?: string
+  }
+  modified?: boolean
+  modifiedAt?: string
+  raw?: Record<string, unknown>
   diagnostics: {
     slotBinding: 'server-bound' | 'minimax-generated'
     layoutMatching: 'heuristic' | 'skill-guided'
@@ -67,3 +84,14 @@ export interface WebDeckTaskResult {
 }
 
 export type WebDeckTaskStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
+
+export interface WebDeckRuntimeMeta {
+  deckId: string
+  userId: string
+  workspacePath: string
+  engine: 'builtin' | 'minimax_pptx_generator'
+  skillId: string
+  artifactId: string | null
+  exportUrl: string | null
+  updatedAt: string
+}

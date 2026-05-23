@@ -1,215 +1,268 @@
 import React, { useEffect, useRef } from 'react'
-import styled from 'styled-components'
+import styled, { keyframes } from 'styled-components'
 import type { PptSlidePreview } from '../../../contexts/GenerationWorkbenchContext'
 
-// ---- Styled components — Light Directory Style ------------------
+const spin = keyframes`
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+`
 
-const Nav = styled.div`
-  width: 180px;
-  min-width: 160px;
-  flex-shrink: 0;
+const Nav = styled.aside`
+  width: 220px;
+  min-width: 220px;
+  max-width: 220px;
+  padding: 14px 12px;
+  background: #f7f9fc;
+  border-right: 1px solid #e2e8f0;
   overflow-y: auto;
-  overflow-x: hidden;
-  background: #fff;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 8px 6px;
-  border-right: 1px solid #e5e7eb;
+  display: grid;
+  align-content: start;
+  gap: 10px;
 
-  &::-webkit-scrollbar { width: 4px; }
-  &::-webkit-scrollbar-track { background: transparent; }
-  &::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 2px; }
+  @media (max-width: 1080px) {
+    width: 200px;
+    min-width: 200px;
+    max-width: 200px;
+  }
 `
 
-const NavModeBadge = styled.div<{ $mode: 'source' | 'retemplated' | 'structure' }>`
-  margin: 0 2px 6px;
-  padding: 5px 8px;
-  border-radius: 8px;
-  font-size: var(--font-size-xs);
-  font-weight: 700;
+const EmptyState = styled.div`
+  padding: 20px 12px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 16px;
+  background: #ffffff;
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.7;
   text-align: center;
-  ${({ $mode }) => {
-    if ($mode === 'source') return 'background: #eef2ff; color: #3730a3; border: 1px solid #c7d2fe;'
-    if ($mode === 'retemplated') return 'background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0;'
-    return 'background: #f3f4f6; color: #4b5563; border: 1px solid #e5e7eb;'
-  }}
 `
 
-const DirItem = styled.div<{ $active: boolean; $loading?: boolean }>`
-  display: flex;
-  align-items: flex-start;
-  gap: 7px;
-  padding: 7px 8px;
-  border-radius: 6px;
+const SlideCard = styled.button<{ $active: boolean }>`
+  width: 100%;
+  padding: 10px;
+  border-radius: 16px;
+  border: 2px solid ${({ $active }) => ($active ? '#3b82f6' : '#dbe4ee')};
+  background: ${({ $active }) => ($active ? '#eff6ff' : '#ffffff')};
+  display: grid;
+  gap: 8px;
   cursor: pointer;
-  border: 1.5px solid ${({ $active }) => $active ? '#3b82f6' : 'transparent'};
-  background: ${({ $active }) => $active ? '#eff6ff' : 'transparent'};
-  transition: background 0.12s, border-color 0.12s;
+  text-align: left;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+  box-shadow: ${({ $active }) => ($active ? '0 10px 22px rgba(59, 130, 246, 0.16)' : '0 3px 10px rgba(15, 23, 42, 0.04)')};
 
   &:hover {
-    background: ${({ $active }) => $active ? '#eff6ff' : '#f3f4f6'};
-    border-color: ${({ $active }) => $active ? '#3b82f6' : '#e5e7eb'};
+    border-color: #60a5fa;
+    transform: translateY(-1px);
   }
-
-  ${({ $loading }) => $loading && `
-    animation: pulse 1.2s ease-in-out infinite;
-    @keyframes pulse { 0%,100% { opacity: 0.6; } 50% { opacity: 1; } }
-  `}
 `
 
-const PageNum = styled.div<{ $active: boolean }>`
-  font-size: var(--font-size-xs);
-  font-weight: 700;
-  color: ${({ $active }) => $active ? '#3b82f6' : '#9ca3af'};
-  min-width: 16px;
-  flex-shrink: 0;
-  padding-top: 1px;
-  line-height: 1;
-  text-align: center;
-`
-
-const DirContent = styled.div`
-  flex: 1;
-  min-width: 0;
+const CardHeader = styled.div`
   display: flex;
-  flex-direction: column;
-  gap: 3px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 `
 
-const DirTitle = styled.div<{ $active: boolean }>`
-  font-size: var(--font-size-xs);
-  font-weight: 600;
-  color: ${({ $active }) => $active ? '#1d4ed8' : '#374151'};
+const PageNumber = styled.span`
+  font-size: 11px;
+  font-weight: 800;
+  color: #3b82f6;
+`
+
+const LayoutBadge = styled.span`
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #4f46e5;
+  font-size: 10px;
+  font-weight: 700;
+`
+
+const Thumbnail = styled.div`
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 12px;
+  border: 1px solid #dbe4ee;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  overflow: hidden;
+  padding: 8px;
+  display: grid;
+  align-content: start;
+  gap: 4px;
+`
+
+const ThumbnailImage = styled.img`
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 10px;
+`
+
+const ThumbTitle = styled.div`
+  font-size: 10px;
+  font-weight: 800;
+  color: #1e3a5f;
+  line-height: 1.35;
+`
+
+const ThumbBullet = styled.div`
+  font-size: 9px;
+  color: #64748b;
   line-height: 1.35;
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+`
+
+const SlideTitle = styled.div`
+  font-size: 12px;
+  font-weight: 700;
+  color: #243b53;
+  line-height: 1.45;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
-  word-break: break-all;
+  overflow: hidden;
 `
 
-const IntentBadge = styled.div<{ $intent: string }>`
-  font-size: 9px;
-  font-weight: 600;
-  padding: 1px 5px;
-  border-radius: 10px;
-  align-self: flex-start;
-  ${({ $intent }) => {
-    switch ($intent) {
-      case 'cover':          return 'background: #fef3c7; color: #92400e;'
-      case 'toc':            return 'background: #e0e7ff; color: #3730a3;'
-      case 'section':
-      case 'section_divider': return 'background: #f0fdf4; color: #166534;'
-      case 'content_cards':
-      case 'cards':          return 'background: #fff7ed; color: #9a3412;'
-      case 'image_text':     return 'background: #fdf4ff; color: #7e22ce;'
-      case 'closing':
-      case 'summary':        return 'background: #ecfeff; color: #155e75;'
-      default:               return 'background: #f3f4f6; color: #6b7280;'
-    }
-  }}
+const CardFooter = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 `
 
-const GeneratingDot = styled.div`
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #f59e0b;
-  animation: blink 1s ease-in-out infinite;
-  flex-shrink: 0;
-  margin-top: 4px;
-  @keyframes blink { 0%,100% { opacity: 0.3; } 50% { opacity: 1; } }
+const MetaText = styled.span`
+  font-size: 11px;
+  color: #64748b;
 `
 
-// ---- Helpers ----
+const StatusTag = styled.span<{ $tone: 'editing' | 'modified' }>`
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  ${({ $tone }) => ($tone === 'editing'
+    ? 'background:#eff6ff;color:#2563eb;'
+    : 'background:#ecfdf5;color:#047857;')}
+`
 
-function getIntentLabel(type: string): string {
-  switch (type) {
-    case 'cover':           return '封面'
-    case 'toc':             return '目录'
-    case 'section':
-    case 'section_divider': return '章节'
-    case 'content':
-    case 'text_content':    return '内容'
-    case 'cards':
-    case 'content_cards':   return '卡片'
-    case 'image_text':      return '图文'
-    case 'metrics':         return '指标'
-    case 'comparison':      return '对比'
-    case 'timeline':        return '时间线'
-    case 'closing':
-    case 'summary':         return '总结'
-    default:                return '通用'
+const Spinner = styled.span`
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  border: 2px solid rgba(59, 130, 246, 0.18);
+  border-top-color: #3b82f6;
+  display: inline-block;
+  animation: ${spin} 0.9s linear infinite;
+`
+
+const MoveButtons = styled.div`
+  display: inline-flex;
+  gap: 4px;
+`
+
+const MoveButton = styled.button`
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  border: 1px solid #dbe4ee;
+  background: #ffffff;
+  color: #94a3b8;
+  cursor: not-allowed;
+`
+
+function formatLayout(layout?: string, type?: string): string {
+  const key = layout || type || 'content'
+  const labelMap: Record<string, string> = {
+    cover: '封面',
+    toc: '目录',
+    content: '内容',
+    summary: '总结',
+    timeline: '时间线',
+    comparison: '对比',
+    table: '表格',
+    'two-column': '双栏',
+    quote: '引用',
+    'section-divider': '章节',
+    cards: '卡片',
+    split: '分栏',
   }
+  return labelMap[key] || key
 }
-
-// ---- Props ----
 
 interface PptSlideNavigatorProps {
   slides: PptSlidePreview[]
   activeIndex: number
-  skillColor?: string
-  generatingIndex?: number
-  previewMode?: 'source' | 'retemplated' | 'structure'
+  editingSlideId?: string | null
+  slideEditStatus?: 'idle' | 'editing' | 'applying' | 'error'
   onSelectSlide: (index: number) => void
 }
 
 export default function PptSlideNavigator({
   slides,
   activeIndex,
-  generatingIndex,
-  previewMode = 'structure',
+  editingSlideId,
+  slideEditStatus = 'idle',
   onSelectSlide,
 }: PptSlideNavigatorProps) {
-  const activeRef = useRef<HTMLDivElement | null>(null)
+  const activeRef = useRef<HTMLButtonElement | null>(null)
 
   useEffect(() => {
     activeRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
   }, [activeIndex])
 
   if (slides.length === 0) {
-    return (
-      <Nav>
-        <div style={{ fontSize: 14, color: '#9ca3af', textAlign: 'center', marginTop: 24 }}>
-          暂无幻灯片
-        </div>
-      </Nav>
-    )
+    return <Nav><EmptyState>暂无幻灯片</EmptyState></Nav>
   }
 
   return (
     <Nav>
-      <NavModeBadge $mode={previewMode}>
-        {previewMode === 'source' ? '原版 PPT 预览' : previewMode === 'retemplated' ? '套模板预览' : '结构预览'}
-      </NavModeBadge>
-      {slides.map((slide, i) => {
-        const isActive = i === activeIndex
-        const isGen = generatingIndex !== undefined && i === generatingIndex
-        const displayTitle = slide.title || slide.heading || `第 ${i + 1} 页`
-
+      {slides.map((slide, index) => {
+        const active = index === activeIndex
+        const previewImage = slide.previewImageUrl || slide.imagePath || null
+        const isEditing = editingSlideId && slide.id === editingSlideId && (slideEditStatus === 'editing' || slideEditStatus === 'applying')
+        const bullets = (slide.bullets || slide.items || []).slice(0, 2)
         return (
-          <DirItem
-            key={i}
-            $active={isActive}
-            $loading={isGen}
-            ref={isActive ? (el => { activeRef.current = el }) : undefined}
-            onClick={() => onSelectSlide(i)}
+          <SlideCard
+            key={slide.id || index}
+            $active={active}
+            onClick={() => onSelectSlide(index)}
+            ref={active ? (node) => { activeRef.current = node } : undefined}
+            type="button"
           >
-            <PageNum $active={isActive}>{i + 1}</PageNum>
-            <DirContent>
-              {slide.imagePath ? (
-                <img
-                  src={`file://${slide.imagePath}`}
-                  alt={`slide ${i + 1}`}
-                  style={{ width: '100%', borderRadius: 3, marginBottom: 3, display: 'block', border: '1px solid #e5e7eb' }}
-                />
-              ) : null}
-              <DirTitle $active={isActive}>{displayTitle}</DirTitle>
-              <IntentBadge $intent={slide.type}>{getIntentLabel(slide.type)}</IntentBadge>
-            </DirContent>
-            {isGen && <GeneratingDot />}
-          </DirItem>
+            <CardHeader>
+              <PageNumber>第 {index + 1} 页</PageNumber>
+              <LayoutBadge>{formatLayout(slide.layout, slide.type)}</LayoutBadge>
+            </CardHeader>
+            <Thumbnail>
+              {previewImage ? (
+                <ThumbnailImage src={previewImage} alt={slide.title || `第 ${index + 1} 页`} />
+              ) : (
+                <>
+                  <ThumbTitle>{slide.title || `第 ${index + 1} 页`}</ThumbTitle>
+                  {bullets.map((bullet, bulletIndex) => (
+                    <ThumbBullet key={`${bullet}-${bulletIndex}`}>• {bullet}</ThumbBullet>
+                  ))}
+                </>
+              )}
+            </Thumbnail>
+            <SlideTitle>{slide.title || `第 ${index + 1} 页`}</SlideTitle>
+            <CardFooter>
+              <MetaText>{slide.modified ? '已修改' : '未修改'}</MetaText>
+              {isEditing ? (
+                <StatusTag $tone="editing"><Spinner /> 修改中</StatusTag>
+              ) : slide.modified ? (
+                <StatusTag $tone="modified">已修改</StatusTag>
+              ) : (
+                <MoveButtons>
+                  <MoveButton type="button" disabled title="TODO">↑</MoveButton>
+                  <MoveButton type="button" disabled title="TODO">↓</MoveButton>
+                </MoveButtons>
+              )}
+            </CardFooter>
+          </SlideCard>
         )
       })}
     </Nav>

@@ -133,6 +133,99 @@ export async function runWebPptxCreate(input: {
   }
 }
 
+export interface WebPptSlideEditResult {
+  success: boolean
+  engine?: 'builtin' | 'minimax_pptx_generator'
+  deckId?: string
+  slideId?: string
+  updatedSlide?: Record<string, unknown>
+  artifact?: SkillResult['artifact']
+  exportUrl?: string
+  message?: string
+  error?: string
+}
+
+export async function editWebPptSlide(input: {
+  deckId: string
+  slideId: string
+  instruction: string
+  currentSlide: Record<string, unknown>
+  deckContext?: {
+    title?: string
+    slideCount?: number
+    nearbySlides?: Array<Record<string, unknown>>
+  }
+  engine?: 'builtin' | 'minimax_pptx_generator'
+}): Promise<WebPptSlideEditResult> {
+  const token = readAuthToken()
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (token) headers.Authorization = `Bearer ${token}`
+
+  try {
+    const response = await fetch(`/api/ppt/decks/${encodeURIComponent(input.deckId)}/slides/${encodeURIComponent(input.slideId)}/edit`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        instruction: input.instruction,
+        currentSlide: input.currentSlide,
+        deckContext: input.deckContext,
+        engine: input.engine,
+      }),
+    })
+    const body = await response.json().catch(() => ({ error: `HTTP ${response.status}` })) as WebPptSlideEditResult
+    if (!response.ok || !body.success) {
+      const message = body.error || body.message || `当前页修改失败 (${response.status})`
+      console.error('[ppt-web] error', { stage: 'slide-edit', deckId: input.deckId, slideId: input.slideId, message })
+      return { success: false, error: message }
+    }
+    return body
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '当前页修改失败'
+    console.error('[ppt-web] error', { stage: 'slide-edit', deckId: input.deckId, slideId: input.slideId, message })
+    return { success: false, error: message }
+  }
+}
+
+export interface WebPptDeckExportResult {
+  success: boolean
+  engine?: 'builtin' | 'minimax_pptx_generator'
+  deckId?: string
+  artifact?: SkillResult['artifact']
+  exportUrl?: string
+  deck?: Record<string, unknown>
+  slides?: Array<Record<string, unknown>>
+  message?: string
+  error?: string
+}
+
+export async function exportWebPptDeck(input: {
+  deckId: string
+  engine?: 'builtin' | 'minimax_pptx_generator'
+}): Promise<WebPptDeckExportResult> {
+  const token = readAuthToken()
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (token) headers.Authorization = `Bearer ${token}`
+
+  try {
+    const response = await fetch(`/api/ppt/decks/${encodeURIComponent(input.deckId)}/export`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ engine: input.engine }),
+    })
+    const body = await response.json().catch(() => ({ error: `HTTP ${response.status}` })) as WebPptDeckExportResult
+    if (!response.ok || !body.success) {
+      const message = body.error || body.message || `PPT 导出失败 (${response.status})`
+      console.error('[ppt-web] error', { stage: 'export', deckId: input.deckId, message })
+      return { success: false, error: message }
+    }
+    return body
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'PPT 导出失败'
+    console.error('[ppt-web] error', { stage: 'export', deckId: input.deckId, message })
+    return { success: false, error: message }
+  }
+}
+
 export async function runWebPptxCreateViaSkill(input: {
   workspacePath: string
   title: string

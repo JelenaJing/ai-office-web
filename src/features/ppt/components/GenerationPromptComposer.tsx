@@ -905,13 +905,21 @@ export default function GenerationPromptComposer() {
       workbench.setModeSession('ppt', (session) => ({
         ...session,
         pptTaskStatus: 'generating_deck',
+        pptDeckId: null,
+        pptArtifactId: null,
+        pptDownloadUrl: null,
         pptEngine: null,
         pptFallbackFrom: null,
         pptFallbackReason: null,
+        pptSlides: [],
         pptLiveSlides: [],
         pptPreviewSlides: [],
         pptTotalSlides: 0,
         pptActiveSlideIndex: 0,
+        pptEditMessages: {},
+        pptDirty: false,
+        pptEditingSlideId: null,
+        pptSlideEditStatus: 'idle',
         pptDeckDocumentId: null,
       }))
       try {
@@ -964,6 +972,9 @@ export default function GenerationPromptComposer() {
         workbench.setModeSession('ppt', (session) => ({
           ...session,
           pptTaskStatus: 'completed',
+          pptDeckId: deckId,
+          pptArtifactId: artifact.id,
+          pptDownloadUrl: downloadUrl,
           pptEngine: engine,
           pptFallbackFrom: fallbackFrom,
           pptFallbackReason: fallbackReason,
@@ -972,10 +983,15 @@ export default function GenerationPromptComposer() {
           resultPath: downloadUrl || artifact.id,
           resultTitle: artifact.title || title,
           resultPreviewText: [engineText, fallbackText, `已生成 ${fn}，可在资源中心 › 生成记录下载。`].filter(Boolean).join(' · '),
+          pptSlides: liveSlides,
           pptLiveSlides: liveSlides,
           pptPreviewSlides: [],
           pptTotalSlides: liveSlides.length,
           pptActiveSlideIndex: 0,
+          pptEditMessages: {},
+          pptDirty: false,
+          pptEditingSlideId: liveSlides[0]?.id || null,
+          pptSlideEditStatus: 'idle',
           pptDeckDocumentId: deckId,
           pptActiveTemplateManifestId: deckTemplateId || session.pptActiveTemplateManifestId,
           lastUpdatedAt: new Date().toISOString(),
@@ -2347,6 +2363,15 @@ export default function GenerationPromptComposer() {
     selectedDocuments,
     workbench,
   ])
+
+  useEffect(() => {
+    const handleWorkbenchRegenerate = () => {
+      if (currentMode !== 'ppt' || effectiveBusy || pptRunningRef.current) return
+      void handleGeneratePpt()
+    }
+    window.addEventListener('ppt-workbench-regenerate', handleWorkbenchRegenerate)
+    return () => window.removeEventListener('ppt-workbench-regenerate', handleWorkbenchRegenerate)
+  }, [currentMode, effectiveBusy, handleGeneratePpt])
 
   const handleSubmit = async () => {
     if (!workbench.generationPrompt.trim() || effectiveBusy) return

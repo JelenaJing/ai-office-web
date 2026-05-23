@@ -31,7 +31,17 @@ export type GenerationResultType = 'docx' | 'image' | 'ppt-outline' | 'pptx' | '
 export type PptTaskStatus = 'idle' | 'importing' | 'extracting' | 'building_deck' | 'ready' | 'generating_outline' | 'generating_plan' | 'generating_slide' | 'generating_content' | 'generating_deck' | 'validating_deck' | 'saving_deck' | 'generating_image' | 'generating_assets' | 'rendering_preview' | 'rendering_pptx' | 'applying_template' | 'stopped' | 'completed' | 'failed'
 export type PptSourceType = 'generated' | 'imported_pptx' | 'email_attachment'
 
+export interface PptAiMessage {
+  id: string
+  role: 'user' | 'assistant' | 'system'
+  content: string
+  createdAt: string
+  slideId?: string
+  status?: 'pending' | 'done' | 'error'
+}
+
 export interface PptSlidePreview {
+  id?: string
   index: number
   type: string
   title?: string
@@ -39,11 +49,20 @@ export interface PptSlidePreview {
   heading?: string
   body?: string
   items?: string[]
+  bullets?: string[]
   summary?: string
   speakerNotes?: string
   visualBrief?: string
   metrics?: Array<{ value: string; label: string; detail?: string }>
   timeline?: Array<{ title: string; detail?: string }>
+  table?: { headers: string[]; rows: string[][] }
+  columns?: Array<{ title: string; items: string[] }>
+  quote?: { text: string; author?: string }
+  layout?: string
+  previewImageUrl?: string | null
+  raw?: Record<string, unknown>
+  modified?: boolean
+  modifiedAt?: string
   imagePath: string | null
   imageLoading: boolean
   isGenerating: boolean
@@ -123,12 +142,20 @@ export interface GenerationModeSession {
   pptContentPackageId: string | null
   pptActiveSkillId: string | null
   pptTaskStatus: PptTaskStatus
+  pptDeckId: string | null
+  pptArtifactId: string | null
+  pptDownloadUrl: string | null
   pptEngine: 'builtin' | 'minimax_pptx_generator' | null
   pptFallbackFrom: 'minimax_pptx_generator' | null
   pptFallbackReason: string | null
+  pptSlides: PptSlidePreview[]
   pptLiveSlides: PptSlidePreview[]
   pptTotalSlides: number
   pptActiveSlideIndex: number
+  pptEditMessages: Record<string, PptAiMessage[]>
+  pptDirty: boolean
+  pptEditingSlideId: string | null
+  pptSlideEditStatus: 'idle' | 'editing' | 'applying' | 'error'
   pptStopRequested: boolean
   pptResumeRequested: boolean
   pptIsResuming: boolean
@@ -243,12 +270,20 @@ function createEmptySession(): GenerationModeSession {
     pptContentPackageId: null,
     pptActiveSkillId: null,
     pptTaskStatus: 'idle' as PptTaskStatus,
+    pptDeckId: null,
+    pptArtifactId: null,
+    pptDownloadUrl: null,
     pptEngine: null,
     pptFallbackFrom: null,
     pptFallbackReason: null,
+    pptSlides: [],
     pptLiveSlides: [],
     pptTotalSlides: 0,
     pptActiveSlideIndex: 0,
+    pptEditMessages: {},
+    pptDirty: false,
+    pptEditingSlideId: null,
+    pptSlideEditStatus: 'idle',
     pptStopRequested: false,
     pptResumeRequested: false,
     pptIsResuming: false,
@@ -372,6 +407,21 @@ export function GenerationWorkbenchProvider({ children }: { children: ReactNode 
           currentMailId: s.currentMailId,
           replyTone: s.replyTone,
           pptPrimarySource: s.pptPrimarySource,
+          pptDeckId: s.pptDeckId,
+          pptArtifactId: s.pptArtifactId,
+          pptDownloadUrl: s.pptDownloadUrl,
+          pptEngine: s.pptEngine,
+          pptFallbackFrom: s.pptFallbackFrom,
+          pptFallbackReason: s.pptFallbackReason,
+          pptSlides: s.pptSlides,
+          pptLiveSlides: s.pptLiveSlides,
+          pptTotalSlides: s.pptTotalSlides,
+          pptActiveSlideIndex: s.pptActiveSlideIndex,
+          pptEditMessages: s.pptEditMessages,
+          pptDirty: s.pptDirty,
+          pptEditingSlideId: s.pptEditingSlideId,
+          pptSlideEditStatus: s.pptSlideEditStatus,
+          pptDeckDocumentId: s.pptDeckDocumentId,
           lastUpdatedAt: s.lastUpdatedAt,
           selectedKnowledgeBaseIds: s.selectedKnowledgeBaseIds,
         }
@@ -690,6 +740,21 @@ export function GenerationWorkbenchProvider({ children }: { children: ReactNode 
       resultPreviewUrl: null,
       resultChartPaths: null,
       documentArtifact: null,
+      ...(currentMode === 'ppt'
+        ? {
+            pptDeckId: null,
+            pptArtifactId: null,
+            pptDownloadUrl: null,
+            pptSlides: [],
+            pptLiveSlides: [],
+            pptTotalSlides: 0,
+            pptActiveSlideIndex: 0,
+            pptEditMessages: {},
+            pptDirty: false,
+            pptEditingSlideId: null,
+            pptSlideEditStatus: 'idle' as const,
+          }
+        : {}),
     }))
   }, [currentMode, setModeSession])
 
