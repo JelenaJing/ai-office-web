@@ -967,7 +967,9 @@ export default function GenerationPromptComposer() {
         const engineText = engine === 'minimax_pptx_generator'
           ? '生成引擎：MiniMax PPTX Generator Skill'
           : '生成引擎：内置 PptxGenJS'
-        const fallbackText = fallbackFrom ? 'MiniMax PPTX Generator 失败，已回退内置引擎' : ''
+        const fallbackText = fallbackFrom
+          ? `MiniMax PPTX Generator 失败，已回退内置引擎${fallbackReason ? `（原因：${fallbackReason}）` : ''}`
+          : ''
         console.log('[ppt-web] deck slides count', liveSlides.length)
         workbench.setModeSession('ppt', (session) => ({
           ...session,

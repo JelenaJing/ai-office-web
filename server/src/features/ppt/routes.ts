@@ -20,7 +20,8 @@ const router = Router()
 type PptEngine = 'builtin' | 'minimax_pptx_generator'
 
 function resolvePptEngine(): { engine: PptEngine; fallback: 'builtin' | 'none' } {
-  const engine = process.env.PPT_ENGINE === 'minimax_pptx_generator' ? 'minimax_pptx_generator' : 'builtin'
+  // Default to minimax_pptx_generator; set PPT_ENGINE=builtin to force builtin
+  const engine = process.env.PPT_ENGINE === 'builtin' ? 'builtin' : 'minimax_pptx_generator'
   const fallback = process.env.PPT_ENGINE_FALLBACK === 'none' ? 'none' : 'builtin'
   return { engine, fallback }
 }

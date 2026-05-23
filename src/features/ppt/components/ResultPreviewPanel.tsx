@@ -2099,15 +2099,16 @@ export default function ResultPreviewPanel() {
   const imageAlreadyInWorkspace = currentMode === 'image'
     && Boolean(activeWorkspacePath && workbench.resultPath && normalizeFileLikePath(workbench.resultPath).startsWith(activeWorkspacePath))
   const pptEngineStatusMessage = useMemo(() => {
-    const base = pptEngine === 'minimax_pptx_generator'
+    if (pptFallbackFrom) {
+      // MiniMax failed and fell back — show fallback message prominently, not the plain "内置 PptxGenJS"
+      const reason = pptFallbackReason ? `（原因：${pptFallbackReason}）` : ''
+      return `MiniMax PPTX Generator 失败，已回退内置引擎${reason}`
+    }
+    return pptEngine === 'minimax_pptx_generator'
       ? '生成引擎：MiniMax PPTX Generator Skill'
       : pptEngine === 'builtin'
         ? '生成引擎：内置 PptxGenJS'
         : ''
-    const fallback = pptFallbackFrom
-      ? `MiniMax PPTX Generator 失败，已回退内置引擎${pptFallbackReason ? `（${pptFallbackReason}）` : ''}`
-      : ''
-    return [base, fallback].filter(Boolean).join(' · ')
   }, [pptEngine, pptFallbackFrom, pptFallbackReason])
 
   // PPT mode: full-screen workbench replaces the default Shell layout
