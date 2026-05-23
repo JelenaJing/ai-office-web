@@ -14,6 +14,7 @@ import { runExportMarkdownSkillFromRequest } from '../skills/document/exportMark
 import { runExportPdfSkill } from '../skills/document/exportPdfSkill'
 import { runAnalyzeXlsxSkill } from '../skills/excel/analyzeXlsxSkill'
 import { runCreateImageSkill } from '../skills/image/createImageSkill'
+import { runCreateMinimaxPptxGeneratorSkill } from '../skills/ppt/createMinimaxPptxGeneratorSkill'
 import { runCreatePptxSkill } from '../skills/ppt/createPptxSkill'
 import { runDailyReportSkill } from '../skills/report/dailyReportSkill'
 import { runEditDocumentSkill, type EditDocumentInput } from '../skills/document/editDocumentSkill'
@@ -21,6 +22,7 @@ import { runGenerateDocumentSkill, type GenerateDocumentInput } from '../skills/
 import { runKnowledgeWritingLegacySkill } from '../skills/document/knowledgeWritingLegacySkill'
 import { runTemplateDocumentGenerateLegacySkill } from '../skills/document/templateDocumentGenerateLegacySkill'
 import { skillRunRateLimit } from '../middleware/rateLimit'
+import { MINIMAX_PPTX_GENERATOR_SKILL } from '../modules/skills'
 
 const router = Router()
 
@@ -124,6 +126,7 @@ const BUILTIN_SKILLS = [
     version: '1.0.0',
     enabled: true,
   },
+  MINIMAX_PPTX_GENERATOR_SKILL,
   {
     id: 'web.daily.report',
     name: '工作日报',
@@ -466,6 +469,12 @@ router.post('/:skillId/run', skillRunRateLimit, async (req, res) => {
     if (!workspacePath) {
       return res.status(400).json({ success: false, error: '缺少 workspacePath' })
     }
+    const directTaskId = `skill-web-pptx-create-${Date.now()}`
+    console.info('[ppt-runtime] route=/api/skills/web.pptx.create/run')
+    console.info('[ppt-runtime] engine=builtin')
+    console.info(`[ppt-runtime] taskId=${directTaskId}`)
+    console.info('[ppt-runtime] skillId=web.pptx.create')
+    console.info('[ppt-runtime] usingMinimaxSkill=false')
     const result = await runCreatePptxSkill({
       userId,
       workspacePath,
@@ -474,8 +483,47 @@ router.post('/:skillId/run', skillRunRateLimit, async (req, res) => {
       templateId: String(params.templateId ?? ''),
     })
     if (result.success) {
+      console.info(`[ppt-runtime] outputArtifactId=${result.artifact.id}`)
+      console.info(`[ppt-runtime] exportUrl=${result.artifact.exports?.[0]?.url || ''}`)
       return res.json({ success: true, artifactId: result.artifactId, artifact: result.artifact })
     }
+    return res.status(result.status ?? 500).json({ success: false, error: result.error })
+  }
+
+  if (skillId === 'minimax.pptx-generator') {
+    if (!workspacePath) {
+      return res.status(400).json({ success: false, error: '缺少 workspacePath' })
+    }
+    const directTaskId = `skill-minimax-pptx-generator-${Date.now()}`
+    console.info('[ppt-runtime] route=/api/skills/minimax.pptx-generator/run')
+    console.info('[ppt-runtime] engine=minimax_pptx_generator')
+    console.info(`[ppt-runtime] taskId=${directTaskId}`)
+    console.info('[ppt-runtime] skillId=minimax.pptx-generator')
+    console.info('[ppt-runtime] usingMinimaxSkill=true')
+    const result = await runCreateMinimaxPptxGeneratorSkill({
+      userId,
+      workspacePath,
+      title: String(params.title ?? ''),
+      prompt: String(body.prompt ?? params.prompt ?? ''),
+      language: params.language === 'en-US' ? 'en-US' : 'zh-CN',
+      slideCount: typeof params.slideCount === 'number' ? params.slideCount : Number(params.slideCount || 0) || undefined,
+      themeId: typeof params.themeId === 'string' ? params.themeId : undefined,
+    })
+    if (result.success) {
+      console.info(`[ppt-runtime] outputArtifactId=${result.artifact.id}`)
+      console.info(`[ppt-runtime] exportUrl=${result.exportUrl}`)
+      return res.json({
+        success: true,
+        engine: result.engine,
+        artifactId: result.artifactId,
+        artifact: result.artifact,
+        exportUrl: result.exportUrl,
+        deckId: result.deckId,
+        deck: result.deck,
+        slides: result.slides,
+      })
+    }
+    console.info('[ppt-runtime] error=' + result.error)
     return res.status(result.status ?? 500).json({ success: false, error: result.error })
   }
 

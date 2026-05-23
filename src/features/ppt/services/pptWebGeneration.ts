@@ -61,13 +61,18 @@ export async function runWebPptxCreate(input: {
         progress?: number
         message?: string
         error?: string
-        result?: {
-          deckId?: string
-          deck?: unknown
-          artifact?: SkillResult['artifact']
-          diagnostics?: unknown
-        }
+      result?: {
+        engine?: 'builtin' | 'minimax_pptx_generator'
+        deckId?: string
+        deck?: unknown
+        slides?: unknown
+        artifact?: SkillResult['artifact']
+        exportUrl?: string
+        fallbackFrom?: 'minimax_pptx_generator'
+        fallbackReason?: string
+        diagnostics?: unknown
       }
+    }
       console.log('[ppt-web] polling task', {
         taskId: startBody.taskId,
         attempt: i + 1,
@@ -105,8 +110,13 @@ export async function runWebPptxCreate(input: {
           status: 'completed',
           artifact: pollBody.result.artifact,
           data: {
+            engine: pollBody.result.engine,
             deckId: pollBody.result.deckId,
             deck: pollBody.result.deck,
+            slides: pollBody.result.slides,
+            exportUrl: pollBody.result.exportUrl,
+            fallbackFrom: pollBody.result.fallbackFrom,
+            fallbackReason: pollBody.result.fallbackReason,
             diagnostics: pollBody.result.diagnostics,
           },
         }

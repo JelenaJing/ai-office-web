@@ -68,3 +68,20 @@ export function mergeDeckIntoLiveSlides(deck: unknown, previousSlides: PptSlideP
     }
   })
 }
+
+export function createMinimalPptLiveSlides(title: string, message?: string): PptSlidePreview[] {
+  return [
+    {
+      index: 0,
+      type: 'cover',
+      title: title || '演示文稿',
+      subtitle: message || 'PPT 已生成，可下载查看完整文件。',
+      heading: title || '演示文稿',
+      body: message || 'PPT 已生成，可下载查看完整文件。',
+      items: [message || 'PPT 已生成，可下载查看完整文件。'],
+      imagePath: null,
+      imageLoading: false,
+      isGenerating: false,
+    },
+  ]
+}

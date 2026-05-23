@@ -4,15 +4,15 @@ import type { GeneratedSlidePlan, SlidePlanItem } from './services/simplePptx'
 export interface WebDeckSlide {
   id: string
   index: number
-  type: SlidePlanItem['type']
+  type: SlidePlanItem['type'] | 'section'
   title: string
   subtitle?: string
   items: string[]
   layoutId: string
   slots: Record<string, string | string[]>
   diagnostics: {
-    slotBinding: 'server-bound'
-    layoutMatching: 'heuristic'
+    slotBinding: 'server-bound' | 'minimax-generated'
+    layoutMatching: 'heuristic' | 'skill-guided'
     contentFit: {
       status: 'fit' | 'overflow-risk'
       itemCount: number
@@ -39,23 +39,28 @@ export interface WebDeckDocument {
   createdAt: string
   updatedAt: string
   diagnostics: {
-    chain: 'web-deck-document-runtime'
+    chain: string
     partialMissing: string[]
   }
 }
 
 export interface WebDeckTaskResult {
+  engine: 'builtin' | 'minimax_pptx_generator'
   deckId: string
   deck: WebDeckDocument
+  slides: WebDeckSlide[]
   slidePlan: GeneratedSlidePlan
   artifact: Artifact
+  exportUrl: string
+  fallbackFrom?: 'minimax_pptx_generator'
+  fallbackReason?: string
   relationships: {
     deckId: string
     artifactId: string
     sourceRefs: WebDeckDocument['sourceRefs']
   }
   diagnostics: {
-    chain: 'web-deck-document-runtime'
+    chain: string
     steps: string[]
     partialMissing: string[]
   }

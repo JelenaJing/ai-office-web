@@ -23,6 +23,7 @@ export interface CreateDeckInput {
   title: string
   prompt: string
   templateId?: string
+  taskId?: string
   source?: 'topic' | 'manuscript' | 'matter'
   sourceId?: string
   isCancelled?: () => boolean
@@ -76,10 +77,13 @@ export function buildDeckDocument(input: {
   templateId: string
   source: 'topic' | 'manuscript' | 'matter'
   sourceId?: string
+  chain?: string
+  partialMissing?: string[]
 }): WebDeckDocument {
   const now = new Date().toISOString()
   const layouts = Array.from(new Set(input.plan.slides.map((slide, index) => toDeckSlide(slide, index).layoutId)))
   const sourceLabel = input.source === 'matter' ? 'AIOS Matter' : input.source === 'manuscript' ? 'Document manuscript' : input.plan.title
+  const partialMissing = input.partialMissing ?? [...PPT_PARTIAL_MISSING]
   return {
     deckId: input.deckId,
     title: input.plan.title,
@@ -103,8 +107,8 @@ export function buildDeckDocument(input: {
     createdAt: now,
     updatedAt: now,
     diagnostics: {
-      chain: 'web-deck-document-runtime',
-      partialMissing: [...PPT_PARTIAL_MISSING],
+      chain: input.chain || 'web-deck-document-runtime',
+      partialMissing,
     },
   }
 }
@@ -115,6 +119,11 @@ export async function createDeckFromPrompt(input: CreateDeckInput): Promise<WebD
     steps.push(message)
     input.onStep?.(message, progress)
   }
+  console.info('[ppt-runtime] engine=builtin')
+  console.info('[ppt-runtime] route=/api/ppt/decks/start')
+  console.info(`[ppt-runtime] taskId=${input.taskId || 'n/a'}`)
+  console.info('[ppt-runtime] skillId=web.ppt.deck.create')
+  console.info('[ppt-runtime] usingMinimaxSkill=false')
 
   assertNotCancelled(input)
   emit('正在生成 DeckDocument 内容层…', 20)
@@ -127,6 +136,7 @@ export async function createDeckFromPrompt(input: CreateDeckInput): Promise<WebD
     templateId,
     source: input.source || 'topic',
     sourceId: input.sourceId,
+    chain: 'web-deck-document-runtime',
   })
 
   assertNotCancelled(input)
@@ -153,14 +163,19 @@ export async function createDeckFromPrompt(input: CreateDeckInput): Promise<WebD
   deck.artifactRefs = [
     { artifactId: artifact.id, type: artifact.type, relation: 'export' },
   ]
+  console.info(`[ppt-runtime] outputArtifactId=${artifact.id}`)
+  console.info(`[ppt-runtime] exportUrl=${artifact.exports?.[0]?.url || `/api/ppt/decks/${deckId}/download`}`)
 
   fs.rmSync(tmpDir, { recursive: true, force: true })
 
   return {
+    engine: 'builtin',
     deckId,
     deck,
+    slides: deck.slides,
     slidePlan: plan,
     artifact,
+    exportUrl: artifact.exports?.[0]?.url || `/api/ppt/decks/${deckId}/download`,
     relationships: {
       deckId,
       artifactId: artifact.id,

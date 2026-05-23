@@ -1,15 +1,19 @@
-/**
- * modules/skills — AI skill registry and execution
- *
- * Responsibilities:
- *  - Register named skills (e.g. web.docx.create)
- *  - Validate skill inputs before execution
- *  - Route skill runs to the appropriate handler (local or AI Gateway)
- *  - Return artifact references on success
- *  - Future: persist skill invocations for audit + quota tracking
- *
- * Current implementation: see routes/skills.ts + skills/docx/createDocxSkill.ts
- * Migration target: this module replaces routes/skills.ts once job queue is wired.
- */
+export interface BuiltInSkillDescriptor {
+  id: string
+  name: string
+  description: string
+  category: string
+  outputArtifactType?: string
+  version: string
+  enabled: boolean
+}
 
-export {}
+export const MINIMAX_PPTX_GENERATOR_SKILL: BuiltInSkillDescriptor = {
+  id: 'minimax.pptx-generator',
+  name: 'MiniMax PPTX Generator',
+  description: 'Vendored MiniMax pptx-generator skill spec runner that creates slide JS files and compiles a pptx artifact.',
+  category: 'presentation',
+  outputArtifactType: 'presentation',
+  version: '1.0.0',
+  enabled: true,
+}

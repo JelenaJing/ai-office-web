@@ -46,7 +46,7 @@ import { startChineseVoskVoiceInput, supportsVoskVoiceInput, type VoskVoiceInput
 import { platformApi } from '../../../platform'
 import { isWebShim } from '../../../platform/detect'
 import { runWebPptxCreate } from '../services/pptWebGeneration'
-import { mergeDeckIntoLiveSlides } from '../services/webDeckSlides'
+import { createMinimalPptLiveSlides, mergeDeckIntoLiveSlides } from '../services/webDeckSlides'
 import { artifactDownloadFilename } from '../../../utils/artifactDisplay'
 import { assembleDeckDocument } from '../ppt/assembleDeckDocument'
 import { validateDeckDocumentOutput } from '../ppt/validateDeckDocumentOutput'
@@ -905,6 +905,9 @@ export default function GenerationPromptComposer() {
       workbench.setModeSession('ppt', (session) => ({
         ...session,
         pptTaskStatus: 'generating_deck',
+        pptEngine: null,
+        pptFallbackFrom: null,
+        pptFallbackReason: null,
         pptLiveSlides: [],
         pptPreviewSlides: [],
         pptTotalSlides: 0,
@@ -935,26 +938,40 @@ export default function GenerationPromptComposer() {
           return
         }
         const artifact = result.artifact
-        const deck = result.data?.deck
-        const deckId = typeof result.data?.deckId === 'string' ? result.data.deckId : null
+        const resultData = (result.data ?? {}) as Record<string, unknown>
+        const deck = resultData.deck
+        const rawSlides = Array.isArray(resultData.slides) ? resultData.slides : []
+        const deckId = typeof resultData.deckId === 'string' ? resultData.deckId : null
+        const engine = resultData.engine === 'minimax_pptx_generator' ? 'minimax_pptx_generator' : 'builtin'
+        const fallbackFrom = resultData.fallbackFrom === 'minimax_pptx_generator' ? 'minimax_pptx_generator' : null
+        const fallbackReason = typeof resultData.fallbackReason === 'string' ? resultData.fallbackReason : null
         const deckTemplateId = deck && typeof deck === 'object' && 'templateId' in deck && typeof deck.templateId === 'string'
           ? deck.templateId
           : null
-        const liveSlides = mergeDeckIntoLiveSlides(deck, [])
+        let liveSlides = mergeDeckIntoLiveSlides(deck || { slides: rawSlides }, [])
         if (liveSlides.length === 0) {
-          throw new Error('PPT 任务已完成，但未返回可预览的 slides')
+          liveSlides = createMinimalPptLiveSlides(title, 'PPT 已生成，可下载查看完整文件。')
         }
-        const downloadUrl = artifact.exports?.[0]?.url || (deckId ? `/api/ppt/decks/${deckId}/download` : null)
+        const downloadUrl = (typeof resultData.exportUrl === 'string' && resultData.exportUrl)
+          || artifact.exports?.[0]?.url
+          || (deckId ? `/api/ppt/decks/${deckId}/download` : null)
         const fn = artifactDownloadFilename(artifact) || `${title}.pptx`
+        const engineText = engine === 'minimax_pptx_generator'
+          ? '生成引擎：MiniMax PPTX Generator Skill'
+          : '生成引擎：内置 PptxGenJS'
+        const fallbackText = fallbackFrom ? 'MiniMax PPTX Generator 失败，已回退内置引擎' : ''
         console.log('[ppt-web] deck slides count', liveSlides.length)
         workbench.setModeSession('ppt', (session) => ({
           ...session,
           pptTaskStatus: 'completed',
+          pptEngine: engine,
+          pptFallbackFrom: fallbackFrom,
+          pptFallbackReason: fallbackReason,
           resultType: 'pptx',
           resultAssetId: artifact.id,
           resultPath: downloadUrl || artifact.id,
           resultTitle: artifact.title || title,
-          resultPreviewText: `已生成 ${fn}，可在资源中心 › 生成记录下载。`,
+          resultPreviewText: [engineText, fallbackText, `已生成 ${fn}，可在资源中心 › 生成记录下载。`].filter(Boolean).join(' · '),
           pptLiveSlides: liveSlides,
           pptPreviewSlides: [],
           pptTotalSlides: liveSlides.length,
@@ -963,8 +980,8 @@ export default function GenerationPromptComposer() {
           pptActiveTemplateManifestId: deckTemplateId || session.pptActiveTemplateManifestId,
           lastUpdatedAt: new Date().toISOString(),
         }))
-        workbench.setGenerationStatus('completed', 'PPT 已生成')
-        setStatusMessage(`PPT 已生成（${fn}）。可在资源中心 › 生成记录下载，或点击右侧「下载 PPT」。`)
+        workbench.setGenerationStatus('completed', fallbackText || engineText)
+        setStatusMessage([`PPT 已生成（${fn}）。可在资源中心 › 生成记录下载，或点击右侧「下载 PPT」。`, engineText, fallbackText].filter(Boolean).join(' '))
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'PPT 生成失败'
         workbench.setGenerationStatus('error', msg)

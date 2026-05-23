@@ -676,6 +676,9 @@ export default function ResultPreviewPanel() {
   const pptDeckDocumentId = workbench.sessions.ppt.pptDeckDocumentId ?? null
   const pptActiveTemplateManifestId = workbench.sessions.ppt.pptActiveTemplateManifestId ?? null
   const pptTaskStatus = workbench.sessions.ppt.pptTaskStatus
+  const pptEngine = workbench.sessions.ppt.pptEngine
+  const pptFallbackFrom = workbench.sessions.ppt.pptFallbackFrom
+  const pptFallbackReason = workbench.sessions.ppt.pptFallbackReason
   const pptLiveSlides = workbench.sessions.ppt.pptLiveSlides
   const pptTotalSlides = workbench.sessions.ppt.pptTotalSlides
   const pptActiveSlideIndex = workbench.sessions.ppt.pptActiveSlideIndex
@@ -1939,6 +1942,17 @@ export default function ResultPreviewPanel() {
   const outputDirectoryPath = currentPreviewPath ? getParentPath(currentPreviewPath) : ''
   const imageAlreadyInWorkspace = currentMode === 'image'
     && Boolean(activeWorkspacePath && workbench.resultPath && normalizeFileLikePath(workbench.resultPath).startsWith(activeWorkspacePath))
+  const pptEngineStatusMessage = useMemo(() => {
+    const base = pptEngine === 'minimax_pptx_generator'
+      ? '生成引擎：MiniMax PPTX Generator Skill'
+      : pptEngine === 'builtin'
+        ? '生成引擎：内置 PptxGenJS'
+        : ''
+    const fallback = pptFallbackFrom
+      ? `MiniMax PPTX Generator 失败，已回退内置引擎${pptFallbackReason ? `（${pptFallbackReason}）` : ''}`
+      : ''
+    return [base, fallback].filter(Boolean).join(' · ')
+  }, [pptEngine, pptFallbackFrom, pptFallbackReason])
 
   // PPT mode: full-screen workbench replaces the default Shell layout
   if (currentMode === 'ppt') {
@@ -1965,7 +1979,7 @@ export default function ResultPreviewPanel() {
           packageHistory={pptPackageHistory}
           isApplyingSkill={pptSkillBusy || pptTemplateImporting}
           isResuming={pptIsResuming}
-          templateStatusMessage={pptSkillApplyStatus || workbench.generationStatus.message}
+          templateStatusMessage={pptSkillApplyStatus || pptEngineStatusMessage || workbench.generationStatus.message}
           onStop={handleStopPptGeneration}
           onResume={handleResumePptGeneration}
           onExportPartial={() => void handleExportPartialPptx()}

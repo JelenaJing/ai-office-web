@@ -123,6 +123,9 @@ export interface GenerationModeSession {
   pptContentPackageId: string | null
   pptActiveSkillId: string | null
   pptTaskStatus: PptTaskStatus
+  pptEngine: 'builtin' | 'minimax_pptx_generator' | null
+  pptFallbackFrom: 'minimax_pptx_generator' | null
+  pptFallbackReason: string | null
   pptLiveSlides: PptSlidePreview[]
   pptTotalSlides: number
   pptActiveSlideIndex: number
@@ -240,6 +243,9 @@ function createEmptySession(): GenerationModeSession {
     pptContentPackageId: null,
     pptActiveSkillId: null,
     pptTaskStatus: 'idle' as PptTaskStatus,
+    pptEngine: null,
+    pptFallbackFrom: null,
+    pptFallbackReason: null,
     pptLiveSlides: [],
     pptTotalSlides: 0,
     pptActiveSlideIndex: 0,

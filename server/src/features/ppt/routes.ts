@@ -10,8 +10,17 @@ import {
   updateDeckTask,
 } from './services/deckTaskStore'
 import { createDeckFromPrompt, retemplateDeck } from './services/deckRuntime'
+import { runMinimaxPptxGenerator } from './services/minimaxPptxGeneratorRunner'
 
 const router = Router()
+
+type PptEngine = 'builtin' | 'minimax_pptx_generator'
+
+function resolvePptEngine(): { engine: PptEngine; fallback: 'builtin' | 'none' } {
+  const engine = process.env.PPT_ENGINE === 'minimax_pptx_generator' ? 'minimax_pptx_generator' : 'builtin'
+  const fallback = process.env.PPT_ENGINE_FALLBACK === 'none' ? 'none' : 'builtin'
+  return { engine, fallback }
+}
 
 router.post('/decks/start', async (req, res) => {
   const userId = await requireAccountUser(req, res)
@@ -30,36 +39,103 @@ router.post('/decks/start', async (req, res) => {
   }
 
   const task = createDeckTask()
+  const engineConfig = resolvePptEngine()
+  console.info('[ppt-runtime] route=/api/ppt/decks/start')
+  console.info(`[ppt-runtime] engine=${engineConfig.engine}`)
+  console.info(`[ppt-runtime] taskId=${task.taskId}`)
+  console.info(`[ppt-runtime] skillId=${engineConfig.engine === 'minimax_pptx_generator' ? 'minimax.pptx-generator' : 'web.ppt.deck.create'}`)
+  console.info(`[ppt-runtime] usingMinimaxSkill=${engineConfig.engine === 'minimax_pptx_generator'}`)
   updateDeckTask(task.taskId, { status: 'running', message: '正在启动 PPT DeckDocument 任务…', progress: 5 })
 
-  void createDeckFromPrompt({
-    userId,
-    workspacePath,
-    title,
-    prompt,
-    templateId: typeof req.body?.templateId === 'string' ? req.body.templateId : undefined,
-    source: req.body?.source === 'manuscript' || req.body?.source === 'matter' ? req.body.source : 'topic',
-    sourceId: typeof req.body?.matterId === 'string'
-      ? req.body.matterId
-      : typeof req.body?.documentId === 'string'
-        ? req.body.documentId
-        : undefined,
-    isCancelled: () => Boolean(getDeckTask(task.taskId)?.cancelRequested),
-    onStep: (message, progress) => updateDeckTask(task.taskId, { status: 'running', message, progress }),
-  })
+  const runBuiltinEngine = async (fallbackReason?: string) => {
+    if (fallbackReason) {
+      console.info('[ppt-runtime] fallback=builtin')
+      console.info(`[ppt-runtime] error=${fallbackReason}`)
+    } else {
+      console.info('[ppt-runtime] fallback=')
+    }
+    const result = await createDeckFromPrompt({
+      userId,
+      workspacePath,
+      title,
+      prompt,
+      taskId: task.taskId,
+      templateId: typeof req.body?.templateId === 'string' ? req.body.templateId : undefined,
+      source: req.body?.source === 'manuscript' || req.body?.source === 'matter' ? req.body.source : 'topic',
+      sourceId: typeof req.body?.matterId === 'string'
+        ? req.body.matterId
+        : typeof req.body?.documentId === 'string'
+          ? req.body.documentId
+          : undefined,
+      isCancelled: () => Boolean(getDeckTask(task.taskId)?.cancelRequested),
+      onStep: (message, progress) => updateDeckTask(task.taskId, { status: 'running', message, progress }),
+    })
+    if (!fallbackReason) return result
+    return {
+      ...result,
+      engine: 'builtin' as const,
+      fallbackFrom: 'minimax_pptx_generator' as const,
+      fallbackReason,
+    }
+  }
+
+  const runSelectedEngine = async () => {
+    if (engineConfig.engine !== 'minimax_pptx_generator') {
+      return runBuiltinEngine()
+    }
+    try {
+      return await runMinimaxPptxGenerator({
+        userId,
+        workspacePath,
+        title,
+        prompt,
+        taskId: task.taskId,
+        routePath: '/api/ppt/decks/start',
+        skillId: 'minimax.pptx-generator',
+        language: req.body?.language === 'en-US' ? 'en-US' : 'zh-CN',
+        slideCount: typeof req.body?.slideCount === 'number'
+          ? req.body.slideCount
+          : Number(req.body?.slideCount || 0) || undefined,
+        themeId: typeof req.body?.themeId === 'string' ? req.body.themeId : undefined,
+        source: req.body?.source === 'manuscript' || req.body?.source === 'matter' ? req.body.source : 'topic',
+        sourceId: typeof req.body?.matterId === 'string'
+          ? req.body.matterId
+          : typeof req.body?.documentId === 'string'
+            ? req.body.documentId
+            : undefined,
+        isCancelled: () => Boolean(getDeckTask(task.taskId)?.cancelRequested),
+        onStep: (message, progress) => updateDeckTask(task.taskId, { status: 'running', message, progress }),
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (engineConfig.fallback === 'builtin') {
+        return runBuiltinEngine(message)
+      }
+      console.info('[ppt-runtime] fallback=none')
+      console.info(`[ppt-runtime] error=${message}`)
+      throw error
+    }
+  }
+
+  void runSelectedEngine()
     .then((result) => {
       if (getDeckTask(task.taskId)?.cancelRequested) return
+      console.info(`[ppt-runtime] outputArtifactId=${result.artifact.id}`)
+      console.info(`[ppt-runtime] exportUrl=${result.exportUrl || result.artifact.exports?.[0]?.url || `/api/ppt/decks/${result.deckId}/download`}`)
       updateDeckTask(task.taskId, {
         deckId: result.deckId,
         status: 'completed',
         progress: 100,
-        message: 'PPT DeckDocument 任务已完成',
+        message: result.engine === 'minimax_pptx_generator' ? 'MiniMax PPTX Generator 任务已完成' : 'PPT DeckDocument 任务已完成',
         result,
       })
     })
     .catch((error) => {
       const message = error instanceof Error ? error.message : String(error)
-      const cancelled = error instanceof Error && error.name === 'PptDeckTaskCancelledError'
+      const cancelled = error instanceof Error && (
+        error.name === 'PptDeckTaskCancelledError'
+        || error.name === 'MinimaxPptxGeneratorCancelledError'
+      )
       updateDeckTask(task.taskId, {
         status: cancelled ? 'cancelled' : 'failed',
         message,

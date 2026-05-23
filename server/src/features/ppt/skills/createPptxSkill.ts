@@ -18,6 +18,10 @@ export type CreatePptxResult =
   | { success: false; error: string; status?: number }
 
 export async function runCreatePptxSkill(input: CreatePptxInput): Promise<CreatePptxResult> {
+  console.info('[ppt-runtime] engine=web.pptx.create+PptxGenJS')
+  console.info('[ppt-runtime] route=/api/skills/web.pptx.create/run')
+  console.info('[ppt-runtime] skillId=web.pptx.create')
+  console.info('[ppt-runtime] usingMinimaxSkill=false')
   const parsed = parseWorkspacePath(input.workspacePath)
   if (!parsed) {
     return { success: false, error: 'workspacePath 无效', status: 400 }
@@ -46,6 +50,8 @@ export async function runCreatePptxSkill(input: CreatePptxInput): Promise<Create
       format: 'pptx',
       content: buffer,
     })
+    console.info(`[ppt-runtime] outputArtifactId=${artifact.id}`)
+    console.info(`[ppt-runtime] exportUrl=${artifact.exports?.[0]?.url || ''}`)
 
     return { success: true, artifactId: artifact.id, artifact }
   } catch (err) {
