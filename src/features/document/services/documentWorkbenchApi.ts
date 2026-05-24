@@ -249,6 +249,15 @@ export interface FormalTemplateCommitResponse extends DocumentTaskResult {
   fallbackReason?: string | null
 }
 
+export interface DocumentImportResponse extends DocumentTaskResult {
+  success: boolean
+  source: 'upload' | 'artifact'
+  html: string
+  text: string
+  title: string
+  wordCount: number
+}
+
 function authHeaders(): Record<string, string> {
   const token = platformApi.auth.getToken()
   return token ? { Authorization: `Bearer ${token}` } : {}
@@ -455,6 +464,37 @@ export async function confirmFormalTemplateFields(input: {
   })
 }
 
+export async function analyzeFormalTemplateFlow(input: {
+  presetId?: string
+  customTemplateText?: string
+  instruction?: string
+}): Promise<{
+  success: boolean
+  presetId: string
+  presetLabel: string
+  templateKind: string
+  runtimeKind: string
+  supported: boolean
+  unavailableReason?: string
+  templateText: string
+  fields: Array<{
+    fieldId: string
+    label: string
+    required: boolean
+    dataType: string
+    hint?: string
+    occurrences: number
+  }>
+  defaultSections: string[]
+  diagnostics: { chain: string; steps: string[] }
+}> {
+  return requestJson('/api/document/formal-template/analyze', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+}
+
 export async function previewFormalTemplate(input: {
   presetId?: string
   customTemplateText?: string
@@ -485,6 +525,27 @@ export async function commitFormalTemplate(input: {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
   })
+}
+
+export async function importDocumentDocx(input: {
+  file?: File
+  artifactId?: string
+  workspacePath?: string
+}): Promise<DocumentImportResponse> {
+  const formData = new FormData()
+  if (input.file) formData.append('file', input.file)
+  if (input.artifactId) formData.append('artifactId', input.artifactId)
+  if (input.workspacePath) formData.append('workspacePath', input.workspacePath)
+  const response = await fetch('/api/documents/import-docx', {
+    method: 'POST',
+    headers: authHeaders(),
+    body: formData,
+  })
+  const payload = await response.json().catch(() => ({})) as { error?: string; message?: string }
+  if (!response.ok) {
+    throw new Error(payload.error || payload.message || `请求失败 (${response.status})`)
+  }
+  return payload as DocumentImportResponse
 }
 
 export function buildKnowledgeRefsFromSelection(

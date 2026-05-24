@@ -1,5 +1,5 @@
 import styled from 'styled-components'
-import { AlertCircle, Clock3, Download, FileDown, RotateCcw, Save } from 'lucide-react'
+import { AlertCircle, Clock3, Download, FileDown, RotateCcw, Save, Upload } from 'lucide-react'
 
 const Toolbar = styled.div`
   display: flex;
@@ -69,6 +69,7 @@ interface DocumentTopToolbarProps {
   docxReady?: boolean
   exportError?: string | null
   onDownloadDocx: () => void
+  onImportDocx?: () => void
   onExportPdf: () => void
   onSave: () => void
   onRegenerate: () => void
@@ -90,6 +91,7 @@ export function DocumentTopToolbar({
   docxReady,
   exportError,
   onDownloadDocx,
+  onImportDocx,
   onExportPdf,
   onSave,
   onRegenerate,
@@ -118,6 +120,10 @@ export function DocumentTopToolbar({
         ) : null}
       </MetaRow>
       <Actions>
+        <ActionButton type="button" data-testid="document-import-docx" onClick={onImportDocx} disabled={busy}>
+          <Upload size={15} />
+          导入 DOCX
+        </ActionButton>
         <ActionButton type="button" data-testid="document-download-docx" onClick={onDownloadDocx} disabled={busy}>
           <Download size={15} />
           下载 DOCX

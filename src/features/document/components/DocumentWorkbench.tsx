@@ -21,6 +21,7 @@ import { DocumentOutlinePanel } from './DocumentOutlinePanel'
 import { DocumentTemplatePanel } from './DocumentTemplatePanel'
 import { DocumentTopToolbar } from './DocumentTopToolbar'
 import {
+  analyzeFormalTemplateFlow,
   buildKnowledgeRefsFromSelection,
   commitFormalTemplate,
   confirmFormalTemplateFields,
@@ -29,6 +30,7 @@ import {
   editDocumentSelection,
   engineLabel,
   exportDocumentArtifact,
+  importDocumentDocx,
   loadDocumentWorkbenchConfig,
   previewFormalTemplate,
   routeDocumentTask,
@@ -45,6 +47,8 @@ import {
 } from '../services/documentDraftTransforms'
 import { runDocumentSkill } from '../services/documentSkillAdapter'
 import { runPaperWorkflowGenerate } from '../services/paperWorkflowAdapter'
+import { fetchContentHandoff } from '../services/contentHandoffApi'
+import { consumePendingDocumentHandoff, peekPendingDocumentHandoff } from '../../../services/pendingDocumentHandoff'
 
 const Shell = styled.div`
   flex: 1;
@@ -243,7 +247,7 @@ function stripTransientAiMarkup(html: string): string {
 }
 
 export default function DocumentWorkbench() {
-  const { activeWorkspacePath } = useWorkspace()
+  const { activeWorkspacePath, openWorkspace } = useWorkspace()
   const { workspaceKbIds, setWorkspaceKbIds } = useDocumentWorkspaceKnowledge()
   const { departments, loading: departmentsLoading } = useDepartment()
 
@@ -268,6 +272,7 @@ export default function DocumentWorkbench() {
   const [recentAiChange, setRecentAiChange] = useState<RecentAiChange | null>(null)
 
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
+  const importDocxInputRef = useRef<HTMLInputElement | null>(null)
   const canvasRef = useRef<DocumentEditorCanvasHandle | null>(null)
 
   useEffect(() => {
@@ -297,6 +302,10 @@ export default function DocumentWorkbench() {
     setHydrated(false)
     setLastAiSnapshot(null)
     setRecentAiChange(null)
+    if (peekPendingDocumentHandoff()) {
+      setHydrated(true)
+      return
+    }
     const persisted = loadPersistedState(activeWorkspacePath)
     if (persisted) {
       setSelectedTemplateId(persisted.templateId || 'annual_report')
@@ -435,6 +444,43 @@ export default function DocumentWorkbench() {
     )
   }, [])
 
+  useEffect(() => {
+    if (!hydrated) return
+    const pending = peekPendingDocumentHandoff()
+    if (!pending?.handoffId) return
+
+    let disposed = false
+    setBusy(true)
+    setStatusMessage('正在加载外部投递文稿…')
+    setStatusTone(undefined)
+
+    void (async () => {
+      try {
+        const detail = pending.detail || await fetchContentHandoff(pending.handoffId)
+        if (disposed) return
+        if (detail.workspacePath && detail.workspacePath !== activeWorkspacePath) {
+          await openWorkspace(detail.workspacePath)
+          return
+        }
+        consumePendingDocumentHandoff()
+        syncEditorStateFromTaskResult(detail.result, detail.createdAt)
+        setStatusMessage(`已加载外部投递文稿：${detail.title}`)
+        setStatusTone('ok')
+      } catch (error) {
+        if (disposed) return
+        consumePendingDocumentHandoff()
+        setStatusMessage(error instanceof Error ? error.message : '外部文稿加载失败')
+        setStatusTone('err')
+      } finally {
+        if (!disposed) setBusy(false)
+      }
+    })()
+
+    return () => {
+      disposed = true
+    }
+  }, [activeWorkspacePath, hydrated, openWorkspace, syncEditorStateFromTaskResult])
+
   const saveCurrentDocument = useCallback(async (status = '正在保存文稿…') => {
     if (!editorState.documentId || !editorState.documentDraft) return null
     const latestHtml = stripTransientAiMarkup(canvasRef.current?.getHtml() || editorState.html)
@@ -494,6 +540,10 @@ export default function DocumentWorkbench() {
     uploadInputRef.current?.click()
   }, [])
 
+  const handleImportDocx = useCallback(() => {
+    importDocxInputRef.current?.click()
+  }, [])
+
   const handleAttachmentFileChange = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     event.target.value = ''
@@ -510,6 +560,33 @@ export default function DocumentWorkbench() {
       setStatusTone('err')
     }
   }, [])
+
+  const handleImportDocxFileChange = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file || !activeWorkspacePath) return
+    setBusy(true)
+    setStatusTone(undefined)
+    setExportError(null)
+    try {
+      setStatusMessage('正在导入 DOCX…')
+      const imported = await importDocumentDocx({
+        file,
+        workspacePath: activeWorkspacePath,
+      })
+      syncEditorStateFromTaskResult(imported, new Date().toISOString())
+      setModifiedSectionIds([])
+      setLastAiSnapshot(null)
+      setRecentAiChange(null)
+      setStatusMessage(`DOCX 已导入并进入 DocumentWorkbench：${imported.title}`)
+      setStatusTone('ok')
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : 'DOCX 导入失败')
+      setStatusTone('err')
+    } finally {
+      setBusy(false)
+    }
+  }, [activeWorkspacePath, syncEditorStateFromTaskResult])
 
   const handleGenerate = useCallback(async () => {
     if (!activeWorkspacePath) {
@@ -552,12 +629,12 @@ export default function DocumentWorkbench() {
       }
 
       if (routed.intent === 'edit_selection') {
-        await handleAiSubmit(generationPrompt.trim(), 'selection')
+        await runAiSubmit(generationPrompt.trim(), 'selection')
         return
       }
 
       if (routed.intent === 'edit_section') {
-        await handleAiSubmit(generationPrompt.trim(), 'section')
+        await runAiSubmit(generationPrompt.trim(), 'section')
         return
       }
 
@@ -586,13 +663,20 @@ export default function DocumentWorkbench() {
 
       if (routed.intent === 'formal_template') {
         setStatusMessage('正在分析正式模板字段…')
+        const analyzed = await analyzeFormalTemplateFlow({
+          instruction: generationPrompt.trim(),
+        })
+        if (!analyzed.supported) {
+          setStatusMessage(analyzed.unavailableReason || '当前正式模板能力未完整迁移到 Web')
+          setStatusTone('err')
+          return
+        }
         const confirmed = await confirmFormalTemplateFields({
           instruction: generationPrompt.trim(),
         })
         if (confirmed.missingFields.length > 0) {
-          setStatusMessage(`正式模板缺少字段：${confirmed.missingFields.join('、')}`)
-          setStatusTone('err')
-          return
+          setStatusMessage(`正式模板仍缺少字段：${confirmed.missingFields.join('、')}，将继续预览并在提交时使用可解析内容。`)
+          setStatusTone(undefined)
         }
         setStatusMessage('正在预览正式模板…')
         await previewFormalTemplate({
@@ -646,7 +730,7 @@ export default function DocumentWorkbench() {
     } finally {
       setBusy(false)
     }
-  }, [activeWorkspacePath, attachments, editorState.documentDraft, editorState.selectedSectionId, editorState.selectedText, editorState.title, generationPrompt, handleAiSubmit, knowledgeNameMap, syncEditorStateFromTaskResult, template, workspaceKbIds])
+  }, [activeWorkspacePath, attachments, editorState.documentDraft, editorState.selectedSectionId, editorState.selectedText, editorState.title, generationPrompt, knowledgeNameMap, syncEditorStateFromTaskResult, template, workspaceKbIds])
 
   const handleSelectSection = useCallback((sectionId: string) => {
     setEditorState((prev) => ({
@@ -818,7 +902,7 @@ export default function DocumentWorkbench() {
     }
   }, [appendHistory, captureAiSnapshot, editorState, markSectionModified, selectedSection])
 
-  const handleAiSubmit = useCallback(async (instruction: string, scope: DocumentAiScope) => {
+  async function runAiSubmit(instruction: string, scope: DocumentAiScope) {
     if (!editorState.documentId || !editorState.documentDraft) {
       setStatusMessage('请先生成文稿')
       setStatusTone('err')
@@ -951,41 +1035,37 @@ export default function DocumentWorkbench() {
     } finally {
       setBusy(false)
     }
-  }, [appendHistory, attachments, captureAiSnapshot, editorState, handleDocumentRewrite, knowledgeNameMap, markSectionModified, selectedSection, syncEditorStateFromTaskResult, template, workspaceKbIds])
+  }
+
+  const handleAiSubmit = useCallback(runAiSubmit, [appendHistory, attachments, captureAiSnapshot, editorState, handleDocumentRewrite, knowledgeNameMap, markSectionModified, selectedSection, syncEditorStateFromTaskResult, template, workspaceKbIds])
 
   const handleDownloadDocx = useCallback(async () => {
     if (!editorState.documentId) return
     setBusy(true)
     try {
-      let artifactId = editorState.artifactId
-      let filename = artifactFilename || 'document.docx'
-      if (editorState.dirty) {
-        const saved = await saveCurrentDocument('检测到未保存修改，正在先更新 DOCX…')
-        if (!saved) {
-          throw new Error('DOCX 更新失败，已阻止下载旧版本。')
-        }
-        artifactId = saved?.artifactId || saved?.artifact?.id || artifactId
-        filename = saved?.filename || filename
-      } else if (!artifactId) {
-        const exported = await exportDocumentArtifact({
-          documentId: editorState.documentId,
-          format: 'docx',
-          title: editorState.title,
-          html: editorState.html,
-          documentDraft: editorState.documentDraft,
-          outline: editorState.outline,
-        })
-        artifactId = exported.artifactId
-        filename = exported.filename
-        setEditorState((prev) => ({
-          ...prev,
-          artifactId: exported.artifactId,
-          exportUrl: exported.exportUrl,
-          dirty: false,
-          lastSavedAt: new Date().toISOString(),
-        }))
-        setArtifactFilename(exported.filename)
-      }
+      const latestHtml = stripTransientAiMarkup(canvasRef.current?.getHtml() || editorState.html)
+      const latestState = latestHtml !== editorState.html
+        ? updateEditableStateFromHtml(editorState, latestHtml)
+        : editorState
+      const exported = await exportDocumentArtifact({
+        documentId: latestState.documentId!,
+        format: 'docx',
+        title: latestState.title,
+        html: latestState.html,
+        documentDraft: latestState.documentDraft,
+        outline: latestState.outline,
+      })
+      const artifactId = exported.artifactId
+      const filename = exported.filename || artifactFilename || 'document.docx'
+      setEditorState((prev) => ({
+        ...latestState,
+        artifactId: exported.artifactId,
+        exportUrl: exported.exportUrl,
+        dirty: false,
+        lastSavedAt: new Date().toISOString(),
+        saving: false,
+      }))
+      setArtifactFilename(exported.filename)
       if (!artifactId) {
         throw new Error('没有可下载的 DOCX 产物')
       }
@@ -1000,7 +1080,7 @@ export default function DocumentWorkbench() {
     } finally {
       setBusy(false)
     }
-  }, [artifactFilename, editorState, saveCurrentDocument])
+  }, [artifactFilename, editorState])
 
   const handleExportPdf = useCallback(() => {
     setStatusMessage('PDF 导出暂未配置')
@@ -1009,19 +1089,20 @@ export default function DocumentWorkbench() {
 
   return (
     <Shell data-testid="document-workbench">
-      <DocumentTopToolbar
-        engineLabel={activeEngineLabel}
-        templateLabel={activeTemplateLabel}
-        knowledgeCount={workspaceKbIds.length}
-        fallbackReason={editorState.fallbackReason || null}
-        artifactLabel={artifactLabel}
-        dirty={editorState.dirty}
-        saving={editorState.saving}
-        lastSavedAt={editorState.lastSavedAt || null}
-        docxReady={Boolean(editorState.artifactId && !editorState.dirty)}
-        exportError={exportError}
-        onDownloadDocx={() => void handleDownloadDocx()}
-        onExportPdf={handleExportPdf}
+        <DocumentTopToolbar
+          engineLabel={activeEngineLabel}
+          templateLabel={activeTemplateLabel}
+          knowledgeCount={workspaceKbIds.length}
+          fallbackReason={editorState.fallbackReason || null}
+          artifactLabel={artifactLabel}
+          dirty={editorState.dirty}
+          saving={editorState.saving}
+          lastSavedAt={editorState.lastSavedAt || null}
+          docxReady={Boolean(editorState.artifactId && !editorState.dirty)}
+          exportError={exportError}
+          onImportDocx={handleImportDocx}
+          onDownloadDocx={() => void handleDownloadDocx()}
+          onExportPdf={handleExportPdf}
         onSave={() => void saveCurrentDocument()}
         onRegenerate={() => void handleGenerate()}
         onViewVersions={() => {}}
@@ -1133,6 +1214,13 @@ export default function DocumentWorkbench() {
         type="file"
         accept=".docx,.doc,.pdf,.txt,.md,.csv"
         onChange={(event) => void handleAttachmentFileChange(event)}
+      />
+      <input
+        ref={importDocxInputRef}
+        style={hiddenInputStyles}
+        type="file"
+        accept=".docx"
+        onChange={(event) => void handleImportDocxFileChange(event)}
       />
     </Shell>
   )
