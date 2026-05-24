@@ -4,6 +4,7 @@ import { requireAccountUser } from '../../lib/authUser'
 import { extractDocxContent } from './services/docxExtractService'
 import paperWorkflowRouter from './routes/paperWorkflow'
 import formalTemplateRouter from './routes/formalTemplate'
+import academicWritingRouter from './routes/academicWriting'
 
 const router = Router()
 
@@ -14,6 +15,7 @@ const upload = multer({
 
 router.use('/paper-workflow', paperWorkflowRouter)
 router.use('/formal-template', formalTemplateRouter)
+router.use('/academic-writing', academicWritingRouter)
 
 /**
  * POST /api/document/import-docx

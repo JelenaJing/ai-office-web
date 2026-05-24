@@ -329,6 +329,9 @@ export interface DocumentEditorCanvasHandle {
     citationId: string
     refId: string
     sourceId?: string
+    sourceType?: string
+    chunkId?: string
+    trustLevel?: string
     label: string
     renderMode?: 'inline' | 'badge' | 'footnote'
   }) => ApplyDocumentEditPatchResult
@@ -339,6 +342,9 @@ export interface DocumentEditorCanvasHandle {
     label: string
     refLabel?: string
     sourceId?: string
+    sourceType?: string
+    chunkId?: string
+    trustLevel?: string
     renderMode?: 'inline' | 'badge' | 'footnote'
   }) => AppendCitationToBlockResult
 }
@@ -912,7 +918,7 @@ export const DocumentEditorCanvas = forwardRef<DocumentEditorCanvasHandle, Docum
           root,
           patch: {
             type: 'insert_citation',
-            html: `<span class="doc-citation" data-citation-id="${escapeHtml(input.citationId)}" data-ref-id="${escapeHtml(input.refId)}" data-ref-label="${escapeHtml(input.label)}" data-source-id="${escapeHtml(input.sourceId || '')}" data-render-mode="${escapeHtml(input.renderMode || 'inline')}">[${escapeHtml(input.label)}]</span>`,
+            html: `<span class="doc-citation" data-citation-id="${escapeHtml(input.citationId)}" data-ref-id="${escapeHtml(input.refId)}" data-ref-label="${escapeHtml(input.label)}" data-source-id="${escapeHtml(input.sourceId || '')}" data-source-type="${escapeHtml(input.sourceType || '')}" data-chunk-id="${escapeHtml(input.chunkId || '')}" data-trust-level="${escapeHtml(input.trustLevel || '')}" data-render-mode="${escapeHtml(input.renderMode || 'inline')}">[${escapeHtml(input.label)}]</span>`,
             citation: {
               id: input.citationId,
               refId: input.refId,
@@ -920,12 +926,18 @@ export const DocumentEditorCanvas = forwardRef<DocumentEditorCanvasHandle, Docum
               text: input.label,
               renderMode: input.renderMode || 'inline',
               sourceId: input.sourceId,
+              sourceType: input.sourceType,
+              chunkId: input.chunkId,
+              trustLevel: input.trustLevel,
             },
             reference: {
               id: input.refId,
               label: input.label,
               kind: 'knowledge_base',
               sourceId: input.sourceId || input.refId,
+              sourceType: input.sourceType,
+              chunkId: input.chunkId,
+              trustLevel: input.trustLevel,
             },
           },
           savedRange: savedRangeRef.current,

@@ -67,9 +67,12 @@ function buildReferences(knowledgeRefs: DocumentKnowledgeRef[]): DocumentReferen
     id: `ref-${ref.kind}-${ref.id}`,
     label: ref.label,
     kind: ref.kind,
-    sourceId: ref.id,
+    sourceId: ref.sourceId || ref.id,
     sourceLabel: ref.label,
     excerpt: ref.excerpt,
+    sourceType: ref.sourceType || ref.kind,
+    chunkId: ref.chunkId,
+    trustLevel: ref.trustLevel || ref.citationStatus,
     citationStatus: ref.citationStatus,
   }))
 }
@@ -102,6 +105,9 @@ function buildCitationsFromHtml(input: {
       text: normalizeText(node.textContent || ''),
       renderMode: (node.dataset.renderMode as DocumentCitation['renderMode']) || 'inline',
       sourceId: node.dataset.sourceId || undefined,
+      sourceType: node.dataset.sourceType || undefined,
+      chunkId: node.dataset.chunkId || undefined,
+      trustLevel: node.dataset.trustLevel || undefined,
     }
   })
 }
@@ -326,6 +332,9 @@ function buildDocumentArtifactFromHtml(input: {
       kind: 'manual_note',
       sourceId: node.dataset.sourceId || refId,
       sourceLabel: label,
+      sourceType: node.dataset.sourceType || 'manual_note',
+      chunkId: node.dataset.chunkId,
+      trustLevel: node.dataset.trustLevel || 'partial',
       citationStatus: 'partial',
     })
     knownRefIds.add(refId)

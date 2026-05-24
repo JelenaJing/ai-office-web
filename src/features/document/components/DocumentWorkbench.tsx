@@ -19,6 +19,7 @@ import { DocumentAttachmentPanel, DocumentKnowledgePanel } from './DocumentKnowl
 import { DocumentOutlinePanel } from './DocumentOutlinePanel'
 import { DocumentTemplatePanel } from './DocumentTemplatePanel'
 import { DocumentTopToolbar } from './DocumentTopToolbar'
+import { AcademicWritingPanel, type AcademicWritingPanelSubmit } from './AcademicWritingPanel'
 import {
   analyzeFormalTemplateFlow,
   buildKnowledgeRefsFromSelection,
@@ -61,6 +62,7 @@ import { undoFormatOp } from '../services/documentPatchApplier'
 import { downloadDocxFromArtifact } from '../services/documentArtifactToDocx'
 import { runDocumentSkill } from '../services/documentSkillAdapter'
 import { runPaperWorkflowGenerate } from '../services/paperWorkflowAdapter'
+import { runAcademicWritingWorkflow } from '../services/academicWritingWorkflow'
 import { fetchContentHandoff } from '../services/contentHandoffApi'
 import { consumePendingDocumentHandoff, peekPendingDocumentHandoff } from '../../../services/pendingDocumentHandoff'
 
@@ -1059,6 +1061,45 @@ export default function DocumentWorkbench() {
     }
   }, [activeWorkspacePath, attachments, editorState.documentDraft, editorState.selectedSectionId, editorState.selectedText, editorState.title, generationPrompt, knowledgeNameMap, syncEditorStateFromTaskResult, template, workspaceKbIds])
 
+  const handleAcademicWritingGenerate = useCallback(async (input: AcademicWritingPanelSubmit) => {
+    if (!activeWorkspacePath) {
+      setStatusMessage('请先打开工作区')
+      setStatusTone('err')
+      return
+    }
+    setBusy(true)
+    setStatusTone(undefined)
+    setExportError(null)
+    try {
+      setStatusMessage('正在生成论文大纲与章节内容…')
+      const knowledgeRefs = buildKnowledgeRefsFromSelection(workspaceKbIds, attachments, knowledgeNameMap)
+      const response = await runAcademicWritingWorkflow({
+        workspacePath: activeWorkspacePath,
+        topic: input.topic,
+        paperType: input.paperType,
+        researchGoal: input.researchGoal,
+        lengthHint: input.lengthHint,
+        language: input.language,
+        style: input.style,
+        outline: input.outline,
+        knowledgeRefs,
+      })
+      syncEditorStateFromTaskResult(response.result, new Date().toISOString())
+      setSelectedTemplateId(`academic.${input.paperType}`)
+      setModifiedSectionIds([])
+      setLastAiSnapshot(null)
+      setRecentAiChange(null)
+      setGenerationPrompt(input.topic)
+      setStatusMessage(`学术写作 workflow 已完成：${response.outline.length} 个章节、${response.citations.length} 条引用。`)
+      setStatusTone('ok')
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : '学术写作 workflow 失败')
+      setStatusTone('err')
+    } finally {
+      setBusy(false)
+    }
+  }, [activeWorkspacePath, attachments, knowledgeNameMap, syncEditorStateFromTaskResult, workspaceKbIds])
+
   const handleSelectSection = useCallback((sectionId: string) => {
     setEditorState((prev) => ({
       ...prev,
@@ -1248,6 +1289,9 @@ export default function DocumentWorkbench() {
       citationId: `citation-${Date.now()}`,
       refId: reference.id,
       sourceId: reference.sourceId,
+      sourceType: reference.sourceType || reference.kind,
+      chunkId: reference.chunkId,
+      trustLevel: reference.trustLevel || reference.citationStatus,
       label: reference.label,
       renderMode: 'inline',
     })
@@ -1348,16 +1392,21 @@ export default function DocumentWorkbench() {
       const knowledgeRefs = editorState.documentArtifact?.knowledgeRefs || []
       const refSource = availableRefs[0] || (knowledgeRefs[0]
         ? {
-            id: `ref-kb-${knowledgeRefs[0].knowledgeBaseId || Date.now()}`,
-            label: knowledgeRefs[0].filename || knowledgeRefs[0].name || '知识库引用',
+            id: `ref-${knowledgeRefs[0].kind}-${knowledgeRefs[0].id}`,
+            label: knowledgeRefs[0].label || '知识库引用',
             kind: 'knowledge_base' as const,
-            sourceId: knowledgeRefs[0].knowledgeBaseId || knowledgeRefs[0].id || 'kb-unknown',
+            sourceId: knowledgeRefs[0].sourceId || knowledgeRefs[0].id || 'kb-unknown',
+            sourceType: knowledgeRefs[0].sourceType || knowledgeRefs[0].kind,
+            chunkId: knowledgeRefs[0].chunkId,
+            trustLevel: knowledgeRefs[0].trustLevel || knowledgeRefs[0].citationStatus,
           }
         : {
             id: `ref-placeholder-${Date.now()}`,
             label: '待补充依据',
             kind: 'manual_note' as const,
             sourceId: 'manual',
+            sourceType: 'manual_note',
+            trustLevel: 'unverified',
           })
 
       const citationId = `citation-cmd-${Date.now()}`
@@ -1368,6 +1417,9 @@ export default function DocumentWorkbench() {
         label: refSource.label,
         refLabel: refSource.label,
         sourceId: refSource.sourceId,
+        sourceType: refSource.sourceType,
+        chunkId: refSource.chunkId,
+        trustLevel: refSource.trustLevel,
       })
 
       if (!result?.applied) {
@@ -1935,6 +1987,20 @@ export default function DocumentWorkbench() {
                   setSelectedTemplateId(id)
                 }}
               />
+            </SidebarSection>
+          </SidebarCard>
+
+          <SidebarCard>
+            <SidebarSection>
+              <SidebarHeader>学术写作</SidebarHeader>
+              <div style={{ padding: '0 16px 16px' }}>
+                <AcademicWritingPanel
+                  disabled={busy}
+                  selectedKnowledgeIds={workspaceKbIds}
+                  attachments={attachments}
+                  onGenerate={handleAcademicWritingGenerate}
+                />
+              </div>
             </SidebarSection>
           </SidebarCard>
 

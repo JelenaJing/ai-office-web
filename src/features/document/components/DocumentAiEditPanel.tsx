@@ -456,7 +456,9 @@ export function DocumentAiEditPanel({
               {references.map((reference) => (
                 <RefCard key={reference.id}>
                   <RefLabel>{reference.label}</RefLabel>
-                  <RefMeta>{reference.kind} · {reference.sourceLabel || reference.sourceId || '手动来源'}</RefMeta>
+                  <RefMeta>{reference.sourceType || reference.kind} · sourceId: {reference.sourceId || '手动来源'}</RefMeta>
+                  <RefMeta>chunkId: {reference.chunkId || '待检索'} · trustLevel: {reference.trustLevel || reference.citationStatus || 'unknown'}</RefMeta>
+                  {reference.citedBlockIds?.length ? <RefMeta>引用段落：{reference.citedBlockIds.join('、')}</RefMeta> : null}
                   {reference.excerpt ? <RefMeta>{reference.excerpt}</RefMeta> : null}
                   {onInsertCitation ? (
                     <QuickBtn
@@ -475,7 +477,8 @@ export function DocumentAiEditPanel({
                 {citations.slice(0, 6).map((citation) => (
                   <RefCard key={citation.id}>
                     <RefLabel>{citation.text || citation.id}</RefLabel>
-                    <RefMeta>{citation.renderMode} · {citation.blockId}</RefMeta>
+                    <RefMeta>{citation.renderMode} · blockId: {citation.blockId}</RefMeta>
+                    <RefMeta>sourceId: {citation.sourceId || 'manual'} · chunkId: {citation.chunkId || '待检索'} · trustLevel: {citation.trustLevel || 'unknown'}</RefMeta>
                   </RefCard>
                 ))}
               </CitationList>

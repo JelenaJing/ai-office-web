@@ -102,6 +102,7 @@ router.post('/start', async (req, res) => {
             engine: 'builtin',
             knowledgeRefs: [],
           }),
+          html: result.html,
         })
         updatePaperTask(task.taskId, {
           status: 'completed',
@@ -232,6 +233,7 @@ router.post('/generate', async (req, res) => {
         engine: 'builtin',
         knowledgeRefs: [],
       }),
+      html: result.html,
     })
     res.json({
       ...result,

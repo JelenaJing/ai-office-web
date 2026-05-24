@@ -287,6 +287,9 @@ export function appendCitationToBlock(
     label: string
     refLabel?: string
     sourceId?: string
+    sourceType?: string
+    chunkId?: string
+    trustLevel?: string
     renderMode?: 'inline' | 'badge' | 'footnote'
   },
 ): AppendCitationToBlockResult {
@@ -302,12 +305,30 @@ export function appendCitationToBlock(
   if (input.sourceId) {
     span.dataset.sourceId = input.sourceId
   }
+  if (input.sourceType) {
+    span.dataset.sourceType = input.sourceType
+  }
+  if (input.chunkId) {
+    span.dataset.chunkId = input.chunkId
+  }
+  if (input.trustLevel) {
+    span.dataset.trustLevel = input.trustLevel
+  }
   span.dataset.renderMode = input.renderMode || 'inline'
   span.setAttribute('data-citation-id', input.citationId)
   span.setAttribute('data-ref-id', input.refId)
   span.setAttribute('data-ref-label', input.refLabel || input.label)
   if (input.sourceId) {
     span.setAttribute('data-source-id', input.sourceId)
+  }
+  if (input.sourceType) {
+    span.setAttribute('data-source-type', input.sourceType)
+  }
+  if (input.chunkId) {
+    span.setAttribute('data-chunk-id', input.chunkId)
+  }
+  if (input.trustLevel) {
+    span.setAttribute('data-trust-level', input.trustLevel)
   }
   span.setAttribute('data-render-mode', input.renderMode || 'inline')
   span.textContent = `[${input.label}]`

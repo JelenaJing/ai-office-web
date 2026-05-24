@@ -185,6 +185,7 @@ export async function persistWorkbenchDocument(input: {
   templateLabel?: string
   knowledgeRefs: DocumentKnowledgeRef[]
   draft: DocumentDraft
+  html?: string
   fallbackFrom?: 'minimax_docx'
   fallbackReason?: string
 }): Promise<{ record: DocumentRecord; result: DocumentTaskResult }> {
@@ -214,6 +215,7 @@ export async function persistWorkbenchDocument(input: {
     documentId,
     draft,
     knowledgeRefs: input.knowledgeRefs,
+    html: input.html,
   })
   const now = new Date().toISOString()
   const record: DocumentRecord = {
@@ -229,6 +231,8 @@ export async function persistWorkbenchDocument(input: {
     templateLabel: input.templateLabel,
     knowledgeRefs: input.knowledgeRefs,
     draft,
+    html: exported.html,
+    documentArtifact: exported.documentArtifact,
     artifactId: exported.artifact.id,
     exportUrl: exported.exportUrl,
     filename: exported.filename,
@@ -251,6 +255,8 @@ export async function persistWorkbenchDocument(input: {
       exportUrl: record.exportUrl,
       filename: record.filename,
       document: draft,
+      html: record.html,
+      documentArtifact: record.documentArtifact,
       outline: draft.outline,
       templateId: record.templateId,
       templateLabel: record.templateLabel,

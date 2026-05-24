@@ -195,6 +195,7 @@ router.post('/commit', async (req, res) => {
       templateLabel: result.presetLabel,
       knowledgeRefs: [],
       draft,
+      html: result.html,
       fallbackReason: result.commitMetadata?.missing?.length
         ? `正式模板 DOCX 壳层能力暂未完整迁移：${result.commitMetadata.missing.join('；')}`
         : undefined,

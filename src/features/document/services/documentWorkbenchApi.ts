@@ -30,6 +30,10 @@ export interface DocumentKnowledgeRef {
   label: string
   excerpt?: string
   sourceTitles?: string[]
+  sourceType?: 'knowledge_base' | 'file' | 'policy' | 'literature' | 'manual_note'
+  sourceId?: string
+  chunkId?: string
+  trustLevel?: 'verified' | 'partial' | 'unverified' | 'unknown'
   citationStatus: 'verified' | 'partial' | 'unverified'
 }
 
@@ -55,6 +59,10 @@ export interface DocumentReference {
   sourceId: string
   sourceLabel?: string
   excerpt?: string
+  sourceType?: 'knowledge_base' | 'file' | 'policy' | 'literature' | 'manual_note'
+  chunkId?: string
+  trustLevel?: 'verified' | 'partial' | 'unverified' | 'unknown'
+  citedBlockIds?: string[]
   citationStatus?: 'verified' | 'partial' | 'unverified'
 }
 
@@ -66,6 +74,9 @@ export interface DocumentCitation {
   text: string
   renderMode: 'inline' | 'footnote' | 'badge'
   sourceId?: string
+  sourceType?: string
+  chunkId?: string
+  trustLevel?: string
 }
 
 export interface DocumentExportPaths {
@@ -414,6 +425,29 @@ export interface DocumentImportResponse extends DocumentTaskResult {
   wordCount: number
 }
 
+export type AcademicWritingPaperType =
+  | 'course_paper'
+  | 'research_report'
+  | 'literature_review'
+  | 'policy_research_report'
+  | 'business_research_report'
+
+export interface AcademicWritingOutlineResponse {
+  success: boolean
+  outline: string[]
+  paperType: AcademicWritingPaperType
+  title: string
+}
+
+export interface AcademicWritingGenerateResponse {
+  success: boolean
+  result: DocumentTaskResult
+  outline: string[]
+  paperType: AcademicWritingPaperType
+  references: DocumentReference[]
+  citations: DocumentCitation[]
+}
+
 export interface DocumentSectionEditResponse extends DocumentTaskResult {
   success: boolean
   updatedSectionId: string
@@ -548,6 +582,39 @@ export async function exportDocumentArtifact(input: {
   filename: string
 }> {
   return requestJson(`/api/documents/${encodeURIComponent(input.documentId)}/export`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+}
+
+export async function generateAcademicWritingOutline(input: {
+  topic: string
+  paperType: AcademicWritingPaperType
+  researchGoal?: string
+  lengthHint?: string
+  language?: 'zh-CN' | 'en-US'
+  style?: 'academic' | 'formal' | 'report'
+}): Promise<AcademicWritingOutlineResponse> {
+  return requestJson('/api/document/academic-writing/outline', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+}
+
+export async function generateAcademicWritingDocument(input: {
+  workspacePath: string
+  topic: string
+  paperType: AcademicWritingPaperType
+  researchGoal?: string
+  lengthHint?: string
+  language?: 'zh-CN' | 'en-US'
+  style?: 'academic' | 'formal' | 'report'
+  outline?: string[]
+  knowledgeRefs?: DocumentKnowledgeRefInput[]
+}): Promise<AcademicWritingGenerateResponse> {
+  return requestJson('/api/document/academic-writing/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),

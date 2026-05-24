@@ -24,6 +24,10 @@ export interface DocumentKnowledgeRef {
   label: string
   excerpt?: string
   sourceTitles?: string[]
+  sourceType?: 'knowledge_base' | 'file' | 'policy' | 'literature' | 'manual_note'
+  sourceId?: string
+  chunkId?: string
+  trustLevel?: 'verified' | 'partial' | 'unverified' | 'unknown'
   citationStatus: 'verified' | 'partial' | 'unverified'
 }
 
@@ -40,6 +44,144 @@ export interface DocumentDraftTable {
   title?: string
   headers: string[]
   rows: string[][]
+}
+
+export interface DocumentReference {
+  id: string
+  label: string
+  kind: 'knowledge_base' | 'file' | 'manual_note'
+  sourceId: string
+  sourceLabel?: string
+  excerpt?: string
+  sourceType?: 'knowledge_base' | 'file' | 'policy' | 'literature' | 'manual_note'
+  chunkId?: string
+  trustLevel?: 'verified' | 'partial' | 'unverified' | 'unknown'
+  citedBlockIds?: string[]
+  citationStatus?: 'verified' | 'partial' | 'unverified'
+}
+
+export interface DocumentCitation {
+  id: string
+  refId: string
+  blockId: string
+  sectionId?: string | null
+  text: string
+  renderMode: 'inline' | 'footnote' | 'badge'
+  sourceId?: string
+  sourceType?: string
+  chunkId?: string
+  trustLevel?: string
+}
+
+export interface DocumentExportPaths {
+  pdf?: string
+  docx?: string
+}
+
+export type DocumentCanonicalBlock =
+  | {
+      id: string
+      type: 'title' | 'heading' | 'paragraph' | 'quote'
+      role: 'title' | 'heading' | 'paragraph' | 'quote'
+      sectionId: string | null
+      sectionTitle?: string
+      order: number
+      text: string
+      level?: number
+      sourceId?: string
+      citationIds?: string[]
+      html?: string
+    }
+  | {
+      id: string
+      type: 'list-item'
+      role: 'list-item'
+      sectionId: string | null
+      sectionTitle?: string
+      order: number
+      text: string
+      listKind: 'bulleted' | 'numbered'
+      index: number
+      sourceId?: string
+      citationIds?: string[]
+      html?: string
+    }
+  | {
+      id: string
+      type: 'table'
+      role: 'table'
+      sectionId: string | null
+      sectionTitle?: string
+      order: number
+      title?: string
+      headers: string[]
+      rows: string[][]
+      sourceId?: string
+      citationIds?: string[]
+      html?: string
+    }
+  | {
+      id: string
+      type: 'image'
+      role: 'image'
+      sectionId: string | null
+      sectionTitle?: string
+      order: number
+      src: string
+      alt?: string
+      caption?: string
+      sourceId?: string
+      citationIds?: string[]
+      html?: string
+    }
+  | {
+      id: string
+      type: 'divider'
+      role: 'divider'
+      sectionId: string | null
+      sectionTitle?: string
+      order: number
+      sourceId?: string
+      citationIds?: string[]
+      html?: string
+    }
+
+export interface DocumentCanonicalSection {
+  id: string
+  title: string
+  level: number
+  blockIds: string[]
+}
+
+export interface DocumentCanonicalData {
+  version: 'document-html-workbench/v1'
+  documentId: string
+  title: string
+  type: string
+  language: string
+  engine: string
+  templateId?: string
+  outline: DocumentDraft['outline']
+  sections: DocumentCanonicalSection[]
+  blocks: DocumentCanonicalBlock[]
+  knowledgeRefs: DocumentKnowledgeRef[]
+  references: DocumentReference[]
+  citations: DocumentCitation[]
+}
+
+export interface DocumentWorkbenchArtifact {
+  id: string
+  type: 'document'
+  title: string
+  html: string
+  canonicalData: DocumentCanonicalData
+  sourceRefs: ArtifactSourceRef[]
+  knowledgeRefs: DocumentKnowledgeRef[]
+  references: DocumentReference[]
+  citations: DocumentCitation[]
+  exportPaths: DocumentExportPaths
+  createdAt: string
+  updatedAt: string
 }
 
 export type DocumentDraft = {
@@ -84,6 +226,8 @@ export interface DocumentTaskResult {
   exportUrl: string
   filename: string
   document: DocumentDraft
+  html: string
+  documentArtifact: DocumentWorkbenchArtifact
   outline: DocumentDraft['outline']
   templateId?: string
   templateLabel?: string
@@ -105,6 +249,8 @@ export interface DocumentRecord {
   templateLabel?: string
   knowledgeRefs: DocumentKnowledgeRef[]
   draft: DocumentDraft
+  html: string
+  documentArtifact: DocumentWorkbenchArtifact
   artifactId: string
   exportUrl: string
   filename: string
