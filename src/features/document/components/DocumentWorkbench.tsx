@@ -22,11 +22,16 @@ import { DocumentTemplatePanel } from './DocumentTemplatePanel'
 import { DocumentTopToolbar } from './DocumentTopToolbar'
 import {
   buildKnowledgeRefsFromSelection,
+  commitFormalTemplate,
+  confirmFormalTemplateFields,
+  continueDocument,
   editDocumentSection,
   editDocumentSelection,
   engineLabel,
   exportDocumentArtifact,
   loadDocumentWorkbenchConfig,
+  previewFormalTemplate,
+  routeDocumentTask,
   saveEditableDocument,
   startDocumentTask,
   waitForDocumentTask,
@@ -39,6 +44,7 @@ import {
   updateEditableStateFromHtml,
 } from '../services/documentDraftTransforms'
 import { runDocumentSkill } from '../services/documentSkillAdapter'
+import { runPaperWorkflowGenerate } from '../services/paperWorkflowAdapter'
 
 const Shell = styled.div`
   flex: 1;
@@ -520,14 +526,107 @@ export default function DocumentWorkbench() {
     setStatusTone(undefined)
     setExportError(null)
     try {
+      const knowledgeRefs = buildKnowledgeRefsFromSelection(workspaceKbIds, attachments, knowledgeNameMap)
+      const routed = await routeDocumentTask({
+        prompt: generationPrompt.trim(),
+        currentDocument: editorState.documentDraft
+          ? { title: editorState.title, type: editorState.documentDraft.type }
+          : null,
+        selectedText: editorState.selectedText,
+        selectedSectionId: editorState.selectedSectionId,
+        attachments: attachments.map((item) => ({ id: item.id, name: item.name })),
+        templateId: template?.id,
+        knowledgeRefs,
+      })
+
+      if (routed.confidence < 0.75 || routed.nextAction.type === 'ask') {
+        setStatusMessage(routed.nextAction.question || routed.nextAction.message)
+        setStatusTone('err')
+        return
+      }
+
+      if (routed.intent === 'form_fill' && routed.missingInputs.length > 0) {
+        setStatusMessage(routed.nextAction.question || '请先上传或选择表格模板。')
+        setStatusTone('err')
+        return
+      }
+
+      if (routed.intent === 'edit_selection') {
+        await handleAiSubmit(generationPrompt.trim(), 'selection')
+        return
+      }
+
+      if (routed.intent === 'edit_section') {
+        await handleAiSubmit(generationPrompt.trim(), 'section')
+        return
+      }
+
+      if (routed.intent === 'academic_paper' || routed.intent === 'literature_review') {
+        const paperResult = await runPaperWorkflowGenerate({
+          topic: generationPrompt.trim(),
+          paperType: routed.intent === 'literature_review' ? 'review' : 'research',
+          language: 'zh',
+          workspacePath: activeWorkspacePath,
+          onStatus: (message) => {
+            setStatusMessage(message)
+            setStatusTone(undefined)
+          },
+        })
+        if (!paperResult.documentResult) {
+          throw new Error('论文工作流未返回可进入 DocumentWorkbench 的文稿结果')
+        }
+        syncEditorStateFromTaskResult(paperResult.documentResult, new Date().toISOString())
+        setModifiedSectionIds([])
+        setLastAiSnapshot(null)
+        setRecentAiChange(null)
+        setStatusMessage(paperResult.message || '论文工作流已完成，并已进入 DocumentWorkbench。')
+        setStatusTone('ok')
+        return
+      }
+
+      if (routed.intent === 'formal_template') {
+        setStatusMessage('正在分析正式模板字段…')
+        const confirmed = await confirmFormalTemplateFields({
+          instruction: generationPrompt.trim(),
+        })
+        if (confirmed.missingFields.length > 0) {
+          setStatusMessage(`正式模板缺少字段：${confirmed.missingFields.join('、')}`)
+          setStatusTone('err')
+          return
+        }
+        setStatusMessage('正在预览正式模板…')
+        await previewFormalTemplate({
+          instruction: generationPrompt.trim(),
+          workspacePath: activeWorkspacePath,
+          language: 'zh',
+          fieldOverrides: confirmed.confirmedFields,
+        })
+        setStatusMessage('正在提交正式模板到 DocumentWorkbench…')
+        const committed = await commitFormalTemplate({
+          instruction: generationPrompt.trim(),
+          workspacePath: activeWorkspacePath,
+          language: 'zh',
+          fieldOverrides: confirmed.confirmedFields,
+        })
+        syncEditorStateFromTaskResult(committed, new Date().toISOString())
+        setModifiedSectionIds([])
+        setLastAiSnapshot(null)
+        setRecentAiChange(null)
+        setStatusMessage(committed.fallbackReason
+          ? `正式模板已进入 DocumentWorkbench，但存在回退说明：${committed.fallbackReason}`
+          : '正式模板已进入 DocumentWorkbench。')
+        setStatusTone(committed.fallbackReason ? 'err' : 'ok')
+        return
+      }
+
       const task = await startDocumentTask({
         workspacePath: activeWorkspacePath,
         prompt: generationPrompt.trim(),
         title: template?.defaultTitle,
         templateId: template?.id,
-        knowledgeRefs: buildKnowledgeRefsFromSelection(workspaceKbIds, attachments, knowledgeNameMap),
-        documentType: template?.documentType || 'report',
-        language: 'zh-CN',
+        knowledgeRefs,
+        documentType: routed.documentType || template?.documentType || 'report',
+        language: routed.defaultLanguage || 'zh-CN',
       })
       const nextResult = await waitForDocumentTask(task.taskId, (state) => {
         setStatusMessage(state.message)
@@ -547,7 +646,7 @@ export default function DocumentWorkbench() {
     } finally {
       setBusy(false)
     }
-  }, [activeWorkspacePath, attachments, generationPrompt, knowledgeNameMap, syncEditorStateFromTaskResult, template, workspaceKbIds])
+  }, [activeWorkspacePath, attachments, editorState.documentDraft, editorState.selectedSectionId, editorState.selectedText, editorState.title, generationPrompt, handleAiSubmit, knowledgeNameMap, syncEditorStateFromTaskResult, template, workspaceKbIds])
 
   const handleSelectSection = useCallback((sectionId: string) => {
     setEditorState((prev) => ({
@@ -656,6 +755,68 @@ export default function DocumentWorkbench() {
       setBusy(false)
     }
   }, [activeWorkspacePath, appendHistory, attachments, editorState, workspaceKbIds])
+
+  const handleContinueWriting = useCallback(async (instruction?: string) => {
+    if (!editorState.documentId || !editorState.documentDraft) {
+      setStatusMessage('请先生成文稿')
+      setStatusTone('err')
+      return
+    }
+    const cursorContext = {
+      sectionId: editorState.selectionRange?.sectionId || selectedSection?.id || undefined,
+      sectionTitle: editorState.selectionRange?.sectionTitle || selectedSection?.title || undefined,
+      beforeText: editorState.selectionRange?.beforeText,
+      afterText: editorState.selectionRange?.afterText,
+    }
+    captureAiSnapshot('section', cursorContext.sectionId || editorState.selectedSectionId)
+    appendHistory('section', cursorContext.sectionId || editorState.selectedSectionId, {
+      role: 'user',
+      text: instruction?.trim() || '请紧接当前光标继续往下写。',
+    })
+    setBusy(true)
+    try {
+      const response = await continueDocument({
+        documentId: editorState.documentId,
+        instruction,
+        cursorContext,
+        document: editorState.documentDraft,
+        html: editorState.html,
+      })
+      const applied = canvasRef.current?.applyPatch(response.patch)
+      if (!applied?.applied) {
+        throw new Error('未能把续写补丁插入到当前光标位置，请重新定位光标后再试。')
+      }
+      setEditorState((prev) => ({
+        ...updateEditableStateFromHtml(prev, applied.html),
+        selectedSectionId: applied.affectedSectionId || prev.selectedSectionId,
+        selectedText: '',
+        selectionRange: undefined,
+        dirty: true,
+      }))
+      markSectionModified(applied.affectedSectionId || editorState.selectedSectionId)
+      setRecentAiChange({
+        token: Date.now(),
+        scope: 'section',
+        sectionId: applied.affectedSectionId || editorState.selectedSectionId,
+      })
+      appendHistory('section', applied.affectedSectionId || editorState.selectedSectionId, {
+        role: 'assistant',
+        text: response.message || '已在当前光标位置续写。',
+      })
+      setStatusMessage(response.message || '已在当前光标位置续写')
+      setStatusTone('ok')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '续写失败'
+      appendHistory('section', cursorContext.sectionId || editorState.selectedSectionId, {
+        role: 'assistant',
+        text: message,
+      })
+      setStatusMessage(message)
+      setStatusTone('err')
+    } finally {
+      setBusy(false)
+    }
+  }, [appendHistory, captureAiSnapshot, editorState, markSectionModified, selectedSection])
 
   const handleAiSubmit = useCallback(async (instruction: string, scope: DocumentAiScope) => {
     if (!editorState.documentId || !editorState.documentDraft) {
@@ -919,13 +1080,14 @@ export default function DocumentWorkbench() {
           disabled={!editorState.documentId}
           canUndoLastAiEdit={Boolean(lastAiSnapshot)}
           onUndoLastAiEdit={handleUndoLastAiEdit}
+          onContinueWriting={handleContinueWriting}
           onSubmit={handleAiSubmit}
         />
       </Body>
 
       <BottomComposer>
         <ComposerHint>
-          这里用于生成整篇文稿。默认生成中文，并会把当前模板、知识库与附件引用一起传给后端文稿任务。
+          这里会先做文稿任务识别，再决定走通知/总结、论文工作流、正式模板，或当前选区/章节改写；默认生成中文。
         </ComposerHint>
         <ComposerInput
           value={generationPrompt}

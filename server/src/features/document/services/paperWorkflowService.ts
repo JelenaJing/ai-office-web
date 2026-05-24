@@ -8,6 +8,7 @@ import {
   type PaperReferencesSidecar,
 } from './paperNFTCORERuntime'
 import type { ReferenceItem } from './openAlexClient'
+import type { DocumentTaskResult } from '../types'
 
 export type PaperWorkflowPaperType = 'research' | 'review' | 'thesis_research'
 
@@ -49,6 +50,7 @@ export interface PaperWorkflowGenerateResult {
   citationStatus: PaperCitationStatus
   referencesSidecar: PaperReferencesSidecar
   artifact: PaperArtifact
+  documentResult?: DocumentTaskResult
   diagnostics: {
     chain: 'paper-workflow' | 'paper-workflow-web-adapter' | 'electron-compatible-nftcore' | 'web-paper-runtime' | 'web-paper-compatible-runtime'
     steps: string[]

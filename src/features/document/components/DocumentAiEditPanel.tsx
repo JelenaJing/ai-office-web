@@ -146,6 +146,7 @@ interface DocumentAiEditPanelProps {
   disabled?: boolean
   canUndoLastAiEdit?: boolean
   onUndoLastAiEdit?: () => void
+  onContinueWriting?: (instruction?: string) => Promise<void> | void
   onSubmit: (instruction: string, scope: DocumentAiScope) => Promise<void> | void
 }
 
@@ -170,6 +171,7 @@ export function DocumentAiEditPanel({
   disabled,
   canUndoLastAiEdit,
   onUndoLastAiEdit,
+  onContinueWriting,
   onSubmit,
 }: DocumentAiEditPanelProps) {
   const [input, setInput] = useState('')
@@ -227,6 +229,16 @@ export function DocumentAiEditPanel({
             {action.label}
           </QuickButton>
         ))}
+        <DangerButton
+          type="button"
+          disabled={disabled || busy || !selectedSectionId}
+          onClick={() => {
+            void onContinueWriting?.(input.trim() || '请紧接当前光标继续往下写，延续当前结构和语气。')
+            setInput('')
+          }}
+        >
+          续写下文
+        </DangerButton>
         <DangerButton
           type="button"
           disabled={!canUndoLastAiEdit || busy}

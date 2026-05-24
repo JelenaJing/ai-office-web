@@ -1,3 +1,4 @@
+import type { DocumentTaskResult } from './documentWorkbenchApi'
 import { isWebShim } from '../../../platform'
 import { markdownToHtml } from '../../../utils/markdownToHtml'
 
@@ -41,6 +42,7 @@ export interface PaperWorkflowGenerateResult {
   title?: string
   taskId?: string
   artifact?: unknown
+  documentResult?: DocumentTaskResult
   message?: string
   diagnostics?: {
     chain: 'paper-workflow' | 'paper-workflow-web-adapter'
@@ -185,6 +187,7 @@ async function runDesktopPaperWorkflow(
         markdown,
         title: String((result.result as Record<string, any>)?.title || '').trim() || input.topic,
         taskId,
+        documentResult: (result.result as Record<string, any>)?.documentResult as DocumentTaskResult | undefined,
         message: input.paperType === 'review' ? '文献综述链路已完成' : '研究文章链路已完成',
         diagnostics: {
           chain: 'paper-workflow',
@@ -325,6 +328,7 @@ async function runWebPaperWorkflow(
           title: result.title,
           taskId,
           artifact: result.artifact,
+          documentResult: (result as Record<string, unknown>).documentResult as DocumentTaskResult | undefined,
           message: input.paperType === 'review' ? '文献综述链路已完成' : '研究文章链路已完成',
           diagnostics: result.diagnostics,
         }

@@ -4,6 +4,19 @@ import type { FileEntry } from '../../../platform'
 export type DocumentEngine = 'builtin' | 'minimax_docx'
 export type DocumentLanguage = 'zh-CN' | 'en-US'
 export type DocumentType = 'report' | 'notice' | 'memo' | 'proposal' | 'summary' | 'official_letter'
+export type DocumentTaskIntent =
+  | 'official_notice'
+  | 'formal_letter'
+  | 'meeting_minutes'
+  | 'work_summary'
+  | 'annual_report'
+  | 'form_fill'
+  | 'academic_paper'
+  | 'literature_review'
+  | 'formal_template'
+  | 'edit_selection'
+  | 'edit_section'
+  | 'unknown'
 
 export interface DocumentKnowledgeRefInput {
   kind: 'knowledge_base' | 'file'
@@ -172,6 +185,70 @@ export interface DocumentWorkbenchConfig {
   fallback: 'builtin' | 'none'
 }
 
+export interface DocumentTaskRouterResponse {
+  success: boolean
+  intent: DocumentTaskIntent
+  confidence: number
+  workflowId: string
+  documentType: DocumentType
+  requiredInputs: string[]
+  missingInputs: string[]
+  targetEditor: 'DocumentWorkbench'
+  defaultLanguage: DocumentLanguage
+  nextAction: {
+    type: 'generate' | 'ask' | 'upload_template' | 'selection_edit' | 'section_edit'
+    message: string
+    question?: string
+  }
+}
+
+export interface DocumentContinueResponse {
+  success: boolean
+  documentId: string
+  sectionId?: string
+  patch: Extract<DocumentEditPatch, { type: 'insert_at_cursor' }>
+  message: string
+}
+
+export interface FormalTemplateFieldConfirmResponse {
+  success: boolean
+  presetId: string
+  presetLabel: string
+  templateKind: string
+  runtimeKind: string
+  confirmedFields: Record<string, string>
+  missingFields: string[]
+  supported: boolean
+  fallbackReason?: string | null
+}
+
+export interface FormalTemplatePreviewResponse {
+  success: boolean
+  title: string
+  markdown: string
+  html: string
+  presetId: string
+  presetLabel: string
+  templateKind: string
+  runtimeKind: string
+  resolvedFields: Record<string, string>
+  fallbackReason?: string | null
+  diagnostics?: {
+    chain: string
+    steps: string[]
+    partialMissing?: string[]
+  }
+}
+
+export interface FormalTemplateCommitResponse extends DocumentTaskResult {
+  success: boolean
+  stage: 'commit'
+  presetId: string
+  presetLabel: string
+  resolvedFields: Record<string, string>
+  fallbackReason?: string | null
+}
+
 function authHeaders(): Record<string, string> {
   const token = platformApi.auth.getToken()
   return token ? { Authorization: `Bearer ${token}` } : {}
@@ -214,6 +291,22 @@ export async function startDocumentTask(input: {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
+  })
+}
+
+export async function routeDocumentTask(input: {
+  prompt: string
+  currentDocument?: { title?: string; type?: string } | null
+  selectedText?: string
+  selectedSectionId?: string
+  attachments?: Array<{ id?: string; name?: string }>
+  templateId?: string
+  knowledgeRefs?: DocumentKnowledgeRefInput[]
+}): Promise<DocumentTaskRouterResponse> {
+  return requestJson('/api/documents/task-router', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
   })
 }
 
@@ -324,6 +417,70 @@ export async function editDocumentSelection(input: {
   html?: string
 }): Promise<DocumentSelectionEditResponse> {
   return requestJson(`/api/documents/${encodeURIComponent(input.documentId)}/edit-selection`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+}
+
+export async function continueDocument(input: {
+  documentId: string
+  instruction?: string
+  cursorContext: {
+    sectionId?: string
+    sectionTitle?: string
+    beforeText?: string
+    afterText?: string
+  }
+  document?: DocumentDraft
+  html?: string
+}): Promise<DocumentContinueResponse> {
+  return requestJson(`/api/documents/${encodeURIComponent(input.documentId)}/continue`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+}
+
+export async function confirmFormalTemplateFields(input: {
+  presetId?: string
+  customTemplateText?: string
+  instruction?: string
+  fieldOverrides?: Record<string, string>
+}): Promise<FormalTemplateFieldConfirmResponse> {
+  return requestJson('/api/document/formal-template/confirm-fields', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+}
+
+export async function previewFormalTemplate(input: {
+  presetId?: string
+  customTemplateText?: string
+  instruction: string
+  language?: 'zh' | 'en'
+  fieldOverrides?: Record<string, string>
+  extraContext?: string
+  workspacePath?: string
+}): Promise<FormalTemplatePreviewResponse> {
+  return requestJson('/api/document/formal-template/preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+}
+
+export async function commitFormalTemplate(input: {
+  presetId?: string
+  customTemplateText?: string
+  instruction: string
+  language?: 'zh' | 'en'
+  fieldOverrides?: Record<string, string>
+  extraContext?: string
+  workspacePath?: string
+}): Promise<FormalTemplateCommitResponse> {
+  return requestJson('/api/document/formal-template/commit', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),

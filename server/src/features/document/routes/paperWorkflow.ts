@@ -12,8 +12,14 @@ import {
   updatePaperTask,
 } from '../services/paperTaskStore'
 import { runPaperNFTCORE } from '../services/paperNFTCORERuntime'
+import { buildWorkbenchDraftFromMarkdown, persistWorkbenchDocument } from '../services/documentWorkbenchBridge'
 
 const router = Router()
+
+function resolveWorkspacePath(userId: string, value: unknown): string {
+  const workspacePath = String(value || '').trim()
+  return workspacePath || `web-workspace:${userId}:document-workbench`
+}
 
 /**
  * POST /api/document/paper-workflow/start
@@ -21,7 +27,10 @@ const router = Router()
  * Kicks off an async paper generation task and immediately returns a taskId.
  * The client should poll GET /tasks/:taskId for progress and final result.
  */
-router.post('/start', requireAccountUser, async (req, res) => {
+router.post('/start', async (req, res) => {
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+
   const topic = String(req.body?.topic || '').trim()
   const paperType = String(req.body?.paperType || '').trim() as PaperWorkflowPaperType
 
@@ -38,6 +47,7 @@ router.post('/start', requireAccountUser, async (req, res) => {
   const task = createPaperTask(paperType)
   const label = paperType === 'review' ? '文献综述' : '研究文章'
   const mode = typeof req.body?.mode === 'string' ? req.body.mode as PaperWorkflowMode : 'full'
+  const workspacePath = resolveWorkspacePath(userId, req.body?.workspacePath)
 
   updatePaperTask(task.taskId, { status: 'running', message: `正在启动${label} NFTCORE 链路…`, progress: 5 })
 
@@ -74,23 +84,51 @@ router.post('/start', requireAccountUser, async (req, res) => {
     .then((result) => {
       const current = getPaperTask(task.taskId)
       if (current?.cancelRequested) return
-      updatePaperTask(task.taskId, {
-        status: 'completed',
-        progress: 100,
-        message: paperType === 'review' ? '文献综述链路已完成' : '研究文章链路已完成',
-        result: {
+      void (async () => {
+        const persisted = await persistWorkbenchDocument({
+          userId,
+          workspacePath,
+          skillId: 'web.document.paper-workflow',
+          engine: 'builtin',
           title: result.title,
-          markdown: result.markdown,
-          html: result.html,
-          paperType: result.paperType as PaperWorkflowPaperType,
-          references: result.references,
-          outline: result.outline,
-          sections: result.sections,
-          citationStatus: result.citationStatus,
-          referencesSidecar: result.referencesSidecar,
-          artifact: result.artifact,
-          diagnostics: result.diagnostics,
-        },
+          documentType: 'report',
+          language: language === 'en' ? 'en-US' : 'zh-CN',
+          knowledgeRefs: [],
+          draft: buildWorkbenchDraftFromMarkdown({
+            markdown: result.markdown,
+            title: result.title,
+            documentType: 'report',
+            language: language === 'en' ? 'en-US' : 'zh-CN',
+            engine: 'builtin',
+            knowledgeRefs: [],
+          }),
+        })
+        updatePaperTask(task.taskId, {
+          status: 'completed',
+          progress: 100,
+          message: paperType === 'review' ? '文献综述链路已完成' : '研究文章链路已完成',
+          result: {
+            title: result.title,
+            markdown: result.markdown,
+            html: result.html,
+            paperType: result.paperType as PaperWorkflowPaperType,
+            references: result.references,
+            outline: result.outline,
+            sections: result.sections,
+            citationStatus: result.citationStatus,
+            referencesSidecar: result.referencesSidecar,
+            artifact: result.artifact,
+            diagnostics: result.diagnostics,
+            documentResult: persisted.result,
+          },
+        })
+      })().catch((error) => {
+        const message = error instanceof Error ? error.message : String(error)
+        updatePaperTask(task.taskId, {
+          status: 'failed',
+          message,
+          error: message,
+        })
       })
     })
     .catch((error) => {
@@ -148,7 +186,10 @@ router.post('/tasks/:taskId/cancel', requireAccountUser, (req, res) => {
  *
  * @deprecated Use /start + GET /tasks/:taskId for long-running generation.
  */
-router.post('/generate', requireAccountUser, async (req, res) => {
+router.post('/generate', async (req, res) => {
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+
   const topic = String(req.body?.topic || '').trim()
   const paperType = String(req.body?.paperType || '').trim() as PaperWorkflowPaperType
 
@@ -173,7 +214,29 @@ router.post('/generate', requireAccountUser, async (req, res) => {
       yearTo: typeof req.body?.yearTo === 'string' ? req.body.yearTo : undefined,
       mode: typeof req.body?.mode === 'string' ? req.body.mode as PaperWorkflowMode : undefined,
     })
-    res.json(result)
+    const workspacePath = resolveWorkspacePath(userId, req.body?.workspacePath)
+    const persisted = await persistWorkbenchDocument({
+      userId,
+      workspacePath,
+      skillId: 'web.document.paper-workflow',
+      engine: 'builtin',
+      title: result.title,
+      documentType: 'report',
+      language: req.body?.language === 'en' ? 'en-US' : 'zh-CN',
+      knowledgeRefs: [],
+      draft: buildWorkbenchDraftFromMarkdown({
+        markdown: result.markdown,
+        title: result.title,
+        documentType: 'report',
+        language: req.body?.language === 'en' ? 'en-US' : 'zh-CN',
+        engine: 'builtin',
+        knowledgeRefs: [],
+      }),
+    })
+    res.json({
+      ...result,
+      documentResult: persisted.result,
+    })
   } catch (error) {
     const message = error instanceof Error ? error.message : '论文工作流失败'
     console.error('[document/paper-workflow/generate]', message)

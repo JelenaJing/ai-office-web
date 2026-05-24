@@ -12,8 +12,23 @@ import {
   requestFormalTemplateTaskCancel,
   updateFormalTemplateTask,
 } from '../services/formalTemplateTaskStore'
+import { buildWorkbenchDraftFromMarkdown, persistWorkbenchDocument } from '../services/documentWorkbenchBridge'
 
 const router = Router()
+
+function resolveWorkspacePath(userId: string, value: unknown): string {
+  const workspacePath = String(value || '').trim()
+  return workspacePath || `web-workspace:${userId}:document-workbench`
+}
+
+function collectFieldOverrides(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object') return {}
+  return Object.entries(value as Record<string, unknown>).reduce<Record<string, string>>((acc, [key, raw]) => {
+    const next = String(raw || '').trim()
+    if (next) acc[key] = next
+    return acc
+  }, {})
+}
 
 /**
  * GET /api/document/formal-template/presets
@@ -48,6 +63,160 @@ router.post('/analyze', requireAccountUser, async (req, res) => {
     const message = err instanceof Error ? err.message : String(err)
     console.error('[formal-template/analyze]', message)
     res.status(500).json({ success: false, error: `分析失败：${message}` })
+  }
+})
+
+router.post('/confirm-fields', requireAccountUser, async (req, res) => {
+  try {
+    const analyzed = await analyzeFormalTemplate({
+      presetId: req.body?.presetId,
+      customTemplateText: req.body?.customTemplateText,
+      instruction: req.body?.instruction,
+    })
+
+    if (!analyzed.success) {
+      res.status(422).json(analyzed)
+      return
+    }
+
+    const confirmedFields = collectFieldOverrides(req.body?.fieldOverrides)
+    const missingFields = analyzed.fields
+      .filter((field) => field.required && !confirmedFields[field.label] && !confirmedFields[field.fieldId])
+      .map((field) => field.label)
+
+    res.json({
+      success: true,
+      presetId: analyzed.presetId,
+      presetLabel: analyzed.presetLabel,
+      templateKind: analyzed.templateKind,
+      runtimeKind: analyzed.runtimeKind,
+      confirmedFields,
+      missingFields,
+      supported: analyzed.supported,
+      fallbackReason: analyzed.supported ? null : analyzed.unavailableReason || '当前模板能力未完整迁移到 Web',
+    })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    res.status(500).json({ success: false, error: `字段确认失败：${message}` })
+  }
+})
+
+router.post('/preview', requireAccountUser, async (req, res) => {
+  const instruction = String(req.body?.instruction || '').trim()
+  if (!instruction) {
+    res.status(400).json({ success: false, error: '必须提供 instruction（文稿要求）' })
+    return
+  }
+
+  try {
+    const result = await generateFormalTemplate({
+      presetId: req.body?.presetId,
+      customTemplateText: req.body?.customTemplateText,
+      instruction,
+      language: req.body?.language,
+      fieldOverrides: req.body?.fieldOverrides,
+      extraContext: req.body?.extraContext,
+      workspacePath: req.body?.workspacePath,
+    })
+
+    if (!result.success) {
+      const statusCode = result.code === 'FT_LLM_NOT_CONFIGURED' ? 503 : 422
+      res.status(statusCode).json(result)
+      return
+    }
+
+    res.json({
+      success: true,
+      title: result.title,
+      markdown: result.markdown,
+      html: result.html,
+      presetId: result.presetId,
+      presetLabel: result.presetLabel,
+      templateKind: result.templateKind,
+      runtimeKind: result.runtimeKind,
+      resolvedFields: result.resolvedFields,
+      previewMetadata: result.previewMetadata,
+      diagnostics: result.diagnostics,
+      fallbackReason: result.commitMetadata?.missing?.length
+        ? `正式模板 DOCX 壳层能力暂未完整迁移：${result.commitMetadata.missing.join('；')}`
+        : null,
+    })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    res.status(500).json({ success: false, error: `预览失败：${message}` })
+  }
+})
+
+router.post('/commit', async (req, res) => {
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+
+  const instruction = String(req.body?.instruction || '').trim()
+  if (!instruction) {
+    res.status(400).json({ success: false, error: '必须提供 instruction（文稿要求）' })
+    return
+  }
+
+  try {
+    const result = await generateFormalTemplate({
+      presetId: req.body?.presetId,
+      customTemplateText: req.body?.customTemplateText,
+      instruction,
+      language: req.body?.language,
+      fieldOverrides: req.body?.fieldOverrides,
+      extraContext: req.body?.extraContext,
+      workspacePath: req.body?.workspacePath,
+    })
+
+    if (!result.success) {
+      const statusCode = result.code === 'FT_LLM_NOT_CONFIGURED' ? 503 : 422
+      res.status(statusCode).json(result)
+      return
+    }
+
+    const workspacePath = resolveWorkspacePath(userId, req.body?.workspacePath)
+    const draft = buildWorkbenchDraftFromMarkdown({
+      markdown: result.markdown,
+      title: result.title,
+      documentType: 'official_letter',
+      language: req.body?.language === 'en' ? 'en-US' : 'zh-CN',
+      engine: 'builtin',
+      knowledgeRefs: [],
+    })
+    const persisted = await persistWorkbenchDocument({
+      userId,
+      workspacePath,
+      skillId: 'web.document.formal-template',
+      engine: 'builtin',
+      title: result.title,
+      documentType: 'official_letter',
+      language: req.body?.language === 'en' ? 'en-US' : 'zh-CN',
+      templateId: result.presetId,
+      templateLabel: result.presetLabel,
+      knowledgeRefs: [],
+      draft,
+      fallbackReason: result.commitMetadata?.missing?.length
+        ? `正式模板 DOCX 壳层能力暂未完整迁移：${result.commitMetadata.missing.join('；')}`
+        : undefined,
+    })
+
+    res.json({
+      success: true,
+      stage: 'commit',
+      fallbackReason: result.commitMetadata?.missing?.length
+        ? `正式模板 DOCX 壳层能力暂未完整迁移：${result.commitMetadata.missing.join('；')}`
+        : null,
+      presetId: result.presetId,
+      presetLabel: result.presetLabel,
+      resolvedFields: result.resolvedFields,
+      previewMetadata: result.previewMetadata,
+      commitMetadata: result.commitMetadata,
+      diagnostics: result.diagnostics,
+      ...persisted.result,
+    })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    res.status(500).json({ success: false, error: `提交失败：${message}` })
   }
 })
 
