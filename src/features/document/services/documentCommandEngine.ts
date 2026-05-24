@@ -10,7 +10,7 @@
  * for invoking the appropriate AI API or DOM patch after receiving the result.
  */
 
-import type { DocumentCanonicalBlock, DocumentCanonicalData } from './documentWorkbenchApi'
+import type { DocumentArtifact, DocumentCanonicalBlock, DocumentCanonicalData } from './documentWorkbenchApi'
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Intent types
@@ -118,6 +118,13 @@ export interface DocumentPatchOperation {
   aiCalled: boolean
   /** The text of the patch (for undo) */
   previousTexts?: Record<string, string>
+  /**
+   * Full document artifact snapshot before this operation.
+   * When present, undo restores this artifact directly instead of
+   * reconstructing it from innerHTML, which correctly restores
+   * citations, references, and canonicalData in one step.
+   */
+  previousArtifact?: DocumentArtifact
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -371,9 +378,7 @@ export function resolveCommandTarget(input: ResolveTargetInput): ResolvedCommand
 
     case 'current_block': {
       if (!selectedBlockId) {
-        // Fall back to first paragraph
-        const firstParagraph = blocks.find((block) => block.role === 'paragraph')
-        if (firstParagraph) return found([firstParagraph], '第一段（自动定位）')
+        // No cursor position — user must click a paragraph first
         return ambiguous('请先点击要操作的段落')
       }
       const block = blocks.find((block) => block.id === selectedBlockId)
@@ -447,6 +452,7 @@ export function buildOperationRecord(opts: {
   aiCalled: boolean
   summary: string
   previousTexts?: Record<string, string>
+  previousArtifact?: DocumentArtifact
 }): DocumentPatchOperation {
   return {
     id: `op-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -457,6 +463,7 @@ export function buildOperationRecord(opts: {
     summary: opts.summary,
     aiCalled: opts.aiCalled,
     previousTexts: opts.previousTexts,
+    previousArtifact: opts.previousArtifact,
   }
 }
 

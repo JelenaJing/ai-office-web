@@ -266,3 +266,48 @@ export function undoFormatOp(root: HTMLElement, previousTexts: Record<string, st
   }
   return root.innerHTML
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// appendCitationToBlock — insert a span.doc-citation at the end of a block
+// without needing a cursor range (used by the command engine)
+// ──────────────────────────────────────────────────────────────────────────────
+
+export interface AppendCitationToBlockResult {
+  applied: boolean
+  html: string
+  affectedSectionId: string | null
+}
+
+export function appendCitationToBlock(
+  root: HTMLElement,
+  input: {
+    blockId: string
+    citationId: string
+    refId: string
+    label: string
+    renderMode?: 'inline' | 'badge' | 'footnote'
+  },
+): AppendCitationToBlockResult {
+  const block = root.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(input.blockId)}"]`)
+  if (!block) return { applied: false, html: root.innerHTML, affectedSectionId: null }
+
+  const doc = root.ownerDocument
+  const span = doc.createElement('span')
+  span.className = 'doc-citation'
+  span.dataset.citationId = input.citationId
+  span.dataset.refId = input.refId
+  span.dataset.renderMode = input.renderMode || 'inline'
+  span.setAttribute('data-citation-id', input.citationId)
+  span.setAttribute('data-ref-id', input.refId)
+  span.setAttribute('data-render-mode', input.renderMode || 'inline')
+  span.textContent = `[${input.label}]`
+  span.style.cssText = 'color: #1d4ed8; font-size: 0.85em; vertical-align: super; cursor: pointer; margin-left: 2px;'
+
+  block.appendChild(span)
+
+  return {
+    applied: true,
+    html: root.innerHTML,
+    affectedSectionId: block.closest<HTMLElement>('[data-section-id]')?.dataset.sectionId || null,
+  }
+}

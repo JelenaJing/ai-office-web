@@ -1132,6 +1132,11 @@ export default function DocumentWorkbench() {
       return true
     }
 
+    // Capture a full artifact snapshot before any mutation (reliable undo)
+    const previousArtifact = editorState.documentArtifact
+      ? { ...editorState.documentArtifact }
+      : undefined
+
     if (isFormatIntent(parsed.intent)) {
       // ── Format operation (no AI) ──────────────────────────────────────────
       const formatOp = buildFormatOp(parsed.intent, resolved.blockIds)
@@ -1148,6 +1153,7 @@ export default function DocumentWorkbench() {
         aiCalled: false,
         summary: `已对「${resolved.label}」执行：${parsed.intent}`,
         previousTexts: result.previousTexts,
+        previousArtifact,
       })
       setCommandUndoStack((prev) => [op, ...prev.slice(0, 19)])
       setLastCommandOp(op)
@@ -1158,6 +1164,72 @@ export default function DocumentWorkbench() {
         text: `✅ 格式操作「${parsed.intent}」已应用至 ${resolved.label}（${result.affectedBlockIds.length} 个块）。无需 AI 调用。`,
       })
       setStatusMessage(`格式已更新：${resolved.label}`)
+      setStatusTone('ok')
+      return true
+    }
+
+    // ── Citation insertion (no AI text rewrite; DOM append) ──────────────────
+    if (parsed.intent === 'add_citation') {
+      const targetBlock = resolved.blocks[0]
+      if (!targetBlock) {
+        setStatusMessage('找不到目标段落，请点击要添加引用的段落后重试')
+        setStatusTone('err')
+        return true
+      }
+
+      // Use first available knowledge ref, or create a placeholder
+      const availableRefs = editorState.documentArtifact?.references || []
+      const knowledgeRefs = editorState.documentArtifact?.knowledgeRefs || []
+      const refSource = availableRefs[0] || (knowledgeRefs[0]
+        ? {
+            id: `ref-kb-${knowledgeRefs[0].knowledgeBaseId || Date.now()}`,
+            label: knowledgeRefs[0].filename || knowledgeRefs[0].name || '知识库引用',
+            kind: 'knowledge_base' as const,
+            sourceId: knowledgeRefs[0].knowledgeBaseId || knowledgeRefs[0].id || 'kb-unknown',
+          }
+        : {
+            id: `ref-placeholder-${Date.now()}`,
+            label: '待补充依据',
+            kind: 'manual_note' as const,
+            sourceId: 'manual',
+          })
+
+      const citationId = `citation-cmd-${Date.now()}`
+      const result = canvasRef.current?.appendCitationToBlock({
+        blockId: targetBlock.id,
+        citationId,
+        refId: refSource.id,
+        label: refSource.label,
+      })
+
+      if (!result?.applied) {
+        setStatusMessage('未能插入引用，目标块未找到')
+        setStatusTone('err')
+        return true
+      }
+
+      const op = buildOperationRecord({
+        operationClass: 'semantic',
+        intent: 'add_citation',
+        blockIds: [targetBlock.id],
+        aiCalled: false,
+        summary: `已在「${resolved.label}」插入引用：${refSource.label}`,
+        previousTexts: { [targetBlock.id]: 'text' in targetBlock ? (targetBlock.text || '') : '' },
+        previousArtifact,
+      })
+      setCommandUndoStack((prev) => [op, ...prev.slice(0, 19)])
+      setLastCommandOp(op)
+      setEditorState((prev) => ({
+        ...updateEditableStateFromHtml(prev, result.html),
+        selectedSectionId: result.affectedSectionId || prev.selectedSectionId,
+        dirty: true,
+      }))
+      appendHistory(
+        parsed.target.kind.startsWith('section') ? 'section' : 'document',
+        editorState.selectedSectionId,
+        { role: 'assistant', text: `✅ 已在「${resolved.label}」末尾插入引用：${refSource.label}` },
+      )
+      setStatusMessage(`已插入引用：${refSource.label}`)
       setStatusTone('ok')
       return true
     }
@@ -1213,6 +1285,7 @@ export default function DocumentWorkbench() {
           aiCalled: true,
           summary: `已对「${resolved.label}」执行：${parsed.intent}（AI）`,
           previousTexts,
+          previousArtifact,
         })
         setCommandUndoStack((prev) => [op, ...prev.slice(0, 19)])
         setLastCommandOp(op)
@@ -1253,11 +1326,22 @@ export default function DocumentWorkbench() {
     const root = canvasRef.current
     if (!root) return
 
-    if (op.operationClass === 'format' && op.previousTexts && Object.keys(op.previousTexts).length > 0) {
-      // We need access to the raw DOM node — canvas exposes getHtml which calls ensureDocumentScaffold
-      // For undo we apply a replace_document with the restored HTML per-block via undoFormatOp
+    if (op.previousArtifact) {
+      // Restore from full artifact snapshot — most reliable path.
+      // Correctly restores html, canonicalData.blocks, citations, and references.
+      const restoredHtml = op.previousArtifact.html
+      const applied = canvasRef.current?.applyPatch({ type: 'replace_document', html: restoredHtml })
+      if (applied?.applied) {
+        setEditorState((prev) => ({
+          ...prev,
+          html: op.previousArtifact!.html,
+          documentArtifact: op.previousArtifact,
+          dirty: true,
+        }))
+      }
+    } else if (op.operationClass === 'format' && op.previousTexts && Object.keys(op.previousTexts).length > 0) {
+      // Fallback: restore per-block innerHTML and remove applied styles
       const currentHtml = canvasRef.current?.getHtml() || editorState.html
-      // Build a temp div to apply undoFormatOp
       const tmp = document.createElement('div')
       tmp.innerHTML = currentHtml
       const restoredHtml = undoFormatOp(tmp, op.previousTexts)
@@ -1266,7 +1350,7 @@ export default function DocumentWorkbench() {
         setEditorState((prev) => ({ ...updateEditableStateFromHtml(prev, applied.html), dirty: true }))
       }
     } else if (op.operationClass === 'semantic' && op.previousTexts) {
-      // Restore each block's previous text
+      // Fallback: restore each block's previous text content
       for (const [blockId, text] of Object.entries(op.previousTexts)) {
         canvasRef.current?.applyPatch({ type: 'replace_block_text', blockId, replacementText: text })
       }

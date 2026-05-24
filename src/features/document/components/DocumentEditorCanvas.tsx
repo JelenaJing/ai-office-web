@@ -7,7 +7,7 @@ import {
   type ClipboardEvent,
 } from 'react'
 import styled from 'styled-components'
-import { applyDocumentEditPatch, applyFormatOp, type ApplyDocumentEditPatchResult, type ApplyFormatOpResult } from '../services/documentPatchApplier'
+import { applyDocumentEditPatch, applyFormatOp, appendCitationToBlock, type ApplyDocumentEditPatchResult, type ApplyFormatOpResult, type AppendCitationToBlockResult } from '../services/documentPatchApplier'
 import type {
   DocumentEditPatch,
   DocumentSelectionRange,
@@ -332,6 +332,13 @@ export interface DocumentEditorCanvasHandle {
     label: string
     renderMode?: 'inline' | 'badge' | 'footnote'
   }) => ApplyDocumentEditPatchResult
+  appendCitationToBlock: (input: {
+    blockId: string
+    citationId: string
+    refId: string
+    label: string
+    renderMode?: 'inline' | 'badge' | 'footnote'
+  }) => AppendCitationToBlockResult
 }
 
 interface DocumentEditorCanvasProps {
@@ -922,6 +929,17 @@ export const DocumentEditorCanvas = forwardRef<DocumentEditorCanvasHandle, Docum
           savedRange: savedRangeRef.current,
           selectedSectionId: state.selectedSectionId,
         })
+        if (result.applied) {
+          ensureDocumentScaffold(root)
+          updatePlaceholderState(root)
+          onHtmlChange(result.html, result.affectedSectionId)
+        }
+        return result
+      },
+      appendCitationToBlock(input) {
+        const root = rootRef.current
+        if (!root) return { applied: false, html: '', affectedSectionId: null }
+        const result = appendCitationToBlock(root, input)
         if (result.applied) {
           ensureDocumentScaffold(root)
           updatePlaceholderState(root)
