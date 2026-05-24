@@ -14,6 +14,13 @@ const Title = styled.h3`
   color: #1e3954;
 `
 
+const Description = styled.div`
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: #6b7f92;
+  line-height: 1.6;
+`
+
 const TemplateGrid = styled.div`
   display: grid;
   gap: 8px;
@@ -32,6 +39,13 @@ const TemplateName = styled.div`
   font-size: 13px;
   font-weight: 800;
   color: #274865;
+`
+
+const TemplateMeta = styled.div`
+  margin-top: 4px;
+  font-size: 12px;
+  color: #4e6a84;
+  font-weight: 700;
 `
 
 const TemplateDesc = styled.div`
@@ -53,17 +67,20 @@ export function DocumentTemplatePanel({
   onSelectTemplate,
 }: DocumentTemplatePanelProps) {
   return (
-    <Panel>
+    <Panel data-testid="document-template-panel">
       <Title>模板选择</Title>
+      <Description>当前模板会直接作为 `templateId` 传入 `/api/documents/start`。</Description>
       <TemplateGrid>
         {templates.map((template) => (
           <TemplateCard
             key={template.id}
             type="button"
+            data-testid={`document-template-${template.id}`}
             $active={selectedTemplateId === template.id}
             onClick={() => onSelectTemplate(template.id)}
           >
             <TemplateName>{template.label}</TemplateName>
+            <TemplateMeta>{template.defaultTitle}</TemplateMeta>
             <TemplateDesc>{template.description}</TemplateDesc>
           </TemplateCard>
         ))}

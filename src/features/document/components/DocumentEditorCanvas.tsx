@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import styled from 'styled-components'
 import type { DocumentDraft } from '../services/documentWorkbenchApi'
 
@@ -6,18 +6,39 @@ const CanvasShell = styled.div`
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 24px;
+  padding: 28px;
   background: linear-gradient(180deg, #e8eef5 0%, #dfe7ef 100%);
 `
 
 const Paper = styled.div`
-  width: min(850px, 100%);
+  width: min(794px, 100%);
+  box-sizing: border-box;
   margin: 0 auto;
   background: #fff;
-  min-height: 1100px;
-  padding: 90px 88px;
+  min-height: 1123px;
+  padding: 84px 76px 96px;
   box-shadow: 0 18px 48px rgba(15, 23, 42, 0.12);
-  border-radius: 6px;
+  border-radius: 8px;
+`
+
+const PaperMeta = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 28px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #e4ebf3;
+  font-size: 12px;
+  color: #607487;
+`
+
+const MetaBadge = styled.div`
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #f5f8fc;
+  color: #48627b;
+  font-weight: 700;
 `
 
 const Title = styled.h1`
@@ -37,10 +58,10 @@ const SectionBlock = styled.section<{ $active?: boolean }>`
   cursor: pointer;
 `
 
-const SectionHeading = styled.h2`
+const SectionHeading = styled.h2<{ $level: 1 | 2 }>`
   margin: 0 0 16px;
-  font-size: 22px;
-  color: #173f69;
+  font-size: ${({ $level }) => ($level === 1 ? '22px' : '18px')};
+  color: ${({ $level }) => ($level === 1 ? '#173f69' : '#355a7f')};
 `
 
 const Paragraph = styled.p<{ $active?: boolean }>`
@@ -55,13 +76,31 @@ const Paragraph = styled.p<{ $active?: boolean }>`
 `
 
 const CitationList = styled.div`
-  margin-top: 6px;
+  margin-top: 12px;
   padding: 10px 12px;
   border-radius: 12px;
   background: #f5f8fc;
   color: #516679;
   font-size: 12px;
   line-height: 1.7;
+`
+
+const CitationMarkerRow = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+`
+
+const CitationMarker = styled.span`
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #edf4fb;
+  color: #31516f;
+  font-size: 12px;
+  font-weight: 700;
 `
 
 const TableWrap = styled.div`
@@ -109,10 +148,14 @@ export function DocumentEditorCanvas({
   onSelectParagraph,
 }: DocumentEditorCanvasProps) {
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({})
+  const sectionLevelMap = useMemo(
+    () => new Map(document?.outline.map((item) => [item.id, item.level]) || []),
+    [document],
+  )
 
   useEffect(() => {
     if (!selectedSectionId) return
-    sectionRefs.current[selectedSectionId]?.scrollIntoView({ block: 'center', behavior: 'auto' })
+    sectionRefs.current[selectedSectionId]?.scrollIntoView({ block: 'center', behavior: 'smooth' })
   }, [selectedSectionId])
 
   return (
@@ -120,12 +163,17 @@ export function DocumentEditorCanvas({
       <Paper>
         {document ? (
           <>
+            <PaperMeta>
+              <MetaBadge>A4 文稿工作区</MetaBadge>
+              <div>{document.language === 'zh-CN' ? '默认中文生成' : document.language}</div>
+            </PaperMeta>
             <Title>{document.title}</Title>
             {document.sections.map((section) => {
               const paragraphs = section.content
                 .split(/\n{2,}/)
                 .map((item) => item.trim())
                 .filter(Boolean)
+              const sectionLevel = sectionLevelMap.get(section.id) === 2 ? 2 : 1
               return (
                 <SectionBlock
                   key={section.id}
@@ -136,7 +184,7 @@ export function DocumentEditorCanvas({
                   $active={selectedSectionId === section.id}
                   onClick={() => onSelectSection(section.id)}
                 >
-                  <SectionHeading>{section.title}</SectionHeading>
+                  <SectionHeading $level={sectionLevel}>{section.title}</SectionHeading>
                   {paragraphs.map((paragraph, index) => {
                     const paragraphKey = `${section.id}:${index}`
                     return (
@@ -175,21 +223,28 @@ export function DocumentEditorCanvas({
                     </TableWrap>
                   ))}
                   {section.citations && section.citations.length > 0 ? (
-                    <CitationList>
-                      {section.citations.map((citation) => (
-                        <div key={citation.id}>
-                          依据：{citation.label}{citation.note ? `（${citation.note}）` : ''}
-                        </div>
-                      ))}
-                    </CitationList>
+                    <>
+                      <CitationMarkerRow>
+                        {section.citations.map((citation, index) => (
+                          <CitationMarker key={citation.id}>[{index + 1}] {citation.label}</CitationMarker>
+                        ))}
+                      </CitationMarkerRow>
+                      <CitationList>
+                        {section.citations.map((citation, index) => (
+                          <div key={citation.id}>
+                            [{index + 1}] {citation.label}{citation.note ? `（${citation.note}）` : ''}
+                          </div>
+                        ))}
+                      </CitationList>
+                    </>
                   ) : null}
                 </SectionBlock>
               )
             })}
           </>
         ) : (
-          <div style={{ color: '#627789', fontSize: 14, lineHeight: 1.8 }}>
-            请选择模板、知识库与附件，在底部输入文稿需求后点击“生成文稿”。
+          <div style={{ color: '#627789', fontSize: 14, lineHeight: 1.9 }}>
+            当前为 A4 文稿预览区。请选择模板、知识库与附件，输入文稿需求后点击“生成文稿”。
           </div>
         )}
       </Paper>

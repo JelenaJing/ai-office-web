@@ -14,6 +14,13 @@ const Title = styled.h3`
   color: #1e3954;
 `
 
+const Description = styled.div`
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: #6b7f92;
+  line-height: 1.6;
+`
+
 const OutlineList = styled.div`
   display: grid;
   gap: 8px;
@@ -44,13 +51,15 @@ export function DocumentOutlinePanel({
   onSelectSection,
 }: DocumentOutlinePanelProps) {
   return (
-    <Panel>
+    <Panel data-testid="document-outline-panel">
       <Title>文档目录</Title>
+      <Description>{document ? `共 ${document.outline.length} 个章节，可点击定位到中间 A4 文稿页面。` : '生成文稿后，这里会显示章节目录。'}</Description>
       <OutlineList>
         {document?.outline.map((item, index) => (
           <OutlineButton
             key={item.id}
             type="button"
+            data-testid={`document-outline-item-${item.id}`}
             $active={selectedSectionId === item.id}
             $level={item.level}
             onClick={() => onSelectSection(item.id)}

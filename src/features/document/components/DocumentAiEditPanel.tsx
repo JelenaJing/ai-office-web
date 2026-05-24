@@ -29,6 +29,19 @@ const Hint = styled.div`
   line-height: 1.6;
 `
 
+const SectionBadge = styled.div`
+  margin-top: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #edf4fb;
+  color: #31516f;
+  font-size: 12px;
+  font-weight: 700;
+`
+
 const QuickActions = styled.div`
   padding: 14px 16px 0;
   display: flex;
@@ -110,6 +123,7 @@ export interface SectionHistoryEntry {
 }
 
 interface DocumentAiEditPanelProps {
+  selectedSectionId: string | null
   selectedSectionLabel: string
   selectedParagraphLabel: string | null
   history: SectionHistoryEntry[]
@@ -150,6 +164,7 @@ function quickActionPrompt(action: typeof QUICK_ACTIONS[number]): string {
 }
 
 export function DocumentAiEditPanel({
+  selectedSectionId,
   selectedSectionLabel,
   selectedParagraphLabel,
   history,
@@ -173,10 +188,11 @@ export function DocumentAiEditPanel({
   }
 
   return (
-    <Panel>
+    <Panel data-testid="document-ai-edit-panel">
       <Header>
         <Title>AI 修改面板</Title>
         <Hint>当前正在修改：{currentLabel || '请先选择章节'}</Hint>
+        <SectionBadge>{selectedSectionId ? `sectionId: ${selectedSectionId}` : '未绑定章节'}</SectionBadge>
       </Header>
 
       <QuickActions>
@@ -184,8 +200,9 @@ export function DocumentAiEditPanel({
           <QuickButton
             key={action}
             type="button"
+            data-testid={`document-ai-quick-${action}`}
             disabled={disabled || busy}
-            onClick={() => setInput(quickActionPrompt(action))}
+            onClick={() => void onSubmit(quickActionPrompt(action))}
           >
             {action}
           </QuickButton>
@@ -205,11 +222,17 @@ export function DocumentAiEditPanel({
       <Composer>
         <Input
           value={input}
+          data-testid="document-ai-edit-input"
           disabled={disabled || busy}
           onChange={(event) => setInput(event.target.value)}
           placeholder={disabled ? '请先选择章节或段落' : '例如：这一节写得更正式，压缩成三段。'}
         />
-        <SubmitButton type="button" disabled={disabled || busy || !input.trim()} onClick={() => void handleSubmit()}>
+        <SubmitButton
+          type="button"
+          data-testid="document-ai-edit-submit"
+          disabled={disabled || busy || !input.trim()}
+          onClick={() => void handleSubmit()}
+        >
           {busy ? '正在修改…' : '修改当前章节'}
         </SubmitButton>
       </Composer>

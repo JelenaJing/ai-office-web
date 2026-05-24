@@ -7,7 +7,6 @@ import { useWorkspaceMode } from '../contexts/WorkspaceModeContext'
 import { SceneFeatureRow } from '../components/scene/SceneFeatureRow'
 import { runWebFeatureAction, sceneStatusForWebFeature } from '../platform/useWebFeatureAction'
 import { logWebWorkbenchEntry } from '../platform/webWorkbenchDebug'
-import { isWebShim } from '../platform/detect'
 
 interface StudyWorkspaceProps {
   onGoToWorkspace: () => void
@@ -53,7 +52,6 @@ export default function StudyWorkspace({ onGoToWorkspace }: StudyWorkspaceProps)
     enterHomeworkMode,
     enterAiClassMode,
     enterDocumentGenerationMode,
-    enterDailyReportMode,
     enterImageGenerationMode,
   } = useWorkspaceMode()
 
@@ -101,7 +99,7 @@ export default function StudyWorkspace({ onGoToWorkspace }: StudyWorkspaceProps)
           actionLabel="论文写作"
           onClick={() => runWebFeatureAction(
             'daily.report',
-            () => go(isWebShim() ? enterDailyReportMode : enterDocumentGenerationMode),
+            () => go(enterDocumentGenerationMode),
             block,
           )}
         />
@@ -139,4 +137,3 @@ export default function StudyWorkspace({ onGoToWorkspace }: StudyWorkspaceProps)
     </Page>
   )
 }
-

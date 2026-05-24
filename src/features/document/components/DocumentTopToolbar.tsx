@@ -61,7 +61,8 @@ interface DocumentTopToolbarProps {
   engineLabel: string
   templateLabel: string
   knowledgeCount: number
-  fallbackMessage?: string | null
+  fallbackReason?: string | null
+  artifactLabel?: string | null
   onDownloadDocx: () => void
   onExportPdf: () => void
   onSave: () => void
@@ -74,7 +75,8 @@ export function DocumentTopToolbar({
   engineLabel,
   templateLabel,
   knowledgeCount,
-  fallbackMessage,
+  fallbackReason,
+  artifactLabel,
   onDownloadDocx,
   onExportPdf,
   onSave,
@@ -88,27 +90,33 @@ export function DocumentTopToolbar({
         <MetaChip>生成引擎：{engineLabel}</MetaChip>
         <MetaChip>模板：{templateLabel}</MetaChip>
         <MetaChip>知识库：已选择 {knowledgeCount} 个</MetaChip>
-        {fallbackMessage ? (
+        {artifactLabel ? <MetaChip>当前产物：{artifactLabel}</MetaChip> : null}
+        {fallbackReason ? (
           <MetaChip $tone="warn">
             <AlertCircle size={14} />
-            {fallbackMessage}
+            fallbackReason：{fallbackReason}
           </MetaChip>
         ) : null}
       </MetaRow>
       <Actions>
-        <ActionButton type="button" onClick={onDownloadDocx} disabled={busy}>
+        <ActionButton type="button" data-testid="document-download-docx" onClick={onDownloadDocx} disabled={busy}>
           <Download size={15} />
           下载 DOCX
         </ActionButton>
-        <ActionButton type="button" onClick={onExportPdf} disabled={busy}>
+        <ActionButton type="button" data-testid="document-export-pdf" onClick={onExportPdf} disabled={busy}>
           <FileDown size={15} />
           导出 PDF
         </ActionButton>
-        <ActionButton type="button" onClick={onSave} disabled={busy}>
+        <ActionButton type="button" data-testid="document-save" onClick={onSave} disabled={busy}>
           <Save size={15} />
           保存
         </ActionButton>
-        <ActionButton type="button" onClick={onRegenerate} disabled={busy || regenerateDisabled}>
+        <ActionButton
+          type="button"
+          data-testid="document-regenerate"
+          onClick={onRegenerate}
+          disabled={busy || regenerateDisabled}
+        >
           <RotateCcw size={15} />
           重新生成
         </ActionButton>

@@ -136,10 +136,15 @@ export async function startDocumentTask(input: {
   documentType?: DocumentType
   language?: DocumentLanguage
 }): Promise<{ success: boolean; taskId: string; status: string }> {
+  const payload = {
+    ...input,
+    documentType: input.documentType || 'report',
+    language: input.language || 'zh-CN',
+  }
   return requestJson('/api/documents/start', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(input),
+    body: JSON.stringify(payload),
   })
 }
 

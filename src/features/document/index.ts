@@ -9,7 +9,7 @@ export { default as DocumentPreviewPane } from './components/DocumentPreviewPane
 export { default as DocumentWorkbench } from './components/DocumentWorkbench'
 export { default as WordLikeDocumentEditor } from './components/WordLikeDocumentEditor'
 export { default as WebDocumentWorkbench } from './components/WebDocumentWorkbench'
-export { default as WebWritingPanel } from './components/WebWritingPanel' // temporary
+export { default as WebWritingPanel } from './components/WebWritingPanel'
 
 // Hooks
 export * from './hooks/useDocumentPatchActions'

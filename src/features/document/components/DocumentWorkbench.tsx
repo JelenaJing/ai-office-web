@@ -9,7 +9,7 @@ import { platformApi } from '../../../platform'
 import type { FileEntry } from '../../../platform'
 import { DocumentAiEditPanel, type SectionHistoryEntry } from './DocumentAiEditPanel'
 import { DocumentEditorCanvas } from './DocumentEditorCanvas'
-import { DocumentKnowledgePanel } from './DocumentKnowledgePanel'
+import { DocumentAttachmentPanel, DocumentKnowledgePanel } from './DocumentKnowledgePanel'
 import { DocumentOutlinePanel } from './DocumentOutlinePanel'
 import { DocumentTemplatePanel } from './DocumentTemplatePanel'
 import { DocumentTopToolbar } from './DocumentTopToolbar'
@@ -46,6 +46,7 @@ const Sidebar = styled.aside`
   padding: 16px;
   overflow: auto;
   display: grid;
+  align-content: start;
   gap: 14px;
   border-right: 1px solid #d8e3ef;
   background: #f7fafc;
@@ -56,6 +57,18 @@ const CenterPane = styled.div`
   min-height: 0;
   display: flex;
   flex-direction: column;
+`
+
+const CanvasHeader = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px;
+  border-bottom: 1px solid #d8e3ef;
+  background: rgba(255, 255, 255, 0.88);
+  color: #48627b;
+  font-size: 12px;
 `
 
 const StatusBar = styled.div<{ $tone?: 'ok' | 'err' }>`
@@ -252,12 +265,19 @@ export default function DocumentWorkbench() {
     [departments],
   )
 
-  const activeEngineLabel = engineLabel(result?.engine || defaultEngine)
+  const activeEngineLabel = engineLabel(defaultEngine)
   const activeTemplateLabel = result?.templateLabel || template?.label || '未选择'
-  const fallbackMessage = useMemo(() => {
+  const fallbackReason = useMemo(() => {
     if (!result?.fallbackFrom) return null
-    return `MiniMax DOCX Skill 失败，已回退内置文稿引擎：${result.fallbackReason || '未提供原因'}`
+    return result.fallbackReason || '未提供原因'
   }, [result])
+  const artifactLabel = useMemo(() => result?.filename || null, [result])
+
+  useEffect(() => {
+    if (!result) return
+    if (selectedSectionId && result.document.sections.some((section) => section.id === selectedSectionId)) return
+    setSelectedSectionId(result.document.sections[0]?.id || null)
+  }, [result, selectedSectionId])
 
   const setHistoryForSection = useCallback((sectionId: string, updater: (history: SectionHistoryEntry[]) => SectionHistoryEntry[]) => {
     setSectionHistory((prev) => ({
@@ -426,7 +446,8 @@ export default function DocumentWorkbench() {
           engineLabel={activeEngineLabel}
           templateLabel={activeTemplateLabel}
           knowledgeCount={workspaceKbIds.length}
-          fallbackMessage={fallbackMessage}
+          fallbackReason={fallbackReason}
+          artifactLabel={artifactLabel}
           onDownloadDocx={() => void downloadArtifact('docx')}
           onExportPdf={() => void downloadArtifact('pdf')}
           onSave={handleSave}
@@ -445,19 +466,25 @@ export default function DocumentWorkbench() {
           <DocumentKnowledgePanel
             departments={departments}
             selectedKnowledgeIds={workspaceKbIds}
-            attachments={attachments}
             onOpenKnowledgePicker={() => setKbPickerOpen(true)}
-            onAddAttachment={handleUploadAttachment}
-            onRemoveAttachment={(fileId) => setAttachments((prev) => prev.filter((item) => item.id !== fileId))}
           />
           <DocumentTemplatePanel
             templates={templates}
             selectedTemplateId={selectedTemplateId}
             onSelectTemplate={setSelectedTemplateId}
           />
+          <DocumentAttachmentPanel
+            attachments={attachments}
+            onAddAttachment={handleUploadAttachment}
+            onRemoveAttachment={(fileId) => setAttachments((prev) => prev.filter((item) => item.id !== fileId))}
+          />
         </Sidebar>
 
         <CenterPane>
+          <CanvasHeader>
+            <div>中间区域为 A4 文稿预览，不使用 textarea；点击目录可定位章节。</div>
+            <div>{selectedSection ? `当前章节：${selectedSection.title}` : '当前章节：未选择'}</div>
+          </CanvasHeader>
           <DocumentEditorCanvas
             document={result?.document || null}
             selectedSectionId={selectedSectionId}
@@ -471,6 +498,7 @@ export default function DocumentWorkbench() {
         </CenterPane>
 
         <DocumentAiEditPanel
+          selectedSectionId={selectedSectionId}
           selectedSectionLabel={selectedSection?.title || '未选择章节'}
           selectedParagraphLabel={selectedParagraphLabel}
           history={selectedSectionId ? (sectionHistory[selectedSectionId] || []) : []}
@@ -482,10 +510,11 @@ export default function DocumentWorkbench() {
 
       <BottomComposer>
         <ComposerHint>
-          底部 Prompt 用于生成整篇文稿。默认会附加 <code>language: zh-CN</code> 与 <code>style: formal_chinese_office</code>；仅当你明确要求英文时才切换。
+          这里用于生成整篇文稿。默认生成中文，并会把当前模板、知识库与附件引用一起传给后端文稿任务。
         </ComposerHint>
         <ComposerInput
           value={generationPrompt}
+          data-testid="document-generation-prompt"
           onChange={(event) => setGenerationPrompt(event.target.value)}
           placeholder="例如：生成一份学院年度工作总结，包含主要成绩、问题分析、下一年度计划。"
         />
@@ -493,7 +522,12 @@ export default function DocumentWorkbench() {
           <div style={{ fontSize: 12, color: '#607487' }}>
             默认引擎：{engineLabel(defaultEngine)} · fallback：{fallbackMode === 'none' ? '关闭' : '内置文稿引擎'}
           </div>
-          <GenerateButton type="button" disabled={busy || !generationPrompt.trim()} onClick={() => void handleGenerate()}>
+          <GenerateButton
+            type="button"
+            data-testid="document-generate-button"
+            disabled={busy || !generationPrompt.trim()}
+            onClick={() => void handleGenerate()}
+          >
             <Sparkles size={15} />
             {busy ? '正在生成文稿…' : '生成文稿'}
           </GenerateButton>

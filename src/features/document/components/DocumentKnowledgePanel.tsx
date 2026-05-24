@@ -18,6 +18,12 @@ const Title = styled.h3`
   color: #1e3954;
 `
 
+const Description = styled.div`
+  font-size: 12px;
+  color: #6b7f92;
+  line-height: 1.6;
+`
+
 const ActionButton = styled.button`
   height: 34px;
   padding: 0 12px;
@@ -64,8 +70,11 @@ const RemoveButton = styled.button`
 interface DocumentKnowledgePanelProps {
   departments: Department[]
   selectedKnowledgeIds: string[]
-  attachments: FileEntry[]
   onOpenKnowledgePicker: () => void
+}
+
+interface DocumentAttachmentPanelProps {
+  attachments: FileEntry[]
   onAddAttachment: () => void
   onRemoveAttachment: (fileId: string) => void
 }
@@ -73,56 +82,65 @@ interface DocumentKnowledgePanelProps {
 export function DocumentKnowledgePanel({
   departments,
   selectedKnowledgeIds,
-  attachments,
   onOpenKnowledgePicker,
-  onAddAttachment,
-  onRemoveAttachment,
 }: DocumentKnowledgePanelProps) {
   const departmentNameMap = new Map(departments.map((department) => [department.id, department.name]))
 
   return (
-    <>
-      <Panel>
-        <div>
+    <Panel data-testid="document-knowledge-panel">
+      <div style={{ display: 'grid', gap: 10 }}>
+        <div style={{ display: 'grid', gap: 6 }}>
           <Title>知识库选择</Title>
-          <div style={{ marginTop: 10 }}>
-            <ActionButton type="button" onClick={onOpenKnowledgePicker}>
-              <BookOpen size={14} />
-              选择知识库
-            </ActionButton>
-          </div>
-          <TagList style={{ marginTop: 10 }}>
-            {selectedKnowledgeIds.length > 0
-              ? selectedKnowledgeIds.map((id) => <Tag key={id}>{departmentNameMap.get(id) || id}</Tag>)
-              : <div style={{ fontSize: 12, color: '#6b7f92' }}>未选择知识库</div>}
-          </TagList>
+          <Description>生成文稿时会把所选知识库一并传入 `/api/documents/start`。</Description>
         </div>
-      </Panel>
-
-      <Panel>
         <div>
-          <Title>附件引用</Title>
-          <div style={{ marginTop: 10 }}>
-            <ActionButton type="button" onClick={onAddAttachment}>
-              <Plus size={14} />
-              添加附件
-            </ActionButton>
-          </div>
-          <TagList style={{ marginTop: 10 }}>
-            {attachments.length > 0
-              ? attachments.map((file) => (
-                <Tag key={file.id}>
-                  <Paperclip size={12} />
-                  {file.name}
-                  <RemoveButton type="button" onClick={() => onRemoveAttachment(file.id)}>
-                    <X size={12} />
-                  </RemoveButton>
-                </Tag>
-              ))
-              : <div style={{ fontSize: 12, color: '#6b7f92' }}>未添加附件引用</div>}
-          </TagList>
+          <ActionButton type="button" onClick={onOpenKnowledgePicker}>
+            <BookOpen size={14} />
+            选择知识库
+          </ActionButton>
         </div>
-      </Panel>
-    </>
+        <TagList>
+          {selectedKnowledgeIds.length > 0
+            ? selectedKnowledgeIds.map((id) => <Tag key={id}>{departmentNameMap.get(id) || id}</Tag>)
+            : <div style={{ fontSize: 12, color: '#6b7f92' }}>未选择知识库</div>}
+        </TagList>
+      </div>
+    </Panel>
+  )
+}
+
+export function DocumentAttachmentPanel({
+  attachments,
+  onAddAttachment,
+  onRemoveAttachment,
+}: DocumentAttachmentPanelProps) {
+  return (
+    <Panel data-testid="document-attachment-panel">
+      <div style={{ display: 'grid', gap: 10 }}>
+        <div style={{ display: 'grid', gap: 6 }}>
+          <Title>附件引用</Title>
+          <Description>可附加 DOCX、PDF、TXT、Markdown 等材料，作为当前文稿的引用输入。</Description>
+        </div>
+        <div>
+          <ActionButton type="button" onClick={onAddAttachment}>
+            <Plus size={14} />
+            添加附件
+          </ActionButton>
+        </div>
+        <TagList>
+          {attachments.length > 0
+            ? attachments.map((file) => (
+              <Tag key={file.id}>
+                <Paperclip size={12} />
+                {file.name}
+                <RemoveButton type="button" onClick={() => onRemoveAttachment(file.id)} aria-label={`移除附件 ${file.name}`}>
+                  <X size={12} />
+                </RemoveButton>
+              </Tag>
+            ))
+            : <div style={{ fontSize: 12, color: '#6b7f92' }}>未添加附件引用</div>}
+        </TagList>
+      </div>
+    </Panel>
   )
 }

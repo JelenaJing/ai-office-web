@@ -87,6 +87,12 @@ function renderPanelContent(
   activePanel: PanelKey,
   generationMode: string,
 ): React.ReactNode {
+  const renderDocumentWorkbench = () => (
+    <EditorViewportShell>
+      <WebDocumentWorkbench />
+    </EditorViewportShell>
+  )
+
   if (isWebShim()) {
     const featureKey = PANEL_WEB_FEATURE[key]
     if (featureKey && !isWebFeatureEnabled(featureKey)) {
@@ -101,11 +107,7 @@ function renderPanelContent(
   switch (key) {
     case 'freewrite':
       if (isWebShim()) {
-        return (
-          <EditorViewportShell>
-            <WebDocumentWorkbench />
-          </EditorViewportShell>
-        )
+        return renderDocumentWorkbench()
       }
       return (
         <EditorViewportShell>
@@ -118,11 +120,7 @@ function renderPanelContent(
       )
     case 'paper':
       if (isWebShim() && generationMode === 'document') {
-        return (
-          <EditorViewportShell>
-            <WebDocumentWorkbench />
-          </EditorViewportShell>
-        )
+        return renderDocumentWorkbench()
       }
       if (isWebShim() && generationMode === 'daily-report') {
         return <WebDailyReportPanel />
