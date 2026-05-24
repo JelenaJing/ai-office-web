@@ -27,6 +27,7 @@ import {
   continueDocument,
   editDocumentSection,
   editDocumentSelection,
+  editDocumentText,
   engineLabel,
   exportDocumentArtifact,
   importDocumentDocx,
@@ -1236,11 +1237,6 @@ export default function DocumentWorkbench() {
 
     if (isSemanticIntent(parsed.intent)) {
       // ── Semantic operation (AI needed) ────────────────────────────────────
-      if (!editorState.documentId) {
-        // No document yet — let caller handle generation
-        return false
-      }
-
       // Get the text of the first resolved block as the selection text
       const targetBlock = resolved.blocks[0]
       if (!targetBlock || !('text' in targetBlock) || !targetBlock.text?.trim()) {
@@ -1254,18 +1250,29 @@ export default function DocumentWorkbench() {
       appendHistory(histScope, editorState.selectedSectionId, { role: 'user', text: instruction })
       captureAiSnapshot(histScope, editorState.selectedSectionId)
       try {
-        const response = await editDocumentSelection({
-          documentId: editorState.documentId,
-          instruction: aiInstruction,
-          selectedText: targetBlock.text.trim(),
-          selectionContext: {
-            sectionId: targetBlock.sectionId ?? undefined,
-            documentTitle: editorState.title,
-            sectionTitle: targetBlock.sectionTitle,
-          },
-          document: editorState.documentDraft,
-          html: editorState.html,
-        })
+        // Use stateless endpoint when no documentId (blank new document)
+        const response = editorState.documentId
+          ? await editDocumentSelection({
+              documentId: editorState.documentId,
+              instruction: aiInstruction,
+              selectedText: targetBlock.text.trim(),
+              selectionContext: {
+                sectionId: targetBlock.sectionId ?? undefined,
+                documentTitle: editorState.title,
+                sectionTitle: targetBlock.sectionTitle,
+              },
+              document: editorState.documentDraft,
+              html: editorState.html,
+            })
+          : await editDocumentText({
+              instruction: aiInstruction,
+              selectedText: targetBlock.text.trim(),
+              selectionContext: {
+                sectionId: targetBlock.sectionId ?? undefined,
+                documentTitle: editorState.title,
+                sectionTitle: targetBlock.sectionTitle,
+              },
+            })
 
         // Apply as replace_block_text for the primary block
         const applied = canvasRef.current?.applyPatch({

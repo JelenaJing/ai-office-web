@@ -24,7 +24,8 @@ import { routeDocumentTask } from '../services/documentTaskRouter'
 import { continueDocumentAtCursor } from '../services/documentContinuationService'
 import { extractDocxContent } from '../services/docxExtractService'
 import { buildWorkbenchDraftFromHtml, persistWorkbenchDocument } from '../services/documentWorkbenchBridge'
-import type { DocumentEngine, DocumentFallbackMode, DocumentKnowledgeRefInput, DocumentLanguage, DocumentType } from '../types'
+import { buildWorkbenchDocumentArtifact } from '../services/documentWorkbenchArtifact'
+import type { DocumentEngine, DocumentFallbackMode, DocumentKnowledgeRefInput, DocumentLanguage, DocumentRecord, DocumentType } from '../types'
 
 const router = Router()
 const upload = multer({
@@ -63,10 +64,18 @@ function updateRecordFromRequest(record: NonNullable<ReturnType<typeof getDocume
     documentDraft: body.documentDraft || body.document,
     outline: body.outline,
   })
+  const workbenchArtifact = buildWorkbenchDocumentArtifact({
+    documentId: record.documentId,
+    draft,
+    html: typeof body.html === 'string' ? body.html : record.html,
+    knowledgeRefs: record.knowledgeRefs,
+  })
   return {
     ...record,
     title: draft.title,
     draft,
+    html: workbenchArtifact.html,
+    documentArtifact: workbenchArtifact,
     updatedAt: new Date().toISOString(),
   }
 }
@@ -362,6 +371,83 @@ router.get('/tasks/:taskId', async (req, res) => {
   })
 })
 
+/**
+ * POST /api/documents/edit-text
+ *
+ * Stateless text-level AI edit that does NOT require an existing document
+ * record.  Intended for blank new documents where documentId is null.
+ * Takes instruction + selectedText and returns updatedText.
+ */
+router.post('/edit-text', async (req, res) => {
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+
+  const instruction = String(req.body?.instruction || '').trim()
+  const selectedText = String(req.body?.selectedText || '').trim()
+  const context = (req.body?.selectionContext || {}) as Record<string, string>
+
+  if (!instruction) {
+    res.status(400).json({ success: false, error: 'instruction 不能为空' })
+    return
+  }
+  if (!selectedText) {
+    res.status(400).json({ success: false, error: 'selectedText 不能为空' })
+    return
+  }
+
+  // Determine effective language from context or default to zh-CN
+  const language = (context.language as DocumentLanguage | undefined) || 'zh-CN'
+  const engine: DocumentEngine = 'minimax_docx'
+
+  // Build a minimal stub record — only the fields used by the edit functions
+  const stubDraft = {
+    id: 'edit-text-stub',
+    title: context.documentTitle || '文稿',
+    type: 'report' as const,
+    language,
+    outline: [],
+    sections: [],
+    metadata: { engine },
+  }
+  const stubRecord = {
+    documentId: 'edit-text-stub',
+    userId,
+    workspacePath: '/',
+    engine,
+    skillId: 'document',
+    title: context.documentTitle || '文稿',
+    language,
+    documentType: 'report' as const,
+    knowledgeRefs: [],
+    draft: stubDraft,
+    html: '',
+    documentArtifact: {} as DocumentRecord['documentArtifact'],
+    artifactId: '',
+    exportUrl: '',
+    filename: '',
+    sourceRefs: [],
+    artifactKnowledgeRefs: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  } satisfies DocumentRecord
+
+  try {
+    const replacementText = await editDocumentSelectionWithMinimax({
+      record: stubRecord,
+      instruction,
+      selectedText,
+      selectionContext: context,
+    })
+    res.json({
+      success: true,
+      updatedText: replacementText,
+      message: '已完成文本级 AI 编辑。',
+    })
+  } catch (error) {
+    res.status(500).json({ success: false, error: error instanceof Error ? error.message : String(error) })
+  }
+})
+
 router.post('/:documentId/sections/:sectionId/edit', async (req, res) => {
   const userId = await requireAccountUser(req, res)
   if (!userId) return
@@ -402,6 +488,8 @@ router.post('/:documentId/sections/:sectionId/edit', async (req, res) => {
       exportUrl: nextRecord.exportUrl,
       filename: nextRecord.filename,
       document: nextRecord.draft,
+      html: nextRecord.html,
+      documentArtifact: nextRecord.documentArtifact,
       outline: buildDocumentOutline(nextRecord.draft),
       updatedSectionId: req.params.sectionId,
       updatedSectionIndex: sectionIndex >= 0 ? sectionIndex + 1 : null,
@@ -525,10 +613,14 @@ router.post('/:documentId/save', async (req, res) => {
       documentId: requestRecord.documentId,
       draft: requestRecord.draft,
       knowledgeRefs: requestRecord.knowledgeRefs,
+      html: requestRecord.html,
+      documentArtifact: requestRecord.documentArtifact,
     })
     const savedAt = new Date().toISOString()
     const nextRecord = {
       ...requestRecord,
+      html: exported.html,
+      documentArtifact: exported.documentArtifact,
       artifactId: exported.artifact.id,
       exportUrl: exported.exportUrl,
       filename: exported.filename,
@@ -547,6 +639,8 @@ router.post('/:documentId/save', async (req, res) => {
       exportUrl: nextRecord.exportUrl,
       filename: nextRecord.filename,
       document: nextRecord.draft,
+      html: nextRecord.html,
+      documentArtifact: nextRecord.documentArtifact,
       outline: buildDocumentOutline(nextRecord.draft),
     })
   } catch (error) {
@@ -579,9 +673,13 @@ router.post('/:documentId/export', async (req, res) => {
       documentId: requestRecord.documentId,
       draft: requestRecord.draft,
       knowledgeRefs: requestRecord.knowledgeRefs,
+      html: requestRecord.html,
+      documentArtifact: requestRecord.documentArtifact,
     })
     const nextRecord = {
       ...requestRecord,
+      html: exported.html,
+      documentArtifact: exported.documentArtifact,
       artifactId: exported.artifact.id,
       exportUrl: exported.exportUrl,
       filename: exported.filename,
@@ -670,11 +768,11 @@ router.post('/import-docx', upload.single('file'), async (req, res) => {
       language: 'zh-CN',
       knowledgeRefs: [],
       draft,
+      html: extracted.html,
     })
     res.json({
       success: true,
       source: artifactId ? 'artifact' : 'upload',
-      html: extracted.html,
       text: extracted.text,
       title: draft.title,
       wordCount: extracted.wordCount,
