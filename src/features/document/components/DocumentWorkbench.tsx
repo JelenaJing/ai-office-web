@@ -58,6 +58,7 @@ import {
   type DocumentPatchOperation,
 } from '../services/documentCommandEngine'
 import { undoFormatOp } from '../services/documentPatchApplier'
+import { downloadDocxFromArtifact } from '../services/documentArtifactToDocx'
 import { runDocumentSkill } from '../services/documentSkillAdapter'
 import { runPaperWorkflowGenerate } from '../services/paperWorkflowAdapter'
 import { fetchContentHandoff } from '../services/contentHandoffApi'
@@ -1748,37 +1749,51 @@ export default function DocumentWorkbench() {
   }, [handleGenerate])
 
   const handleDownloadDocx = useCallback(async () => {
-    if (!editorState.documentId) return
+    if (!hasActiveDocument) return
     setBusy(true)
     try {
       const latestHtml = stripTransientAiMarkup(canvasRef.current?.getHtml() || editorState.html)
       const latestState = latestHtml !== editorState.html
         ? updateEditableStateFromHtml(editorState, latestHtml)
         : editorState
-      const exported = await exportDocumentArtifact({
-        documentId: latestState.documentId!,
-        format: 'docx',
-        title: latestState.title,
-        html: latestState.html,
-        documentDraft: latestState.documentDraft,
-        outline: latestState.outline,
-      })
-      const artifactId = exported.artifactId
-      const filename = exported.filename || artifactFilename || 'document.docx'
-      setEditorState((prev) => ({
-        ...latestState,
-        artifactId: exported.artifactId,
-        exportUrl: exported.exportUrl,
-        dirty: false,
-        lastSavedAt: new Date().toISOString(),
-        saving: false,
-      }))
-      setArtifactFilename(exported.filename)
-      if (!artifactId) {
-        throw new Error('没有可下载的 DOCX 产物')
+
+      // Server-side export: higher-quality output when documentId is available
+      if (latestState.documentId) {
+        const exported = await exportDocumentArtifact({
+          documentId: latestState.documentId,
+          format: 'docx',
+          title: latestState.title,
+          html: latestState.html,
+          documentDraft: latestState.documentDraft,
+          outline: latestState.outline,
+        })
+        const artifactId = exported.artifactId
+        const filename = exported.filename || artifactFilename || 'document.docx'
+        setEditorState((prev) => ({
+          ...latestState,
+          artifactId: exported.artifactId,
+          exportUrl: exported.exportUrl,
+          dirty: false,
+          lastSavedAt: new Date().toISOString(),
+          saving: false,
+        }))
+        setArtifactFilename(exported.filename)
+        if (!artifactId) {
+          throw new Error('没有可下载的 DOCX 产物')
+        }
+        await platformApi.artifacts.download(artifactId, filename)
+        setStatusMessage('DOCX 已下载，内容为当前最新编辑版本')
+        setStatusTone('ok')
+        return
       }
-      await platformApi.artifacts.download(artifactId, filename)
-      setStatusMessage('DOCX 已下载，内容为当前最新编辑版本')
+
+      // Client-side fallback: convert canonicalData.blocks → DOCX via html-docx-js
+      if (!latestState.documentArtifact) {
+        throw new Error('文稿尚未保存，无法导出 DOCX。请先保存文稿。')
+      }
+      const filename = `${(latestState.title || '文稿').replace(/[/\\?%*:|"<>]/g, '-')}.docx`
+      await downloadDocxFromArtifact(latestState.documentArtifact, { filename })
+      setStatusMessage('DOCX 已下载（浏览器本地导出）')
       setStatusTone('ok')
     } catch (error) {
       const message = error instanceof Error ? error.message : 'DOCX 下载失败'
@@ -1788,7 +1803,7 @@ export default function DocumentWorkbench() {
     } finally {
       setBusy(false)
     }
-  }, [artifactFilename, editorState])
+  }, [artifactFilename, editorState, hasActiveDocument])
 
   const handleExportPdf = useCallback(() => {
     const latestHtml = stripTransientAiMarkup(canvasRef.current?.getHtml() || editorState.html)
@@ -1890,7 +1905,7 @@ export default function DocumentWorkbench() {
         onRegenerate={() => void handleGenerate()}
         onViewVersions={() => {}}
         busy={busy}
-        docxDisabled={!editorState.documentId}
+        docxDisabled={!hasActiveDocument}
         regenerateDisabled={!editorState.documentId}
       />
 
