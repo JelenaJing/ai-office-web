@@ -52,6 +52,7 @@ export interface Artifact {
   exports: ArtifactExport[]
   sourceRefs?: ArtifactSourceRef[]
   knowledgeRefs?: ArtifactKnowledgeRef[]
+  metadata?: Record<string, unknown>
   matterId?: string
   emailId?: string
   deckId?: string
@@ -155,7 +156,7 @@ export function getArtifact(artifactId: string): Artifact | null {
   }
 }
 
-export function updateArtifact(artifactId: string, patch: Partial<Pick<Artifact, 'title' | 'type' | 'editable' | 'sourceRefs' | 'knowledgeRefs' | 'matterId' | 'emailId' | 'deckId' | 'documentId'>>): Artifact | null {
+export function updateArtifact(artifactId: string, patch: Partial<Pick<Artifact, 'title' | 'type' | 'editable' | 'sourceRefs' | 'knowledgeRefs' | 'metadata' | 'matterId' | 'emailId' | 'deckId' | 'documentId'>>): Artifact | null {
   const current = getArtifact(artifactId)
   if (!current) return null
   const updated: Artifact = {

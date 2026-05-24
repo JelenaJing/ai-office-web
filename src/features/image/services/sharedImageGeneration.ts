@@ -187,9 +187,11 @@ export async function runSharedImageGeneration(params: RunSharedImageGenerationP
 
   const payload: GenerateImagePayload & { aspectRatio: string; workspacePath?: string } = {
     prompt: normalizedPrompt + contextSuffix,
+    negativePrompt: '',
     aspectRatio: params.aspectRatio || '16:9',
     workspacePath: params.workspacePath,
     references,
+    referenceImages: references,
     styleOptions: params.styleOptions,
     generationMode: params.generationMode,
     styleProfile,
@@ -197,6 +199,7 @@ export async function runSharedImageGeneration(params: RunSharedImageGenerationP
     debug: {
       enabled: true,
       source: params.source,
+      ...(params.debugContext || {}),
     },
   }
 

@@ -7,6 +7,7 @@ import { useWorkspace } from '../../../contexts/WorkspaceContext'
 import { useDocumentEngineRuntime } from '../../../engines/documentEngine/runtime'
 import { isWebShim } from '../../../platform/detect'
 import { webMigrationLabel } from '../../../platform/webMigration'
+import { fetchImageProviderStatus, type ImageProviderStatus } from '../services/ImageService'
 import { getPrimaryStyleReferenceId } from '../services/imageGenerationPrompt'
 import {
   orderSelectedKnowledgeDocuments,
@@ -43,7 +44,7 @@ const ImageThumb = styled.img`display:block;width:100%;max-height:120px;object-f
 const TinyBtn = styled.button`border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#1f2937;font-size:var(--font-size-xs);padding:6px 10px;cursor:pointer;`
 const EmptyHint = styled.div`padding:12px 0;font-size:var(--font-size-xs);color:#64748b;`
 const ColorInput = styled.input`width:100%;height:38px;border:1px solid #ddd;border-radius:6px;padding:4px;background:#fff;`
-const StatusBox = styled.div<{ $error?: boolean }>`margin-top:10px;padding:10px 12px;border-radius:8px;border:1px solid ${p => p.$error ? '#fecaca' : '#cbd5e1'};background:${p => p.$error ? '#fef2f2' : '#fff'};color:${p => p.$error ? '#991b1b' : '#334155'};font-size:var(--font-size-xs);line-height:1.7;`
+const StatusBox = styled.div<{ $error?: boolean }>`margin-top:10px;padding:10px 12px;border-radius:8px;border:1px solid ${p => p.$error ? '#fecaca' : '#cbd5e1'};background:${p => p.$error ? '#fef2f2' : '#fff'};color:${p => p.$error ? '#991b1b' : '#334155'};font-size:var(--font-size-xs);line-height:1.7;white-space:pre-line;`
 const ReferenceStrip = styled.div`margin-top:12px;border:1px solid #dbe5ef;border-radius:10px;background:#f8fbff;padding:10px 12px;`
 const ReferenceTitle = styled.div`font-size:var(--font-size-xs);font-weight:700;color:#1e3a5f;`
 const ReferenceText = styled.div`margin-top:4px;font-size:var(--font-size-xs);line-height:1.6;color:#526579;`
@@ -96,6 +97,31 @@ function imageGenerationErrorMessage(raw: string): string {
     return `图片服务未配置或不可用：${message}`
   }
   return `图片生成失败：${message}`
+}
+
+function buildWebProviderStatusMessage(status: ImageProviderStatus | null, fallbackError: string): string {
+  const lines = [
+    `当前图片引擎：${status?.label || '读取中...'}`,
+    `模型：${status?.model || '-'}`,
+    `状态：${status ? (status.configured ? '已配置' : '未配置') : (fallbackError ? '读取失败' : '读取中...')}`,
+  ]
+  if (status && !status.configured) {
+    lines.push(
+      '',
+      'Nano Banana 图片服务未配置，请在 server/.env.local 配置：',
+      'IMAGE_PROVIDER=nanobanana',
+      'IMAGE_ENDPOINT=https://grsai.dakka.com.cn/v1/draw/nano-banana',
+      'IMAGE_MODEL=nano-banana-fast',
+      'IMAGE_API_KEY=...',
+      '或 NANOBANANA_API_KEY=...',
+    )
+  }
+  if (status?.error) {
+    lines.push('', status.error)
+  } else if (fallbackError) {
+    lines.push('', fallbackError)
+  }
+  return lines.join('\n')
 }
 
 function joinPath(basePath: string, relativePath: string): string {
@@ -154,6 +180,8 @@ const ImageWorkspace: React.FC<{ initialPrompt?: string }> = ({ initialPrompt })
   const [stitchPreviewUrl, setStitchPreviewUrl] = useState('')
   const [stitchFileName, setStitchFileName] = useState(`collage_${Date.now()}.png`)
   const [workspaceStatus, setWorkspaceStatus] = useState('')
+  const [providerStatus, setProviderStatus] = useState<ImageProviderStatus | null>(null)
+  const [providerStatusError, setProviderStatusError] = useState('')
   const imageSession = workbench.sessions.image
   const imageSessionDocumentIds = React.useMemo(
     () => imageSession.imageReferences.map((item) => item.id),
@@ -176,6 +204,29 @@ const ImageWorkspace: React.FC<{ initialPrompt?: string }> = ({ initialPrompt })
   const effectivePrompt = String(prompt || imageSession.generationPrompt || initialPrompt || '').trim()
   const webMode = isWebShim()
   const webLocalOnlyHint = webMigrationLabel('本地导入/保存图片')
+
+  React.useEffect(() => {
+    if (!webMode) {
+      setProviderStatus(null)
+      setProviderStatusError('')
+      return
+    }
+    let cancelled = false
+    void fetchImageProviderStatus()
+      .then((status) => {
+        if (cancelled) return
+        setProviderStatus(status)
+        setProviderStatusError('')
+      })
+      .catch((error) => {
+        if (cancelled) return
+        setProviderStatus(null)
+        setProviderStatusError(error instanceof Error ? error.message : String(error))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [webMode])
 
   const freezeInsertTarget = React.useCallback(() => {
     const runtimeSelection = runtime?.getSelection() || null
@@ -601,6 +652,11 @@ const ImageWorkspace: React.FC<{ initialPrompt?: string }> = ({ initialPrompt })
   return (
     <Wrapper>
       <Title>🎨 图片工作区</Title>
+      {webMode ? (
+        <StatusBox $error={providerStatus ? !providerStatus.configured : Boolean(providerStatusError)}>
+          {buildWebProviderStatusMessage(providerStatus, providerStatusError)}
+        </StatusBox>
+      ) : null}
       <SectionTabs>
         <SectionTab $active={activePanel === 'generate'} onClick={() => setActivePanel('generate')}>生成图片</SectionTab>
         <SectionTab $active={activePanel === 'stitch'} onClick={() => setActivePanel('stitch')}>拼接图片</SectionTab>

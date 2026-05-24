@@ -24,6 +24,7 @@ export interface GenerateImageParams {
   negativePrompt?: string
   traceId?: string
   references?: ImageReferenceItem[]
+  referenceImages?: ImageReferenceItem[]
   styleOptions?: Partial<ImageStyleOptions>
   generationMode?: ImageGenerationMode
   styleProfile?: ImageStyleProfile | null
@@ -36,6 +37,20 @@ export interface GenerateImageResult {
   file_path?: string
   filename?: string
   alt?: string
+  error?: string
+}
+
+export interface ImageProviderStatus {
+  success: true
+  provider: 'nanobanana' | 'openai-image' | 'custom' | 'mock'
+  label: string
+  model: string
+  endpointConfigured: boolean
+  keyConfigured: boolean
+  configured: boolean
+  supportsReferences: boolean
+  supportsAspectRatio: boolean
+  supportsEventStream: boolean
   error?: string
 }
 
@@ -299,6 +314,9 @@ export function getDefaultInsertedGeneratedImageWidthPx(): number {
 export async function generateImage(params: GenerateImageParams): Promise<GenerateImageResult> {
   const traceId = params.traceId || `img-svc-${Date.now()}`
   const references = Array.isArray(params.references) ? params.references : []
+  const referenceImages = Array.isArray(params.referenceImages) && params.referenceImages.length > 0
+    ? params.referenceImages
+    : references
   const primaryReference = references.find((item) => item.role === 'primary-style') || null
   const styleOptions = normalizeImageStyleOptions(params.styleOptions)
   const generationMode = params.generationMode || DEFAULT_IMAGE_GENERATION_MODE
@@ -335,7 +353,19 @@ export async function generateImage(params: GenerateImageParams): Promise<Genera
     const startResp = await fetch('/api/image/jobs/start', {
       method: 'POST',
       headers,
-      body: JSON.stringify({ prompt: params.prompt, workspacePath }),
+      body: JSON.stringify({
+        prompt: params.prompt,
+        workspacePath,
+        aspectRatio,
+        negativePrompt: params.negativePrompt || '',
+        references,
+        referenceImages,
+        styleOptions,
+        generationMode,
+        styleProfile: params.styleProfile || null,
+        traceId,
+        debug: params.debug || { enabled: false, source: 'ImageService.web' },
+      }),
     })
     const startBody = await startResp.json().catch(() => ({ error: `HTTP ${startResp.status}` })) as {
       success?: boolean
@@ -418,7 +448,7 @@ export async function generateImage(params: GenerateImageParams): Promise<Genera
     filename: params.filename,
     workspacePath: params.workspacePath,
     references,
-    referenceImages: references.map((item, index) => ({
+    referenceImages: referenceImages.map((item, index) => ({
       documentId: item.id,
       order: item.order ?? index,
       isPrimary: item.role === 'primary-style',
@@ -453,4 +483,16 @@ export async function generateImage(params: GenerateImageParams): Promise<Genera
     status: 'failed',
     error: result.error || '图片生成失败',
   }
+}
+
+export async function fetchImageProviderStatus(): Promise<ImageProviderStatus> {
+  const headers: Record<string, string> = {}
+  const token = platformApi.auth.getToken()
+  if (token) headers.Authorization = `Bearer ${token}`
+  const response = await fetch('/api/image/provider/status', { headers })
+  const body = await response.json().catch(() => ({ error: `HTTP ${response.status}` })) as Partial<ImageProviderStatus> & { error?: string }
+  if (!response.ok || body.success !== true || !body.provider || !body.label || !body.model) {
+    throw new Error(body.error || `图片引擎状态读取失败 (${response.status})`)
+  }
+  return body as ImageProviderStatus
 }

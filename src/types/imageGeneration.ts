@@ -2,7 +2,7 @@ export type ImageReferenceRole = 'primary-style' | 'style' | 'content'
 
 export type ImageReferenceOrigin = 'knowledge-base' | 'upload' | 'generated' | 'local'
 
-export type ImageGenerationMode = 'style-continuation' | 'reference-redraw'
+export type ImageGenerationMode = 'default' | 'style-continuation' | 'reference-redraw'
 
 export interface ImageReferenceSelection {
   id: string
@@ -94,6 +94,7 @@ export interface GenerateImagePayload {
   filename?: string
   workspacePath?: string
   references: ImageReferenceItem[]
+  referenceImages?: ImageReferenceItem[]
   styleOptions: ImageStyleOptions
   generationMode: ImageGenerationMode
   styleProfile?: ImageStyleProfile | null
@@ -101,5 +102,6 @@ export interface GenerateImagePayload {
   debug?: {
     enabled: boolean
     source?: string
+    [key: string]: unknown
   }
 }

@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { requireAccountUser } from '../../lib/authUser'
+import { getImageProviderStatus } from '../../modules/image-generation'
 import { runCreateImageSkill } from './skills/createImageSkill'
 import {
   createImageJob,
@@ -10,11 +11,33 @@ import {
 
 const router = Router()
 
+function readOptionalString(value: unknown): string | undefined {
+  const normalized = String(value || '').trim()
+  return normalized || undefined
+}
+
+function readOptionalArray(value: unknown): unknown[] | undefined {
+  return Array.isArray(value) ? value : undefined
+}
+
+function readOptionalObject(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined
+}
+
+router.get('/provider/status', async (req, res) => {
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+  res.json(getImageProviderStatus())
+})
+
 router.post('/jobs/start', async (req, res) => {
   const userId = await requireAccountUser(req, res)
   if (!userId) return
-  const workspacePath = String(req.body?.workspacePath || '').trim()
-  const prompt = String(req.body?.prompt || '').trim()
+  const body = readOptionalObject(req.body) || {}
+  const workspacePath = String(body.workspacePath || '').trim()
+  const prompt = String(body.prompt || '').trim()
   if (!workspacePath) {
     res.status(400).json({ success: false, error: 'workspacePath 不能为空' })
     return
@@ -27,7 +50,23 @@ router.post('/jobs/start', async (req, res) => {
   const job = createImageJob()
   updateImageJob(job.jobId, { status: 'running', progress: 5, message: '正在启动图片生成任务…' })
 
-  void runCreateImageSkill({ userId, workspacePath, prompt })
+  void runCreateImageSkill({
+    userId,
+    workspacePath,
+    prompt,
+    aspectRatio: readOptionalString(body.aspectRatio),
+    negativePrompt: readOptionalString(body.negativePrompt),
+    references: readOptionalArray(body.references),
+    referenceImages: readOptionalArray(body.referenceImages),
+    styleOptions: readOptionalObject(body.styleOptions),
+    generationMode: readOptionalString(body.generationMode),
+    styleProfile: readOptionalObject(body.styleProfile),
+    traceId: readOptionalString(body.traceId),
+    debug: readOptionalObject(body.debug),
+    onProgress: (message) => {
+      updateImageJob(job.jobId, { status: 'running', message, progress: 40 })
+    },
+  })
     .then((result) => {
       if (getImageJob(job.jobId)?.cancelRequested) return
       if (!result.success) {
@@ -71,11 +110,7 @@ router.get('/jobs/:jobId', async (req, res) => {
     message: job.message,
     result: job.result,
     error: job.error,
-    partialMissing: [
-      'reference image generation is not yet ported to Web job API',
-      'poster workflow and style controls are partial',
-      'image insertion into document/PPT is not fully wired',
-    ],
+    partialMissing: [],
   })
 })
 

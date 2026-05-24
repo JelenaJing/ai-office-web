@@ -22,6 +22,7 @@ export interface SaveSkillArtifactInput {
   content: Buffer | string
   sourceRefs?: ArtifactSourceRef[]
   knowledgeRefs?: ArtifactKnowledgeRef[]
+  metadata?: Record<string, unknown>
   matterId?: string
   emailId?: string
   deckId?: string
@@ -81,6 +82,7 @@ export function saveSkillArtifact(input: SaveSkillArtifactInput): Artifact {
     ],
     sourceRefs: input.sourceRefs,
     knowledgeRefs: input.knowledgeRefs,
+    metadata: input.metadata,
     matterId: input.matterId,
     emailId: input.emailId,
     deckId: input.deckId,
