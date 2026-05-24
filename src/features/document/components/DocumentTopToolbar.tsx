@@ -1,79 +1,160 @@
+import { useState } from 'react'
 import styled from 'styled-components'
-import { AlertCircle, Clock3, Download, FileDown, RotateCcw, Save, Upload } from 'lucide-react'
+import { AlertCircle, ChevronDown, Clock3, Download, FileDown, List, MoreHorizontal, RotateCcw, Save, Upload } from 'lucide-react'
 
 const Toolbar = styled.div`
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px 18px;
-  border-bottom: 1px solid #d8e3ef;
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(10px);
-`
-
-const MetaRow = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-`
-
-const MetaChip = styled.div<{ $tone?: 'warn' }>`
-  padding: 8px 12px;
-  border-radius: 999px;
-  background: ${({ $tone }) => ($tone === 'warn' ? '#fff6eb' : '#f3f7fb')};
-  border: 1px solid ${({ $tone }) => ($tone === 'warn' ? '#f2c48d' : '#d9e3ee')};
-  font-size: 12px;
-  color: ${({ $tone }) => ($tone === 'warn' ? '#8a4b08' : '#36506b')};
-  font-weight: 700;
-  display: inline-flex;
-  align-items: center;
   gap: 6px;
-`
-
-const Actions = styled.div`
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-`
-
-const ActionButton = styled.button`
-  height: 36px;
   padding: 0 14px;
-  border-radius: 10px;
-  border: 1px solid #c8d5e3;
-  background: #fff;
-  color: #24415d;
-  font-size: 13px;
+  height: 52px;
+  border-bottom: 1px solid #d8e3ef;
+  background: rgba(255, 255, 255, 0.97);
+  backdrop-filter: blur(8px);
+  flex-shrink: 0;
+  overflow: hidden;
+`
+
+const TBDivider = styled.div`
+  width: 1px;
+  height: 22px;
+  background: #d8e3ef;
+  flex-shrink: 0;
+  margin: 0 2px;
+`
+
+const Spacer = styled.div`flex: 1; min-width: 4px;`
+
+const EngineChip = styled.div<{ $tone?: 'warn' }>`
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: ${({ $tone }) => ($tone === 'warn' ? '#fff6eb' : '#f0f7ff')};
+  border: 1px solid ${({ $tone }) => ($tone === 'warn' ? '#f2c48d' : '#c3d8f0')};
+  font-size: 11px;
+  color: ${({ $tone }) => ($tone === 'warn' ? '#8a4b08' : '#1e4d80')};
   font-weight: 700;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
+`
+
+const StatusChip = styled.div<{ $tone?: 'warn' | 'ok' }>`
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: ${({ $tone }) => ($tone === 'warn' ? '#fff6eb' : $tone === 'ok' ? '#f0fdf4' : '#f3f7fb')};
+  border: 1px solid ${({ $tone }) => ($tone === 'warn' ? '#f2c48d' : $tone === 'ok' ? '#a3d9b1' : '#d9e3ee')};
+  font-size: 11px;
+  color: ${({ $tone }) => ($tone === 'warn' ? '#8a4b08' : $tone === 'ok' ? '#15803d' : '#36506b')};
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
+`
+
+const ToolButton = styled.button`
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid #d4deea;
+  background: #fff;
+  color: #334e68;
+  font-size: 12px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+
+  &:hover:not(:disabled) {
+    background: #f5f8fc;
+    border-color: #b8c9d9;
+  }
 
   &:disabled {
-    opacity: 0.45;
+    opacity: 0.4;
     cursor: not-allowed;
   }
 `
 
-interface DocumentTopToolbarProps {
+const PrimaryButton = styled(ToolButton)`
+  border-color: #78a9de;
+  background: linear-gradient(180deg, #e8f2fd 0%, #dceefb 100%);
+  color: #1d4f80;
+
+  &:hover:not(:disabled) {
+    background: linear-gradient(180deg, #d8eafc 0%, #cce2f9 100%);
+  }
+`
+
+const MoreMenuWrapper = styled.div`
+  position: relative;
+  flex-shrink: 0;
+`
+
+const MoreMenu = styled.div`
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 168px;
+  background: #fff;
+  border: 1px solid #d0dce9;
+  border-radius: 12px;
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.12);
+  z-index: 300;
+  padding: 6px;
+  display: grid;
+  gap: 2px;
+`
+
+const MoreMenuItem = styled.button`
+  height: 36px;
+  padding: 0 12px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #274865;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+
+  &:hover:not(:disabled) {
+    background: #f0f7ff;
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+`
+
+export interface DocumentTopToolbarProps {
   engineLabel: string
   templateLabel: string
   knowledgeCount: number
   fallbackReason?: string | null
-  artifactLabel?: string | null
   dirty?: boolean
   saving?: boolean
   lastSavedAt?: string | null
-  docxReady?: boolean
   exportError?: string | null
+  onOpenOutline: () => void
+  onOpenTemplate: () => void
+  onOpenKnowledge: () => void
   onDownloadDocx: () => void
   onImportDocx?: () => void
   onExportPdf: () => void
   onSave: () => void
   onRegenerate: () => void
-  onViewVersions: () => void
+  onViewVersions?: () => void
   busy?: boolean
   pdfDisabled?: boolean
   regenerateDisabled?: boolean
@@ -84,12 +165,13 @@ export function DocumentTopToolbar({
   templateLabel,
   knowledgeCount,
   fallbackReason,
-  artifactLabel,
   dirty,
   saving,
   lastSavedAt,
-  docxReady,
   exportError,
+  onOpenOutline,
+  onOpenTemplate,
+  onOpenKnowledge,
   onDownloadDocx,
   onImportDocx,
   onExportPdf,
@@ -100,55 +182,91 @@ export function DocumentTopToolbar({
   pdfDisabled,
   regenerateDisabled,
 }: DocumentTopToolbarProps) {
+  const [moreOpen, setMoreOpen] = useState(false)
+
   return (
     <Toolbar>
-      <MetaRow>
-        <MetaChip>生成引擎：{engineLabel}</MetaChip>
-        <MetaChip>模板：{templateLabel}</MetaChip>
-        <MetaChip>知识库：已选择 {knowledgeCount} 个</MetaChip>
-        {artifactLabel ? <MetaChip>当前产物：{artifactLabel}</MetaChip> : null}
-        {saving ? <MetaChip><Clock3 size={14} />保存中</MetaChip> : null}
-        {!saving && dirty ? <MetaChip $tone="warn">未保存修改</MetaChip> : null}
-        {!dirty && lastSavedAt ? <MetaChip>已保存：{new Date(lastSavedAt).toLocaleTimeString('zh-CN', { hour12: false })}</MetaChip> : null}
-        {docxReady ? <MetaChip>DOCX 已更新</MetaChip> : null}
-        {exportError ? <MetaChip $tone="warn">导出失败：{exportError}</MetaChip> : null}
-        {fallbackReason ? (
-          <MetaChip $tone="warn">
-            <AlertCircle size={14} />
-            fallbackReason：{fallbackReason}
-          </MetaChip>
-        ) : null}
-      </MetaRow>
-      <Actions>
-        <ActionButton type="button" data-testid="document-import-docx" onClick={onImportDocx} disabled={busy}>
-          <Upload size={15} />
-          导入 DOCX
-        </ActionButton>
-        <ActionButton type="button" data-testid="document-download-docx" onClick={onDownloadDocx} disabled={busy}>
-          <Download size={15} />
-          下载 DOCX
-        </ActionButton>
-        <ActionButton type="button" data-testid="document-export-pdf" onClick={onExportPdf} disabled={busy || pdfDisabled}>
-          <FileDown size={15} />
-          导出 PDF
-        </ActionButton>
-        <ActionButton type="button" data-testid="document-save" onClick={onSave} disabled={busy}>
-          <Save size={15} />
-          保存
-        </ActionButton>
-        <ActionButton
+      <EngineChip>生成引擎：{engineLabel}</EngineChip>
+      {fallbackReason ? (
+        <EngineChip $tone="warn">
+          <AlertCircle size={11} />
+          回退：{fallbackReason.slice(0, 20)}
+        </EngineChip>
+      ) : null}
+      <TBDivider />
+      <ToolButton type="button" data-testid="document-toolbar-outline" onClick={onOpenOutline}>
+        <List size={14} />
+        目录
+      </ToolButton>
+      <ToolButton type="button" data-testid="document-toolbar-template" onClick={onOpenTemplate}>
+        {templateLabel}
+        <ChevronDown size={12} />
+      </ToolButton>
+      <ToolButton type="button" data-testid="document-toolbar-knowledge" onClick={onOpenKnowledge}>
+        知识库{knowledgeCount > 0 ? ` ${knowledgeCount}` : ''}
+        <ChevronDown size={12} />
+      </ToolButton>
+      <Spacer />
+      {saving ? <StatusChip><Clock3 size={11} />保存中</StatusChip> : null}
+      {!saving && dirty ? <StatusChip $tone="warn">未保存修改</StatusChip> : null}
+      {!dirty && !saving && lastSavedAt ? <StatusChip $tone="ok">已保存</StatusChip> : null}
+      {exportError ? <StatusChip $tone="warn">导出失败</StatusChip> : null}
+      <TBDivider />
+      <ToolButton type="button" data-testid="document-save" onClick={onSave} disabled={busy}>
+        <Save size={14} />
+        保存
+      </ToolButton>
+      <PrimaryButton type="button" data-testid="document-download-docx" onClick={onDownloadDocx} disabled={busy}>
+        <Download size={14} />
+        下载 DOCX
+      </PrimaryButton>
+      <MoreMenuWrapper>
+        <ToolButton
           type="button"
-          data-testid="document-regenerate"
-          onClick={onRegenerate}
-          disabled={busy || regenerateDisabled}
+          data-testid="document-more-menu"
+          onClick={() => setMoreOpen((v) => !v)}
         >
-          <RotateCcw size={15} />
-          重新生成
-        </ActionButton>
-        <ActionButton type="button" data-testid="document-view-versions" onClick={onViewVersions} disabled>
-          查看版本
-        </ActionButton>
-      </Actions>
+          <MoreHorizontal size={15} />
+        </ToolButton>
+        {moreOpen && (
+          <MoreMenu>
+            <MoreMenuItem
+              type="button"
+              data-testid="document-import-docx"
+              onClick={() => { onImportDocx?.(); setMoreOpen(false) }}
+            >
+              <Upload size={14} />
+              导入 DOCX
+            </MoreMenuItem>
+            <MoreMenuItem
+              type="button"
+              data-testid="document-export-pdf"
+              onClick={() => { onExportPdf(); setMoreOpen(false) }}
+              disabled={pdfDisabled}
+            >
+              <FileDown size={14} />
+              导出 PDF
+            </MoreMenuItem>
+            <MoreMenuItem
+              type="button"
+              data-testid="document-regenerate"
+              onClick={() => { onRegenerate(); setMoreOpen(false) }}
+              disabled={busy || regenerateDisabled}
+            >
+              <RotateCcw size={14} />
+              重新生成
+            </MoreMenuItem>
+            <MoreMenuItem
+              type="button"
+              data-testid="document-view-versions"
+              onClick={() => { onViewVersions?.(); setMoreOpen(false) }}
+              disabled
+            >
+              查看版本
+            </MoreMenuItem>
+          </MoreMenu>
+        )}
+      </MoreMenuWrapper>
     </Toolbar>
   )
 }

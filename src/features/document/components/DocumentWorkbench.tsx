@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import styled from 'styled-components'
-import { Sparkles } from 'lucide-react'
 import { useWorkspace } from '../../../contexts/WorkspaceContext'
 import { useDocumentWorkspaceKnowledge } from '../../../contexts/DocumentWorkspaceContext'
 import { useDepartment } from '../../../contexts/DepartmentContext'
@@ -57,24 +56,16 @@ const Shell = styled.div`
   display: flex;
   flex-direction: column;
   background: #eef3f8;
+  position: relative;
 `
 
 const Body = styled.div`
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr) 360px;
+  grid-template-columns: minmax(0, 1fr) 360px;
   overflow: hidden;
-`
-
-const Sidebar = styled.aside`
-  padding: 16px;
-  overflow: auto;
-  display: grid;
-  align-content: start;
-  gap: 14px;
-  border-right: 1px solid #d8e3ef;
-  background: #f7fafc;
+  position: relative;
 `
 
 const CenterPane = styled.div`
@@ -84,16 +75,44 @@ const CenterPane = styled.div`
   flex-direction: column;
 `
 
-const CanvasHeader = styled.div`
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 20px;
-  border-bottom: 1px solid #d8e3ef;
-  background: rgba(255, 255, 255, 0.88);
-  color: #48627b;
-  font-size: 12px;
+/* ── Overlay system ── */
+
+const OverlayBackdrop = styled.div`
+  position: absolute;
+  inset: 0;
+  z-index: 90;
+`
+
+const OutlineDrawerPanel = styled.aside`
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 296px;
+  z-index: 100;
+  background: #f7fafc;
+  border-right: 1px solid #d8e3ef;
+  overflow: auto;
+  padding: 16px;
+  box-shadow: 6px 0 24px rgba(15, 23, 42, 0.10);
+  display: grid;
+  align-content: start;
+  gap: 0;
+`
+
+const FloatingPanel = styled.div`
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 100;
+  width: 320px;
+  max-height: calc(100vh - 120px);
+  overflow: auto;
+  background: #fff;
+  border: 1px solid #d0dce9;
+  border-radius: 16px;
+  box-shadow: 0 12px 36px rgba(15, 23, 42, 0.14);
+  padding: 16px;
 `
 
 const StatusBar = styled.div<{ $tone?: 'ok' | 'err' }>`
@@ -102,58 +121,7 @@ const StatusBar = styled.div<{ $tone?: 'ok' | 'err' }>`
   background: #fff;
   color: ${({ $tone }) => ($tone === 'err' ? '#b91c1c' : $tone === 'ok' ? '#15803d' : '#516679')};
   font-size: 12px;
-`
-
-const BottomComposer = styled.div`
-  padding: 14px 18px 18px;
-  border-top: 1px solid #d8e3ef;
-  background: #fff;
-  display: grid;
-  gap: 10px;
-`
-
-const ComposerHint = styled.div`
-  font-size: 12px;
-  color: #607487;
-`
-
-const ComposerInput = styled.textarea`
-  width: 100%;
-  min-height: 84px;
-  padding: 12px 14px;
-  border-radius: 14px;
-  border: 1px solid #d5dfeb;
-  resize: vertical;
-  font-size: 14px;
-  line-height: 1.7;
-  font-family: inherit;
-`
-
-const ComposerActions = styled.div`
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-`
-
-const GenerateButton = styled.button`
-  height: 40px;
-  padding: 0 16px;
-  border-radius: 12px;
-  border: 1px solid #73a8e1;
-  background: linear-gradient(180deg, #6aa5e4 0%, #4d90d9 100%);
-  color: #fff;
-  font-size: 14px;
-  font-weight: 800;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-
-  &:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
+  flex-shrink: 0;
 `
 
 const hiddenInputStyles = {
@@ -262,6 +230,9 @@ export default function DocumentWorkbench() {
   const [sectionHistory, setSectionHistory] = useState<Record<string, SectionHistoryEntry[]>>({})
   const [activeHistoryKey, setActiveHistoryKey] = useState('document')
   const [kbPickerOpen, setKbPickerOpen] = useState(false)
+  const [outlineOpen, setOutlineOpen] = useState(false)
+  const [templatePopoverOpen, setTemplatePopoverOpen] = useState(false)
+  const [knowledgeOverlayOpen, setKnowledgeOverlayOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [statusMessage, setStatusMessage] = useState('')
   const [statusTone, setStatusTone] = useState<'ok' | 'err' | undefined>()
@@ -578,6 +549,7 @@ export default function DocumentWorkbench() {
       setModifiedSectionIds([])
       setLastAiSnapshot(null)
       setRecentAiChange(null)
+      setOutlineOpen(true)
       setStatusMessage(`DOCX 已导入并进入 DocumentWorkbench：${imported.title}`)
       setStatusTone('ok')
     } catch (error) {
@@ -588,13 +560,14 @@ export default function DocumentWorkbench() {
     }
   }, [activeWorkspacePath, syncEditorStateFromTaskResult])
 
-  const handleGenerate = useCallback(async () => {
+  const handleGenerate = useCallback(async (promptOverride?: string) => {
+    const generationText = (promptOverride ?? generationPrompt).trim()
     if (!activeWorkspacePath) {
       setStatusMessage('请先打开工作区')
       setStatusTone('err')
       return
     }
-    if (!generationPrompt.trim()) {
+    if (!generationText) {
       setStatusMessage('请先输入文稿需求')
       setStatusTone('err')
       return
@@ -603,9 +576,10 @@ export default function DocumentWorkbench() {
     setStatusTone(undefined)
     setExportError(null)
     try {
+      if (promptOverride) setGenerationPrompt(promptOverride)
       const knowledgeRefs = buildKnowledgeRefsFromSelection(workspaceKbIds, attachments, knowledgeNameMap)
       const routed = await routeDocumentTask({
-        prompt: generationPrompt.trim(),
+        prompt: generationText,
         currentDocument: editorState.documentDraft
           ? { title: editorState.title, type: editorState.documentDraft.type }
           : null,
@@ -629,18 +603,18 @@ export default function DocumentWorkbench() {
       }
 
       if (routed.intent === 'edit_selection') {
-        await runAiSubmit(generationPrompt.trim(), 'selection')
+        await runAiSubmit(generationText, 'selection')
         return
       }
 
       if (routed.intent === 'edit_section') {
-        await runAiSubmit(generationPrompt.trim(), 'section')
+        await runAiSubmit(generationText, 'section')
         return
       }
 
       if (routed.intent === 'academic_paper' || routed.intent === 'literature_review') {
         const paperResult = await runPaperWorkflowGenerate({
-          topic: generationPrompt.trim(),
+          topic: generationText,
           paperType: routed.intent === 'literature_review' ? 'review' : 'research',
           language: 'zh',
           workspacePath: activeWorkspacePath,
@@ -656,6 +630,7 @@ export default function DocumentWorkbench() {
         setModifiedSectionIds([])
         setLastAiSnapshot(null)
         setRecentAiChange(null)
+        setOutlineOpen(true)
         setStatusMessage(paperResult.message || '论文工作流已完成，并已进入 DocumentWorkbench。')
         setStatusTone('ok')
         return
@@ -664,7 +639,7 @@ export default function DocumentWorkbench() {
       if (routed.intent === 'formal_template') {
         setStatusMessage('正在分析正式模板字段…')
         const analyzed = await analyzeFormalTemplateFlow({
-          instruction: generationPrompt.trim(),
+          instruction: generationText,
         })
         if (!analyzed.supported) {
           setStatusMessage(analyzed.unavailableReason || '当前正式模板能力未完整迁移到 Web')
@@ -672,7 +647,7 @@ export default function DocumentWorkbench() {
           return
         }
         const confirmed = await confirmFormalTemplateFields({
-          instruction: generationPrompt.trim(),
+          instruction: generationText,
         })
         if (confirmed.missingFields.length > 0) {
           setStatusMessage(`正式模板仍缺少字段：${confirmed.missingFields.join('、')}，将继续预览并在提交时使用可解析内容。`)
@@ -680,14 +655,14 @@ export default function DocumentWorkbench() {
         }
         setStatusMessage('正在预览正式模板…')
         await previewFormalTemplate({
-          instruction: generationPrompt.trim(),
+          instruction: generationText,
           workspacePath: activeWorkspacePath,
           language: 'zh',
           fieldOverrides: confirmed.confirmedFields,
         })
         setStatusMessage('正在提交正式模板到 DocumentWorkbench…')
         const committed = await commitFormalTemplate({
-          instruction: generationPrompt.trim(),
+          instruction: generationText,
           workspacePath: activeWorkspacePath,
           language: 'zh',
           fieldOverrides: confirmed.confirmedFields,
@@ -696,6 +671,7 @@ export default function DocumentWorkbench() {
         setModifiedSectionIds([])
         setLastAiSnapshot(null)
         setRecentAiChange(null)
+        setOutlineOpen(true)
         setStatusMessage(committed.fallbackReason
           ? `正式模板已进入 DocumentWorkbench，但存在回退说明：${committed.fallbackReason}`
           : '正式模板已进入 DocumentWorkbench。')
@@ -705,7 +681,7 @@ export default function DocumentWorkbench() {
 
       const task = await startDocumentTask({
         workspacePath: activeWorkspacePath,
-        prompt: generationPrompt.trim(),
+        prompt: generationText,
         title: template?.defaultTitle,
         templateId: template?.id,
         knowledgeRefs,
@@ -720,6 +696,7 @@ export default function DocumentWorkbench() {
       setModifiedSectionIds([])
       setLastAiSnapshot(null)
       setRecentAiChange(null)
+      setOutlineOpen(true)
       setStatusMessage(nextResult.fallbackFrom
         ? `文稿已完成。MiniMax DOCX Skill 失败，已回退内置文稿引擎：${nextResult.fallbackReason || '未提供原因'}`
         : `${engineLabel(nextResult.engine)} 已完成。`)
@@ -730,7 +707,7 @@ export default function DocumentWorkbench() {
     } finally {
       setBusy(false)
     }
-  }, [activeWorkspacePath, attachments, editorState.documentDraft, editorState.selectedSectionId, editorState.selectedText, editorState.title, generationPrompt, knowledgeNameMap, syncEditorStateFromTaskResult, template, workspaceKbIds])
+  }, [activeWorkspacePath, attachments, editorState.documentDraft, editorState.selectedSectionId, editorState.selectedText, editorState.title, generationPrompt, knowledgeNameMap, setOutlineOpen, syncEditorStateFromTaskResult, template, workspaceKbIds])
 
   const handleSelectSection = useCallback((sectionId: string) => {
     setEditorState((prev) => ({
@@ -1039,6 +1016,10 @@ export default function DocumentWorkbench() {
 
   const handleAiSubmit = useCallback(runAiSubmit, [appendHistory, attachments, captureAiSnapshot, editorState, handleDocumentRewrite, knowledgeNameMap, markSectionModified, selectedSection, syncEditorStateFromTaskResult, template, workspaceKbIds])
 
+  const handleAiPanelGenerate = useCallback(async (text: string) => {
+    await handleGenerate(text)
+  }, [handleGenerate])
+
   const handleDownloadDocx = useCallback(async () => {
     if (!editorState.documentId) return
     setBusy(true)
@@ -1089,58 +1070,93 @@ export default function DocumentWorkbench() {
 
   return (
     <Shell data-testid="document-workbench">
-        <DocumentTopToolbar
-          engineLabel={activeEngineLabel}
-          templateLabel={activeTemplateLabel}
-          knowledgeCount={workspaceKbIds.length}
-          fallbackReason={editorState.fallbackReason || null}
-          artifactLabel={artifactLabel}
-          dirty={editorState.dirty}
-          saving={editorState.saving}
-          lastSavedAt={editorState.lastSavedAt || null}
-          docxReady={Boolean(editorState.artifactId && !editorState.dirty)}
-          exportError={exportError}
-          onImportDocx={handleImportDocx}
-          onDownloadDocx={() => void handleDownloadDocx()}
-          onExportPdf={handleExportPdf}
+      <DocumentTopToolbar
+        engineLabel={activeEngineLabel}
+        templateLabel={activeTemplateLabel}
+        knowledgeCount={workspaceKbIds.length}
+        fallbackReason={editorState.fallbackReason || null}
+        dirty={editorState.dirty}
+        saving={editorState.saving}
+        lastSavedAt={editorState.lastSavedAt || null}
+        exportError={exportError}
+        onOpenOutline={() => setOutlineOpen((v) => !v)}
+        onOpenTemplate={() => setTemplatePopoverOpen((v) => !v)}
+        onOpenKnowledge={() => setKnowledgeOverlayOpen((v) => !v)}
+        onImportDocx={handleImportDocx}
+        onDownloadDocx={() => void handleDownloadDocx()}
+        onExportPdf={handleExportPdf}
         onSave={() => void saveCurrentDocument()}
         onRegenerate={() => void handleGenerate()}
         onViewVersions={() => {}}
-        busy={busy || !editorState.documentId}
+        busy={busy}
         pdfDisabled
-        regenerateDisabled={!generationPrompt.trim()}
+        regenerateDisabled={!editorState.documentId}
       />
 
       <Body>
-        <Sidebar>
-          <DocumentOutlinePanel
-            outline={editorState.outline}
-            selectedSectionId={editorState.selectedSectionId}
-            modifiedSectionIds={modifiedSectionIds}
-            onSelectSection={handleSelectSection}
-          />
-          <DocumentKnowledgePanel
-            departments={departments}
-            selectedKnowledgeIds={workspaceKbIds}
-            onOpenKnowledgePicker={() => setKbPickerOpen(true)}
-          />
-          <DocumentTemplatePanel
-            templates={templates}
-            selectedTemplateId={selectedTemplateId}
-            onSelectTemplate={setSelectedTemplateId}
-          />
-          <DocumentAttachmentPanel
-            attachments={attachments}
-            onAddAttachment={handleUploadAttachment}
-            onRemoveAttachment={(fileId) => setAttachments((prev) => prev.filter((item) => item.id !== fileId))}
-          />
-        </Sidebar>
+        {/* Outline drawer — slides in from left */}
+        {outlineOpen && (
+          <>
+            <OverlayBackdrop onClick={() => setOutlineOpen(false)} />
+            <OutlineDrawerPanel>
+              <DocumentOutlinePanel
+                outline={editorState.outline}
+                selectedSectionId={editorState.selectedSectionId}
+                modifiedSectionIds={modifiedSectionIds}
+                onSelectSection={(sectionId) => {
+                  handleSelectSection(sectionId)
+                  setOutlineOpen(false)
+                }}
+              />
+            </OutlineDrawerPanel>
+          </>
+        )}
+
+        {/* Template popover */}
+        {templatePopoverOpen && (
+          <>
+            <OverlayBackdrop onClick={() => setTemplatePopoverOpen(false)} />
+            <FloatingPanel style={{ left: 200 }}>
+              <DocumentTemplatePanel
+                templates={templates}
+                selectedTemplateId={selectedTemplateId}
+                onSelectTemplate={(id) => {
+                  setSelectedTemplateId(id)
+                  setTemplatePopoverOpen(false)
+                }}
+              />
+            </FloatingPanel>
+          </>
+        )}
+
+        {/* Knowledge overlay */}
+        {knowledgeOverlayOpen && (
+          <>
+            <OverlayBackdrop onClick={() => setKnowledgeOverlayOpen(false)} />
+            <FloatingPanel style={{ left: 340 }}>
+              <DocumentKnowledgePanel
+                departments={departments}
+                selectedKnowledgeIds={workspaceKbIds}
+                onOpenKnowledgePicker={() => {
+                  setKnowledgeOverlayOpen(false)
+                  setKbPickerOpen(true)
+                }}
+              />
+              <div style={{ marginTop: 12 }}>
+                <DocumentAttachmentPanel
+                  attachments={attachments}
+                  onAddAttachment={() => {
+                    setKnowledgeOverlayOpen(false)
+                    handleUploadAttachment()
+                  }}
+                  onRemoveAttachment={(fileId) => setAttachments((prev) => prev.filter((item) => item.id !== fileId))}
+                />
+              </div>
+            </FloatingPanel>
+          </>
+        )}
 
         <CenterPane>
-          <CanvasHeader>
-            <div>中间区域为 A4 可编辑文稿页面，支持直接输入、选中文本、章节定位与局部 AI 修改。</div>
-            <div>{selectedSection ? `当前章节：${selectedSection.title}` : '当前章节：未选择'}</div>
-          </CanvasHeader>
           <DocumentEditorCanvas
             ref={canvasRef}
             state={editorState}
@@ -1158,39 +1174,15 @@ export default function DocumentWorkbench() {
           selectionLength={editorState.selectedText.trim().length}
           history={currentHistory}
           busy={busy}
-          disabled={!editorState.documentId}
+          disabled={false}
+          hasDocument={Boolean(editorState.documentId)}
           canUndoLastAiEdit={Boolean(lastAiSnapshot)}
           onUndoLastAiEdit={handleUndoLastAiEdit}
           onContinueWriting={handleContinueWriting}
+          onGenerate={handleAiPanelGenerate}
           onSubmit={handleAiSubmit}
         />
       </Body>
-
-      <BottomComposer>
-        <ComposerHint>
-          这里会先做文稿任务识别，再决定走通知/总结、论文工作流、正式模板，或当前选区/章节改写；默认生成中文。
-        </ComposerHint>
-        <ComposerInput
-          value={generationPrompt}
-          data-testid="document-generation-prompt"
-          onChange={(event) => setGenerationPrompt(event.target.value)}
-          placeholder="例如：生成一份学院年度工作总结，包含主要成绩、问题分析、下一年度计划。"
-        />
-        <ComposerActions>
-          <div style={{ fontSize: 12, color: '#607487' }}>
-            默认引擎：{engineLabel(defaultEngine)} · fallback：{fallbackMode === 'none' ? '关闭' : '内置文稿引擎'}
-          </div>
-          <GenerateButton
-            type="button"
-            data-testid="document-generate-button"
-            disabled={busy || !generationPrompt.trim()}
-            onClick={() => void handleGenerate()}
-          >
-            <Sparkles size={15} />
-            {busy ? '正在生成文稿…' : '生成文稿'}
-          </GenerateButton>
-        </ComposerActions>
-      </BottomComposer>
 
       {statusMessage ? <StatusBar $tone={statusTone}>{statusMessage}</StatusBar> : null}
 

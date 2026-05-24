@@ -220,12 +220,16 @@ test('document workbench acceptance flow is stable in browser', async ({ page },
   expect(formFillRoute.intent).toBe('form_fill')
   expect(`${formFillRoute.nextAction?.question || ''}${formFillRoute.nextAction?.message || ''}`).toMatch(/上传|模板|表格/)
 
+  await workbench.getByTestId('document-toolbar-template').click()
   await expect(workbench.getByTestId('document-template-panel')).toBeVisible()
+  await workbench.getByTestId('document-template-annual_report').click()
+  await workbench.getByTestId('document-toolbar-knowledge').click()
   await expect(workbench.getByTestId('document-knowledge-panel')).toBeVisible()
   await expect(workbench.getByRole('button', { name: '选择知识库' })).toBeVisible()
-  await workbench.getByTestId('document-template-annual_report').click()
-  await workbench.getByTestId('document-generation-prompt').fill('生成一篇年度总结。')
-  await workbench.getByTestId('document-generate-button').click()
+  // close knowledge overlay
+  await page.keyboard.press('Escape')
+  await workbench.getByTestId('document-ai-edit-input').fill('生成一篇年度总结。')
+  await workbench.getByTestId('document-ai-edit-submit').click()
 
   await waitForSection(page, '主要成绩')
   await waitForSection(page, '问题分析')
@@ -239,6 +243,9 @@ test('document workbench acceptance flow is stable in browser', async ({ page },
   const nextPlanBefore = await sectionText(page, '下一年度计划')
   const selectionTarget = '部分业务数据沉淀与共享机制尚未完全打通'
 
+  // Open outline drawer to click section item
+  await workbench.getByTestId('document-toolbar-outline').click()
+  await expect(page.getByTestId('document-outline-panel')).toBeVisible()
   await workbench.getByTestId('document-outline-item-section-problems').click()
   await selectSectionText(page, '问题分析', selectionTarget)
   await expect(page.getByText(/已选中文字：\d+ 字/)).toBeVisible()
@@ -252,6 +259,8 @@ test('document workbench acceptance flow is stable in browser', async ({ page },
 
   await placeCursorAtSectionEnd(page, '下一年度计划')
   await expect(page.getByText('未选中文字：发送后将修改当前章节')).toBeVisible()
+  // 续写下文 is in the "更多指令" dropdown
+  await page.getByRole('button', { name: '更多指令' }).click()
   await page.getByRole('button', { name: '续写下文' }).click()
   await expect.poll(async () => sectionText(page, '下一年度计划')).not.toBe(nextPlanBefore)
   const nextPlanAfterContinue = await sectionText(page, '下一年度计划')
@@ -282,8 +291,9 @@ test('document workbench acceptance flow is stable in browser', async ({ page },
   mkdirSync(dirname(downloadPath), { recursive: true })
   writeFileSync(downloadPath, Buffer.from(await downloadedDocx.body()))
 
-  await workbench.getByTestId('document-generation-prompt').fill('请按正式模板生成一份邀请某高校教授来校交流访问的正式模板访问函，称谓写尊敬的教授，落款写AIOS高校行政办公室。')
-  await workbench.getByTestId('document-generate-button').click()
+  // Formal template via AI panel
+  await workbench.getByTestId('document-ai-edit-input').fill('请按正式模板生成一份邀请某高校教授来校交流访问的正式模板访问函，称谓写尊敬的教授，落款写AIOS高校行政办公室。')
+  await workbench.getByTestId('document-ai-edit-submit').click()
   await expect.poll(
     async () => page.locator('[data-testid="document-editor-canvas"]').innerText(),
     { timeout: 90_000 },
@@ -293,6 +303,8 @@ test('document workbench acceptance flow is stable in browser', async ({ page },
   const importResponsePromise = page.waitForResponse((response) =>
     response.request().method() === 'POST' && response.url().includes('/api/documents/import-docx'),
   )
+  // Import DOCX is now in the More dropdown
+  await workbench.getByTestId('document-more-menu').click()
   await workbench.getByTestId('document-import-docx').click()
   const importFileBytes = Array.from(readFileSync(downloadPath))
   await page.evaluate(({ bytes }) => {
