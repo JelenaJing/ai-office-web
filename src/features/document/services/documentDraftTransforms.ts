@@ -323,10 +323,10 @@ function buildDocumentArtifactFromHtml(input: {
     references.push({
       id: refId,
       label,
-      kind: 'manual',
+      kind: 'manual_note',
       sourceId: node.dataset.sourceId || refId,
       sourceLabel: label,
-      citationStatus: 'cited',
+      citationStatus: 'partial',
     })
     knownRefIds.add(refId)
   })

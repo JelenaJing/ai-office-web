@@ -52,6 +52,7 @@ import {
   buildOperationRecord,
   isFormatIntent,
   isSemanticIntent,
+  isUndoInstruction,
   parseDocumentCommand,
   resolveCommandTarget,
   type DocumentPatchOperation,
@@ -356,6 +357,72 @@ function stripTransientAiMarkup(html: string): string {
   return String(html || '').replace(/<mark\b[^>]*data-ai-change="true"[^>]*>(.*?)<\/mark>/giu, '$1')
 }
 
+function hasEditableDocumentContent(state: EditableDocumentState): boolean {
+  const blocks = state.documentArtifact?.canonicalData.blocks || []
+  return blocks.some((block) => {
+    if (block.role === 'title') {
+      return 'text' in block && Boolean(block.text?.trim())
+    }
+    if (block.role === 'paragraph' || block.role === 'heading' || block.role === 'quote' || block.role === 'list-item') {
+      return 'text' in block && Boolean(block.text?.trim())
+    }
+    if (block.role === 'table') {
+      return block.headers.length > 0 || block.rows.length > 0
+    }
+    if (block.role === 'image') {
+      return Boolean(block.src)
+    }
+    return block.role === 'divider'
+  })
+}
+
+function buildPdfPrintHtml(input: { title: string; html: string }): string {
+  return [
+    '<!doctype html>',
+    '<html lang="zh-CN">',
+    '<head>',
+    '<meta charset="utf-8" />',
+    `<title>${escapeHtml(input.title || '文稿')}</title>`,
+    '<style>',
+    '@page { size: A4; margin: 18mm 16mm 20mm; }',
+    'html, body { margin: 0; padding: 0; background: #dfe7ef; color: #28384a; font-family: "FangSong", "STSong", "SimSun", serif; }',
+    'body { padding: 18px 0; }',
+    '.paper { width: 210mm; min-height: 297mm; box-sizing: border-box; margin: 0 auto; background: #fff; box-shadow: 0 18px 48px rgba(15, 23, 42, 0.12); border: 1px solid rgba(191, 208, 226, 0.9); padding: 24mm 20mm 26mm; }',
+    'article[data-document-root="true"] { min-height: auto; }',
+    'h1[data-document-title="true"] { margin: 0 0 32px; text-align: center; font-size: 28px; line-height: 1.4; color: #17283a; }',
+    'section[data-section-id] { margin: 0 0 18px; padding: 0; border: 0; background: transparent; box-shadow: none; }',
+    'h2[data-section-heading="true"], h3[data-section-heading="true"] { margin: 0 0 14px; color: #173f69; line-height: 1.5; }',
+    'h2[data-section-heading="true"] { font-size: 22px; }',
+    'h3[data-section-heading="true"] { font-size: 18px; color: #355a7f; }',
+    'p { margin: 0 0 16px; line-height: 1.95; text-indent: 2em; }',
+    'ul, ol { margin: 0 0 16px; padding-left: 28px; }',
+    'li { margin: 6px 0; line-height: 1.85; }',
+    'blockquote { margin: 16px 0; padding: 12px 14px; border-left: 4px solid #bcd2e9; background: #f5f8fc; color: #516679; font-size: 14px; line-height: 1.75; }',
+    'hr { margin: 18px 0; border: none; border-top: 1px solid #d2dce7; }',
+    '.document-table-block { margin: 16px 0; }',
+    '.document-table-title { margin-bottom: 8px; text-align: center; font-size: 14px; font-weight: 700; color: #2b4d69; }',
+    'table { width: 100%; border-collapse: collapse; }',
+    'th, td { border: 1px solid #bfd0e2; padding: 10px 12px; font-size: 14px; color: #334a60; vertical-align: top; }',
+    'th { background: #edf4fb; font-weight: 800; }',
+    'figure[data-block-type="image"] { margin: 18px 0; display: grid; gap: 8px; justify-items: center; }',
+    'figure[data-block-type="image"] img { display: block; max-width: 100%; max-height: 420px; border-radius: 10px; }',
+    'figure[data-block-type="image"] figcaption { font-size: 13px; line-height: 1.6; color: #60758a; text-align: center; }',
+    '[data-format-highlight="true"], mark[data-ai-change="true"] { background: rgba(253, 224, 71, 0.38) !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }',
+    '.doc-citation { color: #1d4ed8; font-size: 0.85em; vertical-align: super; margin-left: 2px; }',
+    '@media print { html, body { background: #fff; } body { padding: 0; } .paper { width: auto; min-height: auto; margin: 0; padding: 0; border: none; box-shadow: none; } }',
+    '</style>',
+    '</head>',
+    '<body>',
+    `<div class="paper">${input.html}</div>`,
+    '<script>',
+    'window.addEventListener("load", () => { setTimeout(() => window.print(), 150); });',
+    'window.onafterprint = () => { try { window.close(); } catch {} };',
+    '</script>',
+    '</body>',
+    '</html>',
+  ].join('')
+}
+
 export default function DocumentWorkbench() {
   const { activeWorkspacePath, openWorkspace } = useWorkspace()
   const { workspaceKbIds, setWorkspaceKbIds } = useDocumentWorkspaceKnowledge()
@@ -524,6 +591,7 @@ export default function DocumentWorkbench() {
 
   const activeEngineLabel = engineLabel((editorState.engine as 'builtin' | 'minimax_docx') || defaultEngine)
   const activeTemplateLabel = template?.label || '未选择'
+  const hasActiveDocument = Boolean(editorState.documentId || hasEditableDocumentContent(editorState))
 
   const appendHistory = useCallback((scope: DocumentAiScope | null, sectionId: string | null, entry: SectionHistoryEntry) => {
     const key = documentHistoryKey(scope, sectionId)
@@ -637,11 +705,43 @@ export default function DocumentWorkbench() {
   }, [activeWorkspacePath, hydrated, openWorkspace, syncEditorStateFromTaskResult])
 
   const saveCurrentDocument = useCallback(async (status = '正在保存文稿…') => {
-    if (!editorState.documentId || !editorState.documentDraft) return null
+    if (!editorState.documentDraft) return null
     const latestHtml = stripTransientAiMarkup(canvasRef.current?.getHtml() || editorState.html)
     const latestState = latestHtml !== editorState.html
       ? updateEditableStateFromHtml(editorState, latestHtml)
       : editorState
+    if (!latestState.documentId) {
+      const savedAt = new Date().toISOString()
+      const nextState = {
+        ...latestState,
+        dirty: false,
+        saving: false,
+        lastSavedAt: savedAt,
+      }
+      const key = storageKey(activeWorkspacePath)
+      if (key && typeof window !== 'undefined') {
+        const payload: PersistedWorkbenchState = {
+          templateId: selectedTemplateId,
+          generationPrompt,
+          attachments,
+          editorState: nextState,
+          sectionHistory,
+          modifiedSectionIds,
+          artifactFilename,
+        }
+        window.localStorage.setItem(key, JSON.stringify(payload))
+        window.localStorage.setItem(LOCAL_DRAFT_STORAGE_KEY, JSON.stringify({
+          title: nextState.title,
+          body: nextState.html,
+          updatedAt: savedAt,
+        } satisfies LocalEditorDraft))
+      }
+      setEditorState(nextState)
+      setStatusMessage('已保存到本地草稿，刷新后可恢复当前 HTML 文稿')
+      setStatusTone('ok')
+      setExportError(null)
+      return null
+    }
     setEditorState((prev) => ({ ...prev, saving: true }))
     setStatusMessage(status)
     setStatusTone(undefined)
@@ -679,7 +779,7 @@ export default function DocumentWorkbench() {
       setStatusTone('err')
       return null
     }
-  }, [editorState.documentDraft, editorState.documentId, editorState.html, editorState.outline, editorState.title])
+  }, [activeWorkspacePath, artifactFilename, attachments, editorState, generationPrompt, modifiedSectionIds, sectionHistory, selectedTemplateId])
 
   useEffect(() => {
     if (!hydrated || !editorState.dirty || !editorState.documentId || !editorState.documentDraft || busy || editorState.saving) {
@@ -735,7 +835,6 @@ export default function DocumentWorkbench() {
       setModifiedSectionIds([])
       setLastAiSnapshot(null)
       setRecentAiChange(null)
-      setOutlineOpen(true)
       setStatusMessage(`DOCX 已导入并进入 DocumentWorkbench：${imported.title}`)
       setStatusTone('ok')
     } catch (error) {
@@ -816,7 +915,6 @@ export default function DocumentWorkbench() {
         setModifiedSectionIds([])
         setLastAiSnapshot(null)
         setRecentAiChange(null)
-        setOutlineOpen(true)
         setStatusMessage(paperResult.message || '论文工作流已完成，并已进入 DocumentWorkbench。')
         setStatusTone('ok')
         return
@@ -857,7 +955,6 @@ export default function DocumentWorkbench() {
         setModifiedSectionIds([])
         setLastAiSnapshot(null)
         setRecentAiChange(null)
-        setOutlineOpen(true)
         setStatusMessage(committed.fallbackReason
           ? `正式模板已进入 DocumentWorkbench，但存在回退说明：${committed.fallbackReason}`
           : '正式模板已进入 DocumentWorkbench。')
@@ -882,7 +979,6 @@ export default function DocumentWorkbench() {
       setModifiedSectionIds([])
       setLastAiSnapshot(null)
       setRecentAiChange(null)
-      setOutlineOpen(true)
       setStatusMessage(nextResult.fallbackFrom
         ? `文稿已完成。MiniMax DOCX Skill 失败，已回退内置文稿引擎：${nextResult.fallbackReason || '未提供原因'}`
         : `${engineLabel(nextResult.engine)} 已完成。`)
@@ -893,7 +989,7 @@ export default function DocumentWorkbench() {
     } finally {
       setBusy(false)
     }
-  }, [activeWorkspacePath, attachments, editorState.documentDraft, editorState.selectedSectionId, editorState.selectedText, editorState.title, generationPrompt, knowledgeNameMap, setOutlineOpen, syncEditorStateFromTaskResult, template, workspaceKbIds])
+  }, [activeWorkspacePath, attachments, editorState.documentDraft, editorState.selectedSectionId, editorState.selectedText, editorState.title, generationPrompt, knowledgeNameMap, syncEditorStateFromTaskResult, template, workspaceKbIds])
 
   const handleSelectSection = useCallback((sectionId: string) => {
     setEditorState((prev) => ({
@@ -1150,6 +1246,7 @@ export default function DocumentWorkbench() {
       const op = buildOperationRecord({
         operationClass: 'format',
         intent: parsed.intent,
+        instruction,
         blockIds: result.affectedBlockIds,
         aiCalled: false,
         summary: `已对「${resolved.label}」执行：${parsed.intent}`,
@@ -1201,6 +1298,8 @@ export default function DocumentWorkbench() {
         citationId,
         refId: refSource.id,
         label: refSource.label,
+        refLabel: refSource.label,
+        sourceId: refSource.sourceId,
       })
 
       if (!result?.applied) {
@@ -1212,6 +1311,7 @@ export default function DocumentWorkbench() {
       const op = buildOperationRecord({
         operationClass: 'semantic',
         intent: 'add_citation',
+        instruction,
         blockIds: [targetBlock.id],
         aiCalled: false,
         summary: `已在「${resolved.label}」插入引用：${refSource.label}`,
@@ -1288,6 +1388,7 @@ export default function DocumentWorkbench() {
         const op = buildOperationRecord({
           operationClass: 'semantic',
           intent: parsed.intent,
+          instruction,
           blockIds: [targetBlock.id],
           aiCalled: true,
           summary: `已对「${resolved.label}」执行：${parsed.intent}（AI）`,
@@ -1339,12 +1440,15 @@ export default function DocumentWorkbench() {
       const restoredHtml = op.previousArtifact.html
       const applied = canvasRef.current?.applyPatch({ type: 'replace_document', html: restoredHtml })
       if (applied?.applied) {
-        setEditorState((prev) => ({
-          ...prev,
-          html: op.previousArtifact!.html,
-          documentArtifact: op.previousArtifact,
-          dirty: true,
-        }))
+        setEditorState((prev) => {
+          const restoredState = updateEditableStateFromHtml(prev, op.previousArtifact!.html)
+          return {
+            ...restoredState,
+            documentArtifact: op.previousArtifact,
+            dirty: true,
+            saving: false,
+          }
+        })
       }
     } else if (op.operationClass === 'format' && op.previousTexts && Object.keys(op.previousTexts).length > 0) {
       // Fallback: restore per-block innerHTML and remove applied styles
@@ -1620,11 +1724,34 @@ export default function DocumentWorkbench() {
   }, [artifactFilename, editorState])
 
   const handleExportPdf = useCallback(() => {
-    setStatusMessage('PDF 导出暂未配置')
-    setStatusTone('err')
-  }, [])
+    const latestHtml = stripTransientAiMarkup(canvasRef.current?.getHtml() || editorState.html)
+    const latestState = latestHtml !== editorState.html
+      ? updateEditableStateFromHtml(editorState, latestHtml)
+      : editorState
+    const printableHtml = buildPdfPrintHtml({
+      title: latestState.title || '未命名文稿',
+      html: latestState.html,
+    })
+    const printWindow = window.open('', '_blank')
+    if (!printWindow) {
+      setStatusMessage('浏览器拦截了打印窗口，请允许弹窗后重试导出 PDF')
+      setStatusTone('err')
+      return
+    }
+    printWindow.document.open()
+    printWindow.document.write(printableHtml)
+    printWindow.document.close()
+    setEditorState((prev) => (
+      latestHtml !== prev.html
+        ? { ...latestState, dirty: prev.dirty }
+        : prev
+    ))
+    setStatusMessage('已打开打印预览，请在系统对话框中选择“另存为 PDF”')
+    setStatusTone('ok')
+    setExportError(null)
+  }, [editorState])
 
-  const promptDockActionLabel = editorState.documentId
+  const promptDockActionLabel = hasActiveDocument
     ? editorState.selectedText.trim()
       ? '改写选中内容'
       : editorState.selectedSectionId
@@ -1639,28 +1766,41 @@ export default function DocumentWorkbench() {
       setStatusTone('err')
       return
     }
-    // Try command engine first when there is an existing document
-    if (editorState.documentId) {
+    if (isUndoInstruction(prompt)) {
+      if (commandUndoStack.length > 0) {
+        handleUndoLastCommand()
+        setGenerationPrompt('')
+      } else {
+        setStatusMessage('当前没有可撤销的指令操作')
+        setStatusTone('err')
+      }
+      return
+    }
+    // Try command engine first whenever the editor already contains a document-like draft
+    if (hasActiveDocument) {
       const handled = await handleCommandSubmit(prompt)
       if (handled) {
         setGenerationPrompt('')
         return
       }
       // Fall through to legacy path
-      if (editorState.selectedText.trim()) {
+      if (editorState.documentId && editorState.selectedText.trim()) {
         await handleAiSubmit(prompt, 'selection')
         setGenerationPrompt('')
         return
       }
-      if (editorState.selectedSectionId) {
+      if (editorState.documentId && editorState.selectedSectionId) {
         await handleAiSubmit(prompt, 'section')
         setGenerationPrompt('')
         return
       }
+      setStatusMessage('当前草稿已存在内容。请使用明确的块级指令，或先保存 / 生成服务端文稿后再执行常规 AI 改写。')
+      setStatusTone('err')
+      return
     }
     await handleGenerate(prompt)
     setGenerationPrompt('')
-  }, [editorState.documentId, editorState.selectedSectionId, editorState.selectedText, generationPrompt, handleAiSubmit, handleCommandSubmit, handleGenerate])
+  }, [commandUndoStack.length, editorState.documentId, editorState.selectedSectionId, editorState.selectedText, generationPrompt, handleAiSubmit, handleCommandSubmit, handleGenerate, handleUndoLastCommand, hasActiveDocument])
 
   return (
     <Shell data-testid="document-workbench">
@@ -1683,7 +1823,7 @@ export default function DocumentWorkbench() {
         onRegenerate={() => void handleGenerate()}
         onViewVersions={() => {}}
         busy={busy}
-        pdfDisabled
+        docxDisabled={!editorState.documentId}
         regenerateDisabled={!editorState.documentId}
       />
 
@@ -1763,7 +1903,11 @@ export default function DocumentWorkbench() {
           citations={editorState.documentArtifact?.citations}
           busy={busy}
           disabled={false}
-          hasDocument={Boolean(editorState.documentId)}
+          hasDocument={hasActiveDocument}
+          dirty={editorState.dirty}
+          saving={editorState.saving}
+          lastSavedAt={editorState.lastSavedAt || null}
+          statusMessage={statusMessage}
           canUndoLastAiEdit={Boolean(lastAiSnapshot)}
           lastCommandOp={lastCommandOp}
           canUndoLastCommand={commandUndoStack.length > 0}
@@ -1773,6 +1917,15 @@ export default function DocumentWorkbench() {
           onInsertCitation={handleInsertCitation}
           onGenerate={handleAiPanelGenerate}
           onSubmit={async (instruction, scope) => {
+            if (isUndoInstruction(instruction)) {
+              if (commandUndoStack.length > 0) {
+                handleUndoLastCommand()
+              } else {
+                setStatusMessage('当前没有可撤销的指令操作')
+                setStatusTone('err')
+              }
+              return
+            }
             // Try command engine first, fall back to legacy scope-based submit
             const handled = await handleCommandSubmit(instruction)
             if (!handled) await handleAiSubmit(instruction, scope)
@@ -1789,7 +1942,7 @@ export default function DocumentWorkbench() {
             value={generationPrompt}
             data-testid="document-generation-prompt"
             onChange={(event) => setGenerationPrompt(event.target.value)}
-            placeholder={editorState.documentId
+            placeholder={hasActiveDocument
               ? '例如：把当前章节改得更正式，或补充一段总结。'
               : '例如：生成一份学院年度工作总结，包含主要成绩、问题分析、下一年度计划。'}
           />

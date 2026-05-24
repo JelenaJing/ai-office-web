@@ -307,6 +307,10 @@ interface DocumentAiEditPanelProps {
   busy?: boolean
   disabled?: boolean
   hasDocument: boolean
+  dirty?: boolean
+  saving?: boolean
+  lastSavedAt?: string | null
+  statusMessage?: string
   canUndoLastAiEdit?: boolean
   lastCommandOp?: DocumentPatchOperation | null
   canUndoLastCommand?: boolean
@@ -332,6 +336,10 @@ export function DocumentAiEditPanel({
   busy,
   disabled,
   hasDocument,
+  dirty,
+  saving,
+  lastSavedAt,
+  statusMessage,
   canUndoLastAiEdit,
   lastCommandOp,
   canUndoLastCommand,
@@ -420,6 +428,25 @@ export function DocumentAiEditPanel({
           <MetaLine>{selectedBlockId ? `Block：${selectedBlockRole || 'paragraph'} · ${selectedBlockId}` : 'Block：未选中'}</MetaLine>
           {selectedBlockText ? <MetaLine>{selectedBlockText.slice(0, 80)}</MetaLine> : null}
         </InspectorSection>
+
+        <InspectorSection>
+          <InspectorTitle>保存状态</InspectorTitle>
+          <MetaLine>{saving ? '状态：保存中' : dirty ? '状态：有未保存修改' : '状态：已保存 / 已同步本地草稿'}</MetaLine>
+          {lastSavedAt ? <MetaLine>最近保存：{new Date(lastSavedAt).toLocaleString()}</MetaLine> : null}
+          {statusMessage ? <MetaLine>提示：{statusMessage}</MetaLine> : null}
+        </InspectorSection>
+
+        {lastCommandOp ? (
+          <InspectorSection>
+            <InspectorTitle>上一次指令</InspectorTitle>
+            {lastCommandOp.instruction ? <MetaLine>原始指令：{lastCommandOp.instruction}</MetaLine> : null}
+            <MetaLine>Intent：{lastCommandOp.intent}</MetaLine>
+            <MetaLine>作用块：{lastCommandOp.blockIds.join('、') || '—'}</MetaLine>
+            <MetaLine>影响数量：{lastCommandOp.blockIds.length} 个 block</MetaLine>
+            <MetaLine>AI 调用：{lastCommandOp.aiCalled ? '是' : '否'}</MetaLine>
+            <MetaLine>可撤销：{canUndoLastCommand ? '是' : '否'}</MetaLine>
+          </InspectorSection>
+        ) : null}
 
         {references.length > 0 || citations.length > 0 ? (
           <InspectorSection>
@@ -566,9 +593,12 @@ export function DocumentAiEditPanel({
             <div style={{ fontWeight: 800, marginBottom: 4 }}>上次指令操作</div>
             <div>{lastCommandOp.summary}</div>
             <div style={{ marginTop: 4, color: '#42826a' }}>
+              {lastCommandOp.instruction ? `指令：${lastCommandOp.instruction} · ` : ''}
+              intent：{lastCommandOp.intent} ·
               块 ID：{lastCommandOp.blockIds.join('、') || '—'} ·
               {lastCommandOp.aiCalled ? ' 调用了 AI' : ' 未调用 AI'} ·
-              {lastCommandOp.operationClass === 'format' ? ' 格式操作' : ' 语义操作'}
+              {lastCommandOp.operationClass === 'format' ? ' 格式操作' : ' 语义操作'} ·
+              {canUndoLastCommand ? ' 可撤销' : ' 不可撤销'}
             </div>
           </div>
         ) : null}

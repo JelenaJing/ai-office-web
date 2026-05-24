@@ -156,6 +156,7 @@ export interface DocumentTopToolbarProps {
   onRegenerate: () => void
   onViewVersions?: () => void
   busy?: boolean
+  docxDisabled?: boolean
   pdfDisabled?: boolean
   regenerateDisabled?: boolean
 }
@@ -179,6 +180,7 @@ export function DocumentTopToolbar({
   onRegenerate,
   onViewVersions,
   busy,
+  docxDisabled,
   pdfDisabled,
   regenerateDisabled,
 }: DocumentTopToolbarProps) {
@@ -216,7 +218,7 @@ export function DocumentTopToolbar({
         <Save size={14} />
         保存
       </ToolButton>
-      <PrimaryButton type="button" data-testid="document-download-docx" onClick={onDownloadDocx} disabled={busy}>
+      <PrimaryButton type="button" data-testid="document-download-docx" onClick={onDownloadDocx} disabled={busy || docxDisabled}>
         <Download size={14} />
         下载 DOCX
       </PrimaryButton>
@@ -245,7 +247,7 @@ export function DocumentTopToolbar({
               disabled={pdfDisabled}
             >
               <FileDown size={14} />
-              导出 PDF
+              {pdfDisabled ? '导出 PDF（即将支持）' : '导出 PDF'}
             </MoreMenuItem>
             <MoreMenuItem
               type="button"

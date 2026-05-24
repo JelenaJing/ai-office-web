@@ -337,6 +337,8 @@ export interface DocumentEditorCanvasHandle {
     citationId: string
     refId: string
     label: string
+    refLabel?: string
+    sourceId?: string
     renderMode?: 'inline' | 'badge' | 'footnote'
   }) => AppendCitationToBlockResult
 }
@@ -910,7 +912,7 @@ export const DocumentEditorCanvas = forwardRef<DocumentEditorCanvasHandle, Docum
           root,
           patch: {
             type: 'insert_citation',
-            html: `<span class="doc-citation" data-citation-id="${escapeHtml(input.citationId)}" data-ref-id="${escapeHtml(input.refId)}" data-source-id="${escapeHtml(input.sourceId || '')}" data-render-mode="${escapeHtml(input.renderMode || 'inline')}">[${escapeHtml(input.label)}]</span>`,
+            html: `<span class="doc-citation" data-citation-id="${escapeHtml(input.citationId)}" data-ref-id="${escapeHtml(input.refId)}" data-ref-label="${escapeHtml(input.label)}" data-source-id="${escapeHtml(input.sourceId || '')}" data-render-mode="${escapeHtml(input.renderMode || 'inline')}">[${escapeHtml(input.label)}]</span>`,
             citation: {
               id: input.citationId,
               refId: input.refId,

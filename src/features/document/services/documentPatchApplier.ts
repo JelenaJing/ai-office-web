@@ -285,6 +285,8 @@ export function appendCitationToBlock(
     citationId: string
     refId: string
     label: string
+    refLabel?: string
+    sourceId?: string
     renderMode?: 'inline' | 'badge' | 'footnote'
   },
 ): AppendCitationToBlockResult {
@@ -296,9 +298,17 @@ export function appendCitationToBlock(
   span.className = 'doc-citation'
   span.dataset.citationId = input.citationId
   span.dataset.refId = input.refId
+  span.dataset.refLabel = input.refLabel || input.label
+  if (input.sourceId) {
+    span.dataset.sourceId = input.sourceId
+  }
   span.dataset.renderMode = input.renderMode || 'inline'
   span.setAttribute('data-citation-id', input.citationId)
   span.setAttribute('data-ref-id', input.refId)
+  span.setAttribute('data-ref-label', input.refLabel || input.label)
+  if (input.sourceId) {
+    span.setAttribute('data-source-id', input.sourceId)
+  }
   span.setAttribute('data-render-mode', input.renderMode || 'inline')
   span.textContent = `[${input.label}]`
   span.style.cssText = 'color: #1d4ed8; font-size: 0.85em; vertical-align: super; cursor: pointer; margin-left: 2px;'

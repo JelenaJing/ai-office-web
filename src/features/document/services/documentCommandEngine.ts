@@ -110,6 +110,8 @@ export interface DocumentPatchOperation {
   timestamp: number
   operationClass: OperationClass
   intent: CommandIntent
+  /** Original natural-language instruction */
+  instruction?: string
   /** Block IDs that were affected */
   blockIds: string[]
   /** Human-readable summary for the AI panel */
@@ -252,6 +254,17 @@ function zhOrdinalToN(raw: string): number | null {
   return null
 }
 
+function extractNamedSection(raw: string): string {
+  const normalized = raw
+    .replace(/^(帮我|请|给我|给|把)/u, '')
+    .replace(/(加引用|添加引用|插入引用|引用|改写|翻译|高光|正式|压缩|扩写|总结|摘要).*$/u, '')
+    .trim()
+  const match = normalized.match(/([\u4e00-\u9fa5A-Za-z0-9_-]{1,24}?)(?:部分|章节|一节|节)/u)
+  return (match?.[1] || normalized)
+    .replace(/^(当前|这一|这|该)/u, '')
+    .trim()
+}
+
 const TARGET_RULES: TargetRule[] = [
   { patterns: [/标题/], descriptor: { kind: 'title' } },
   {
@@ -271,10 +284,10 @@ const TARGET_RULES: TargetRule[] = [
   { patterns: [/当前章节/, /这一节/, /这节/, /该章节/], descriptor: { kind: 'section_current' } },
   { patterns: [/全文/, /整篇/, /所有/, /全部/], descriptor: { kind: 'all' } },
   {
-    // section by name: e.g. "政策依据部分"
-    patterns: [/部分$/, /章节$/, /节$/],
+    // section by name: e.g. "政策依据部分" / "给政策依据部分加引用"
+    patterns: [/[\u4e00-\u9fa5A-Za-z0-9_-]{1,24}(部分|章节|一节|节)/u],
     descriptor: (raw) => {
-      const name = raw.replace(/部分|章节|节$/, '').replace(/^(帮我?|请|给)/, '').trim()
+      const name = extractNamedSection(raw)
       return { kind: 'section_by_name', name: name || raw }
     },
   },
@@ -411,7 +424,15 @@ export function resolveCommandTarget(input: ResolveTargetInput): ResolvedCommand
           (block) => (block.sectionTitle || '').toLowerCase().includes(name),
         )
         if (matchedBlocks.length > 0) return found(matchedBlocks, `章节"${name}"（模糊匹配）`)
-        return ambiguous(`找不到章节"${name}"`)
+        const textMatchedBlocks = blocks.filter((block) => (
+          'text' in block
+          && typeof block.text === 'string'
+          && block.text.toLowerCase().includes(name)
+        ))
+        if (textMatchedBlocks.length > 0) {
+          return found(textMatchedBlocks, `文本包含"${name}"的块`)
+        }
+        return ambiguous(`找不到章节或文本"${name}"`)
       }
       const sectionBlocks = blocks.filter((block) => block.sectionId === section.id)
       return found(sectionBlocks, `章节"${section.title}"`)
@@ -448,6 +469,7 @@ export function buildFormatOp(intent: FormatIntent, blockIds: string[]): FormatO
 export function buildOperationRecord(opts: {
   operationClass: OperationClass
   intent: CommandIntent
+  instruction?: string
   blockIds: string[]
   aiCalled: boolean
   summary: string
@@ -459,6 +481,7 @@ export function buildOperationRecord(opts: {
     timestamp: Date.now(),
     operationClass: opts.operationClass,
     intent: opts.intent,
+    instruction: opts.instruction,
     blockIds: opts.blockIds,
     summary: opts.summary,
     aiCalled: opts.aiCalled,
@@ -481,4 +504,8 @@ export function isFormatIntent(intent: CommandIntent): intent is FormatIntent {
 
 export function isSemanticIntent(intent: CommandIntent): intent is SemanticIntent {
   return !FORMAT_INTENTS.has(intent) && intent !== 'unknown'
+}
+
+export function isUndoInstruction(raw: string): boolean {
+  return /撤销(上一次|最近一次|刚才|最后一次)?(操作|修改|命令)?/u.test(String(raw || '').trim())
 }
