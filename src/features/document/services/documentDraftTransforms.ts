@@ -130,12 +130,10 @@ export function parseEditableHtmlToDraft(input: {
   const parser = new DOMParser()
   const doc = parser.parseFromString(input.html || '', 'text/html')
   const baseDraft = input.baseDraft || null
-  const title = normalizeText(
-    doc.querySelector('[data-document-title="true"]')?.textContent
-    || doc.querySelector('h1')?.textContent
-    || baseDraft?.title
-    || '办公文稿',
-  ) || '办公文稿'
+  const explicitTitleNode = doc.querySelector('[data-document-title="true"]') || doc.querySelector('h1')
+  const title = explicitTitleNode
+    ? normalizeText(explicitTitleNode.textContent || '')
+    : (normalizeText(baseDraft?.title || '') || '办公文稿')
   const sections = Array.from(doc.querySelectorAll<HTMLElement>('section[data-section-id]'))
     .map((section, index) => {
       const sectionId = section.getAttribute('data-section-id') || baseDraft?.sections[index]?.id || `section-${index + 1}`

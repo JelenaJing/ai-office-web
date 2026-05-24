@@ -15,6 +15,10 @@ import type {
 } from '../services/documentWorkbenchApi'
 import { buildSelectionContextFromOffsets } from '../services/documentDraftTransforms'
 
+const DEFAULT_SECTION_ID = 'section-main'
+const TITLE_PLACEHOLDER = '未命名文稿'
+const BODY_PLACEHOLDER = '从这里开始写作，或在下方输入需求让 AI 帮你生成'
+
 const CanvasShell = styled.div`
   flex: 1;
   min-height: 0;
@@ -46,6 +50,11 @@ const ToolbarButton = styled.button`
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
 `
 
 const ToolbarHint = styled.div`
@@ -68,12 +77,6 @@ const Paper = styled.div`
   box-sizing: border-box;
 `
 
-const EmptyState = styled.div`
-  color: #627789;
-  font-size: 14px;
-  line-height: 1.9;
-`
-
 const EditableRoot = styled.div`
   outline: none;
   min-height: 940px;
@@ -82,6 +85,10 @@ const EditableRoot = styled.div`
   line-height: 1.95;
   font-family: "FangSong", "STSong", "SimSun", serif;
 
+  article[data-document-root="true"] {
+    min-height: 940px;
+  }
+
   h1[data-document-title="true"] {
     margin: 0 0 40px;
     text-align: center;
@@ -89,6 +96,16 @@ const EditableRoot = styled.div`
     line-height: 1.4;
     color: #17283a;
     letter-spacing: 0.04em;
+    position: relative;
+    min-height: 1.4em;
+  }
+
+  h1[data-document-title="true"][data-placeholder-visible="true"]::before {
+    content: '${TITLE_PLACEHOLDER}';
+    position: absolute;
+    inset: 0;
+    color: #97a8b8;
+    pointer-events: none;
   }
 
   section[data-section-id] {
@@ -97,6 +114,21 @@ const EditableRoot = styled.div`
     border-radius: 18px;
     border: 1px solid transparent;
     transition: background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+    position: relative;
+  }
+
+  section[data-document-body="true"] {
+    min-height: 220px;
+  }
+
+  section[data-document-body="true"][data-placeholder-visible="true"]::before {
+    content: '${BODY_PLACEHOLDER}';
+    position: absolute;
+    top: 14px;
+    left: 18px;
+    right: 18px;
+    color: #98a9b8;
+    pointer-events: none;
   }
 
   section[data-section-id][data-active="true"] {
@@ -134,6 +166,7 @@ const EditableRoot = styled.div`
   p {
     margin: 0 0 16px;
     text-indent: 2em;
+    min-height: 1.95em;
   }
 
   ul,
@@ -154,6 +187,12 @@ const EditableRoot = styled.div`
     color: #516679;
     font-size: 14px;
     line-height: 1.75;
+  }
+
+  hr {
+    margin: 18px 0;
+    border: none;
+    border-top: 1px solid #d2dce7;
   }
 
   .document-table-block {
@@ -195,10 +234,52 @@ const EditableRoot = styled.div`
   }
 `
 
+type ToolbarAction =
+  | { label: string; kind: 'exec'; command: string; value?: string }
+  | { label: string; kind: 'clear' }
+
+const TOOLBAR_ACTIONS: ToolbarAction[] = [
+  { label: '撤销', kind: 'exec', command: 'undo' },
+  { label: '重做', kind: 'exec', command: 'redo' },
+  { label: '标题', kind: 'exec', command: 'formatBlock', value: 'h2' },
+  { label: '正文', kind: 'exec', command: 'formatBlock', value: 'p' },
+  { label: '加粗', kind: 'exec', command: 'bold' },
+  { label: '斜体', kind: 'exec', command: 'italic' },
+  { label: '项目符号', kind: 'exec', command: 'insertUnorderedList' },
+  { label: '编号列表', kind: 'exec', command: 'insertOrderedList' },
+  { label: '插入分隔线', kind: 'exec', command: 'insertHorizontalRule' },
+  { label: '清空文档', kind: 'clear' },
+]
+
+const ALLOWED_PASTE_TAGS = new Set([
+  'p',
+  'br',
+  'strong',
+  'b',
+  'em',
+  'i',
+  'u',
+  'ul',
+  'ol',
+  'li',
+  'blockquote',
+  'h1',
+  'h2',
+  'h3',
+  'table',
+  'thead',
+  'tbody',
+  'tr',
+  'th',
+  'td',
+  'hr',
+])
+
 export interface DocumentEditorCanvasHandle {
   scrollToSection: (sectionId: string) => void
   applyPatch: (patch: DocumentEditPatch) => ApplyDocumentEditPatchResult
   getHtml: () => string
+  focusBody: () => void
 }
 
 interface DocumentEditorCanvasProps {
@@ -217,23 +298,22 @@ interface DocumentEditorCanvasProps {
   }) => void
 }
 
-const ALLOWED_PASTE_TAGS = new Set(['p', 'br', 'strong', 'b', 'u', 'ul', 'ol', 'li', 'blockquote', 'h1', 'h2', 'h3', 'table', 'thead', 'tbody', 'tr', 'th', 'td'])
-
-const TOOLBAR_ACTIONS = [
-  { label: '正文', command: 'formatBlock', value: 'p' },
-  { label: '一级标题', command: 'formatBlock', value: 'h2' },
-  { label: '二级标题', command: 'formatBlock', value: 'h3' },
-  { label: '列表', command: 'insertUnorderedList' },
-  { label: '引用', command: 'formatBlock', value: 'blockquote' },
-  { label: '加粗', command: 'bold' },
-  { label: '下划线', command: 'underline' },
-] as const
-
 function escapeHtml(value: string): string {
   return String(value || '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
+}
+
+function buildBlankEditorHtml(): string {
+  return [
+    '<article data-document-root="true" data-document-mode="draft">',
+    '<h1 data-document-title="true"></h1>',
+    `<section data-section-id="${DEFAULT_SECTION_ID}" data-section-title="正文" data-section-level="1" data-document-body="true">`,
+    '<p><br /></p>',
+    '</section>',
+    '</article>',
+  ].join('')
 }
 
 function unwrapElement(element: HTMLElement) {
@@ -271,6 +351,7 @@ function sanitizePastedHtml(input: string): string {
       return Array.from(node.childNodes).map(serialize).join('')
     }
     if (tag === 'br') return '<br />'
+    if (tag === 'hr') return '<hr />'
     const content = Array.from(node.childNodes).map(serialize).join('')
     if (!content.trim()) return ''
     return `<${tag}>${content}</${tag}>`
@@ -326,6 +407,89 @@ function selectionOffsetsInSection(sectionElement: HTMLElement, range: Range) {
   }
 }
 
+function ensureDocumentScaffold(root: HTMLElement) {
+  if (!root.innerHTML.trim()) {
+    root.innerHTML = buildBlankEditorHtml()
+  }
+  let article = root.querySelector<HTMLElement>('article[data-document-root="true"]')
+  if (!article) {
+    root.innerHTML = buildBlankEditorHtml()
+    article = root.querySelector<HTMLElement>('article[data-document-root="true"]')
+  }
+  if (!article) return null
+
+  let title = article.querySelector<HTMLElement>('h1[data-document-title="true"]')
+  if (!title) {
+    title = document.createElement('h1')
+    title.dataset.documentTitle = 'true'
+    article.insertBefore(title, article.firstChild)
+  }
+
+  let bodySection = article.querySelector<HTMLElement>('section[data-document-body="true"]')
+    || article.querySelector<HTMLElement>('section[data-section-id]')
+  if (!bodySection) {
+    bodySection = document.createElement('section')
+    bodySection.dataset.sectionId = DEFAULT_SECTION_ID
+    bodySection.dataset.sectionTitle = '正文'
+    bodySection.dataset.sectionLevel = '1'
+    bodySection.dataset.documentBody = 'true'
+    bodySection.innerHTML = '<p><br /></p>'
+    article.appendChild(bodySection)
+  }
+
+  bodySection.dataset.documentBody = 'true'
+  bodySection.dataset.sectionId = bodySection.dataset.sectionId || DEFAULT_SECTION_ID
+  bodySection.dataset.sectionTitle = bodySection.dataset.sectionTitle || '正文'
+  bodySection.dataset.sectionLevel = bodySection.dataset.sectionLevel || '1'
+
+  if (!bodySection.innerHTML.trim()) {
+    bodySection.innerHTML = '<p><br /></p>'
+  }
+
+  return { article, title, bodySection }
+}
+
+function bodyText(section: HTMLElement): string {
+  const content = Array.from(section.childNodes)
+    .filter((node) => !(node instanceof HTMLElement && node.matches('[data-section-heading="true"], h2, h3, h4')))
+    .map((node) => node.textContent || '')
+    .join('')
+  return content.replace(/\u200B/g, '').trim()
+}
+
+function updatePlaceholderState(root: HTMLElement) {
+  const scaffold = ensureDocumentScaffold(root)
+  if (!scaffold) return
+  scaffold.title.dataset.placeholderVisible = scaffold.title.textContent?.trim() ? 'false' : 'true'
+  scaffold.bodySection.dataset.placeholderVisible = bodyText(scaffold.bodySection) ? 'false' : 'true'
+}
+
+function placeCaret(root: HTMLElement, toEnd: boolean) {
+  const scaffold = ensureDocumentScaffold(root)
+  const target = scaffold?.bodySection.querySelector<HTMLElement>('p:last-of-type, li:last-of-type, blockquote:last-of-type')
+    || scaffold?.bodySection
+    || root
+  if (!target) return
+  const selection = window.getSelection()
+  if (!selection) return
+  const range = document.createRange()
+  range.selectNodeContents(target)
+  range.collapse(!toEnd)
+  selection.removeAllRanges()
+  selection.addRange(range)
+  root.focus()
+}
+
+function commandSupported(command: string): boolean {
+  if (typeof document === 'undefined') return false
+  if (typeof document.queryCommandSupported !== 'function') return true
+  try {
+    return document.queryCommandSupported(command)
+  } catch {
+    return false
+  }
+}
+
 export const DocumentEditorCanvas = forwardRef<DocumentEditorCanvasHandle, DocumentEditorCanvasProps>(
   function DocumentEditorCanvas({
     state,
@@ -336,12 +500,30 @@ export const DocumentEditorCanvas = forwardRef<DocumentEditorCanvasHandle, Docum
   }, ref) {
     const rootRef = useRef<HTMLDivElement | null>(null)
     const savedRangeRef = useRef<Range | null>(null)
+    const didAutoFocusRef = useRef(false)
 
     useEffect(() => {
       const root = rootRef.current
       if (!root) return
-      if (state.html && root.innerHTML !== state.html) {
-        root.innerHTML = state.html
+      const nextHtml = state.html || buildBlankEditorHtml()
+      if (root.innerHTML !== nextHtml) {
+        root.innerHTML = nextHtml
+      }
+      updatePlaceholderState(root)
+    }, [state.html])
+
+    useEffect(() => {
+      const root = rootRef.current
+      if (!root || didAutoFocusRef.current) return
+      const timer = window.requestAnimationFrame(() => {
+        const scaffold = ensureDocumentScaffold(root)
+        if (!scaffold) return
+        placeCaret(root, Boolean(bodyText(scaffold.bodySection)))
+        updatePlaceholderState(root)
+        didAutoFocusRef.current = true
+      })
+      return () => {
+        window.cancelAnimationFrame(timer)
       }
     }, [state.html])
 
@@ -354,6 +536,7 @@ export const DocumentEditorCanvas = forwardRef<DocumentEditorCanvasHandle, Docum
         section.dataset.modified = modifiedSectionIds.includes(sectionId) ? 'true' : 'false'
         section.dataset.aiHighlight = 'false'
       })
+      updatePlaceholderState(root)
     }, [modifiedSectionIds, state.selectedSectionId, state.html])
 
     useEffect(() => {
@@ -372,6 +555,7 @@ export const DocumentEditorCanvas = forwardRef<DocumentEditorCanvasHandle, Docum
     const emitSelection = useCallback((target?: EventTarget | null) => {
       const root = rootRef.current
       if (!root) return
+      updatePlaceholderState(root)
       const selection = window.getSelection()
       const anchorElement = (
         target instanceof Element
@@ -435,20 +619,30 @@ export const DocumentEditorCanvas = forwardRef<DocumentEditorCanvasHandle, Docum
     const handleInput = useCallback(() => {
       const root = rootRef.current
       if (!root) return
+      ensureDocumentScaffold(root)
       clearTransientHighlights(root)
+      updatePlaceholderState(root)
       const currentSelection = window.getSelection()
       const activeSection = currentSelection?.anchorNode instanceof Element
         ? currentSelection.anchorNode.closest<HTMLElement>('section[data-section-id]')
         : currentSelection?.anchorNode?.parentElement?.closest<HTMLElement>('section[data-section-id]') || null
-      onHtmlChange(root.innerHTML, activeSection?.dataset.sectionId || state.selectedSectionId)
+      onHtmlChange(root.innerHTML || buildBlankEditorHtml(), activeSection?.dataset.sectionId || state.selectedSectionId)
       emitSelection()
     }, [emitSelection, onHtmlChange, state.selectedSectionId])
 
-    const runCommand = useCallback((command: string, value?: string) => {
+    const runCommand = useCallback((action: ToolbarAction) => {
       const root = rootRef.current
       if (!root) return
+      if (action.kind === 'clear') {
+        if (!window.confirm('确认清空当前文稿内容？')) return
+        root.innerHTML = buildBlankEditorHtml()
+        updatePlaceholderState(root)
+        handleInput()
+        placeCaret(root, false)
+        return
+      }
       root.focus()
-      document.execCommand(command, false, value)
+      document.execCommand(action.command, false, action.value)
       handleInput()
     }, [handleInput])
 
@@ -482,6 +676,8 @@ export const DocumentEditorCanvas = forwardRef<DocumentEditorCanvasHandle, Docum
         })
         if (result.applied) {
           savedRangeRef.current = null
+          ensureDocumentScaffold(root)
+          updatePlaceholderState(root)
           onHtmlChange(result.html, result.affectedSectionId)
           onSelectionChange({
             selectedSectionId: result.affectedSectionId,
@@ -494,21 +690,17 @@ export const DocumentEditorCanvas = forwardRef<DocumentEditorCanvasHandle, Docum
         return result
       },
       getHtml() {
-        return rootRef.current?.innerHTML || ''
+        const root = rootRef.current
+        if (!root) return ''
+        ensureDocumentScaffold(root)
+        return root.innerHTML || buildBlankEditorHtml()
       },
-    }), [onHtmlChange, onSelectionChange, state.selectedSectionId])
-
-    if (!state.documentDraft) {
-      return (
-        <CanvasShell>
-          <Paper>
-            <EmptyState>
-              当前为 A4 文稿编辑区。请选择模板、知识库与附件，输入文稿需求后点击“生成文稿”。
-            </EmptyState>
-          </Paper>
-        </CanvasShell>
-      )
-    }
+      focusBody() {
+        const root = rootRef.current
+        if (!root) return
+        placeCaret(root, Boolean(bodyText(ensureDocumentScaffold(root)?.bodySection || root)))
+      },
+    }), [emitSelection, onHtmlChange, onSelectionChange, state.selectedSectionId])
 
     return (
       <CanvasShell>
@@ -517,15 +709,16 @@ export const DocumentEditorCanvas = forwardRef<DocumentEditorCanvasHandle, Docum
             <ToolbarButton
               key={action.label}
               type="button"
+              disabled={action.kind === 'exec' ? !commandSupported(action.command) : false}
               onMouseDown={(event) => {
                 event.preventDefault()
-                runCommand(action.command, 'value' in action ? action.value : undefined)
+                runCommand(action)
               }}
             >
               {action.label}
             </ToolbarButton>
           ))}
-          <ToolbarHint>标题可直接在页面顶部修改；粘贴外部内容时会自动清洗样式。</ToolbarHint>
+          <ToolbarHint>标题和正文都可直接编辑；刷新后会恢复本地草稿。</ToolbarHint>
         </EditorToolbar>
         <Paper>
           <EditableRoot

@@ -36,6 +36,7 @@ import {
   saveEditableDocument,
   startDocumentTask,
   waitForDocumentTask,
+  type DocumentDraft,
   type DocumentTaskResult,
   type DocumentTemplateOption,
   type EditableDocumentState,
@@ -124,9 +125,84 @@ const StatusBar = styled.div<{ $tone?: 'ok' | 'err' }>`
   flex-shrink: 0;
 `
 
+const PromptDock = styled.div`
+  flex-shrink: 0;
+  padding: 12px 18px 16px;
+  border-top: 1px solid #d8e3ef;
+  background: rgba(255, 255, 255, 0.96);
+  display: grid;
+  gap: 10px;
+`
+
+const PromptHint = styled.div`
+  font-size: 12px;
+  color: #627789;
+`
+
+const PromptRow = styled.div`
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+`
+
+const PromptInput = styled.textarea`
+  width: 100%;
+  min-height: 72px;
+  max-height: 140px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid #d4deea;
+  resize: vertical;
+  font-size: 14px;
+  line-height: 1.7;
+  font-family: inherit;
+  background: #f9fbfd;
+
+  &:focus {
+    outline: none;
+    border-color: #7aaee0;
+    background: #fff;
+  }
+`
+
+const PromptSubmit = styled.button`
+  height: 44px;
+  padding: 0 18px;
+  border-radius: 12px;
+  border: 1px solid #77a9df;
+  background: linear-gradient(180deg, #6aa4e2 0%, #4b8fd7 100%);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+`
+
 const hiddenInputStyles = {
   display: 'none',
 } as const
+
+const LOCAL_DRAFT_STORAGE_KEY = 'aios_document_editor_draft'
+const DEFAULT_SECTION_ID = 'section-main'
+
+interface LocalEditorDraft {
+  title: string
+  body: string
+  updatedAt: string
+}
+
+function escapeHtml(value: string): string {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
 
 interface PersistedWorkbenchState {
   templateId: string
@@ -153,17 +229,68 @@ interface RecentAiChange {
   sectionId: string | null
 }
 
+function createLocalDocumentDraft(engine: string, title = ''): DocumentDraft {
+  return {
+    id: 'local-document-draft',
+    title,
+    type: 'report',
+    language: 'zh-CN',
+    outline: [
+      {
+        id: DEFAULT_SECTION_ID,
+        level: 1,
+        title: '正文',
+      },
+    ],
+    sections: [
+      {
+        id: DEFAULT_SECTION_ID,
+        title: '正文',
+        content: '',
+      },
+    ],
+    metadata: {
+      engine,
+      knowledgeRefs: [],
+    },
+  }
+}
+
+function createBlankDocumentHtml(title = '', bodyHtml = '<p><br /></p>'): string {
+  return [
+    '<article data-document-root="true" data-document-mode="draft">',
+    `<h1 data-document-title="true">${escapeHtml(title)}</h1>`,
+    `<section data-section-id="${DEFAULT_SECTION_ID}" data-section-title="正文" data-section-level="1" data-document-body="true">`,
+    bodyHtml,
+    '</section>',
+    '</article>',
+  ].join('')
+}
+
+function loadLocalEditorDraft(): LocalEditorDraft | null {
+  if (typeof window === 'undefined') return null
+  const raw = window.localStorage.getItem(LOCAL_DRAFT_STORAGE_KEY)
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as LocalEditorDraft
+    return typeof parsed.body === 'string' ? parsed : null
+  } catch {
+    return null
+  }
+}
+
 function createEmptyEditorState(engine: string): EditableDocumentState {
+  const draft = createLocalDocumentDraft(engine, '')
   return {
     documentId: null,
     artifactId: null,
     exportUrl: null,
     title: '',
-    html: '',
+    html: createBlankDocumentHtml(),
     markdown: '',
-    documentDraft: undefined,
-    outline: [],
-    selectedSectionId: null,
+    documentDraft: draft,
+    outline: draft.outline,
+    selectedSectionId: DEFAULT_SECTION_ID,
     selectedText: '',
     selectionRange: undefined,
     dirty: false,
@@ -279,18 +406,41 @@ export default function DocumentWorkbench() {
     }
     const persisted = loadPersistedState(activeWorkspacePath)
     if (persisted) {
+      const restoredState = persisted.editorState?.documentDraft
+        ? persisted.editorState
+        : updateEditableStateFromHtml(createEmptyEditorState(defaultEngine), persisted.editorState?.html || createBlankDocumentHtml())
       setSelectedTemplateId(persisted.templateId || 'annual_report')
       setAttachments(Array.isArray(persisted.attachments) ? persisted.attachments : [])
       setGenerationPrompt(persisted.generationPrompt || '')
-      setEditorState(persisted.editorState || createEmptyEditorState(defaultEngine))
+      setEditorState({
+        ...createEmptyEditorState(defaultEngine),
+        ...restoredState,
+        selectedSectionId: restoredState.selectedSectionId || DEFAULT_SECTION_ID,
+      })
       setModifiedSectionIds(persisted.modifiedSectionIds || [])
       setSectionHistory(persisted.sectionHistory || {})
       setArtifactFilename(persisted.artifactFilename || null)
       setActiveHistoryKey(
-        persisted.editorState?.selectedSectionId
-          ? documentHistoryKey('section', persisted.editorState.selectedSectionId)
+        restoredState.selectedSectionId
+          ? documentHistoryKey('section', restoredState.selectedSectionId)
           : 'document',
       )
+    } else {
+      const localDraft = loadLocalEditorDraft()
+      if (localDraft) {
+        const localState = updateEditableStateFromHtml(
+          createEmptyEditorState(defaultEngine),
+          localDraft.body || createBlankDocumentHtml(localDraft.title || ''),
+        )
+        setEditorState({
+          ...localState,
+          title: localDraft.title || localState.title,
+          dirty: true,
+          lastSavedAt: localDraft.updatedAt,
+        })
+      } else {
+        setEditorState(createEmptyEditorState(defaultEngine))
+      }
     }
     setHydrated(true)
   }, [activeWorkspacePath, defaultEngine])
@@ -309,6 +459,20 @@ export default function DocumentWorkbench() {
     }
     window.localStorage.setItem(key, JSON.stringify(payload))
   }, [activeWorkspacePath, attachments, artifactFilename, editorState, generationPrompt, hydrated, modifiedSectionIds, sectionHistory, selectedTemplateId])
+
+  useEffect(() => {
+    if (!hydrated || typeof window === 'undefined') return
+    const timer = window.setTimeout(() => {
+      window.localStorage.setItem(LOCAL_DRAFT_STORAGE_KEY, JSON.stringify({
+        title: editorState.title,
+        body: editorState.html,
+        updatedAt: new Date().toISOString(),
+      } satisfies LocalEditorDraft))
+    }, 700)
+    return () => {
+      window.clearTimeout(timer)
+    }
+  }, [editorState.html, editorState.title, hydrated])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -341,7 +505,6 @@ export default function DocumentWorkbench() {
 
   const activeEngineLabel = engineLabel((editorState.engine as 'builtin' | 'minimax_docx') || defaultEngine)
   const activeTemplateLabel = template?.label || '未选择'
-  const artifactLabel = artifactFilename || null
 
   const appendHistory = useCallback((scope: DocumentAiScope | null, sectionId: string | null, entry: SectionHistoryEntry) => {
     const key = documentHistoryKey(scope, sectionId)
@@ -1068,6 +1231,34 @@ export default function DocumentWorkbench() {
     setStatusTone('err')
   }, [])
 
+  const promptDockActionLabel = editorState.documentId
+    ? editorState.selectedText.trim()
+      ? '改写选中内容'
+      : editorState.selectedSectionId
+        ? '改写当前章节'
+        : '发送给 AI'
+    : '生成文稿'
+
+  const handlePromptDockSubmit = useCallback(async () => {
+    const prompt = generationPrompt.trim()
+    if (!prompt) {
+      setStatusMessage('请先输入文稿需求或修改指令')
+      setStatusTone('err')
+      return
+    }
+    if (editorState.documentId) {
+      if (editorState.selectedText.trim()) {
+        await handleAiSubmit(prompt, 'selection')
+        return
+      }
+      if (editorState.selectedSectionId) {
+        await handleAiSubmit(prompt, 'section')
+        return
+      }
+    }
+    await handleGenerate(prompt)
+  }, [editorState.documentId, editorState.selectedSectionId, editorState.selectedText, generationPrompt, handleAiSubmit, handleGenerate])
+
   return (
     <Shell data-testid="document-workbench">
       <DocumentTopToolbar
@@ -1183,6 +1374,30 @@ export default function DocumentWorkbench() {
           onSubmit={handleAiSubmit}
         />
       </Body>
+
+      <PromptDock>
+        <PromptHint>
+          可以直接在正文区写作，也可以在下方输入需求，让 AI 帮你生成或改写文稿。
+        </PromptHint>
+        <PromptRow>
+          <PromptInput
+            value={generationPrompt}
+            data-testid="document-generation-prompt"
+            onChange={(event) => setGenerationPrompt(event.target.value)}
+            placeholder={editorState.documentId
+              ? '例如：把当前章节改得更正式，或补充一段总结。'
+              : '例如：生成一份学院年度工作总结，包含主要成绩、问题分析、下一年度计划。'}
+          />
+          <PromptSubmit
+            type="button"
+            data-testid="document-generate-button"
+            disabled={busy || !generationPrompt.trim()}
+            onClick={() => void handlePromptDockSubmit()}
+          >
+            {busy ? '处理中…' : promptDockActionLabel}
+          </PromptSubmit>
+        </PromptRow>
+      </PromptDock>
 
       {statusMessage ? <StatusBar $tone={statusTone}>{statusMessage}</StatusBar> : null}
 
