@@ -114,8 +114,8 @@ export const webPlatformApi: PlatformApi = {
 
   auth: {
     async login(email: string, password: string): Promise<AuthResult> {
-      const result = await apiPost<AuthResult>('/api/account-center/login', {
-        email,
+      const result = await apiPost<AuthResult>('/api/auth/login', {
+        username: email,
         password,
       })
       localStorage.setItem(PRIMARY_TOKEN_KEY, result.token)

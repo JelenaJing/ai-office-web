@@ -23,7 +23,7 @@ import type {
   ChatStatus,
 } from '../types/personDirectory'
 
-const ACCOUNT_CENTER_LOGIN_PATH = '/api/account-center/login'
+const ACCOUNT_CENTER_LOGIN_PATH = '/api/auth/login'
 const WEB_BACKEND_UNREACHABLE_MESSAGE = '无法连接 AI Office Web 后端'
 const ACCOUNT_CENTER_UNREACHABLE_MESSAGE = '无法连接内部账号中心，请检查 13100 服务'
 
@@ -99,10 +99,10 @@ async function request<T>(
     }
     if (isLoginEndpoint) {
       if (response.status === 401) {
-        throw new Error('用户名或密码错误')
+        throw new Error(msg || '用户名或密码错误')
       }
       if (response.status === 403) {
-        throw new Error(msg.includes('禁用') ? msg : '用户名或密码错误')
+        throw new Error(msg || '该账号已被禁用，请联系管理员')
       }
       if (response.status >= 500) {
         throw new Error(WEB_BACKEND_UNREACHABLE_MESSAGE)
@@ -112,7 +112,7 @@ async function request<T>(
       if (!isLoginEndpoint && typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('account:session-expired'))
       }
-      throw new Error(isLoginEndpoint ? '用户名或密码错误' : '登录已过期，请重新登录')
+      throw new Error(isLoginEndpoint ? (msg || '用户名或密码错误') : '登录已过期，请重新登录')
     }
     if (response.status === 403) throw new Error(msg || '该内部账号已被禁用，请联系管理员')
     throw new Error(msg || `请求失败 (${response.status})`)
