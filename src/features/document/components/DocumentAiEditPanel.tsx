@@ -422,14 +422,14 @@ export function DocumentAiEditPanel({
       </PanelHeader>
 
       <ScrollRegion>
-        <InspectorSection>
+        <InspectorSection data-testid="document-current-location">
           <InspectorTitle>当前定位</InspectorTitle>
           <MetaLine>{selectedSectionId ? `章节：${selectedSectionLabel}` : '章节：全文'}</MetaLine>
           <MetaLine>{selectedBlockId ? `Block：${selectedBlockRole || 'paragraph'} · ${selectedBlockId}` : 'Block：未选中'}</MetaLine>
           {selectedBlockText ? <MetaLine>{selectedBlockText.slice(0, 80)}</MetaLine> : null}
         </InspectorSection>
 
-        <InspectorSection>
+        <InspectorSection data-testid="document-save-status">
           <InspectorTitle>保存状态</InspectorTitle>
           <MetaLine>{saving ? '状态：保存中' : dirty ? '状态：有未保存修改' : '状态：已保存 / 已同步本地草稿'}</MetaLine>
           {lastSavedAt ? <MetaLine>最近保存：{new Date(lastSavedAt).toLocaleString()}</MetaLine> : null}
@@ -437,7 +437,7 @@ export function DocumentAiEditPanel({
         </InspectorSection>
 
         {lastCommandOp ? (
-          <InspectorSection>
+          <InspectorSection data-testid="document-last-command-inspector">
             <InspectorTitle>上一次指令</InspectorTitle>
             {lastCommandOp.instruction ? <MetaLine>原始指令：{lastCommandOp.instruction}</MetaLine> : null}
             <MetaLine>Intent：{lastCommandOp.intent}</MetaLine>
@@ -449,7 +449,7 @@ export function DocumentAiEditPanel({
         ) : null}
 
         {references.length > 0 || citations.length > 0 ? (
-          <InspectorSection>
+          <InspectorSection data-testid="document-reference-panel">
             <InspectorTitle>引用来源</InspectorTitle>
             {citations.length > 0 ? <MetaLine>当前文稿引用 {citations.length} 条</MetaLine> : null}
             <RefList>
@@ -589,7 +589,7 @@ export function DocumentAiEditPanel({
 
       <Composer>
         {lastCommandOp ? (
-          <div style={{ padding: '8px 12px', borderRadius: 10, background: '#f0f9f4', border: '1px solid #b6e0c9', fontSize: 12, color: '#1a5c34', marginBottom: 6 }}>
+          <div data-testid="document-last-command-card" style={{ padding: '8px 12px', borderRadius: 10, background: '#f0f9f4', border: '1px solid #b6e0c9', fontSize: 12, color: '#1a5c34', marginBottom: 6 }}>
             <div style={{ fontWeight: 800, marginBottom: 4 }}>上次指令操作</div>
             <div>{lastCommandOp.summary}</div>
             <div style={{ marginTop: 4, color: '#42826a' }}>

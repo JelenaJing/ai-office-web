@@ -201,6 +201,13 @@ interface LocalEditorDraft {
   title: string
   body: string
   updatedAt: string
+  templateId?: string
+  generationPrompt?: string
+  attachments?: FileEntry[]
+  editorState?: EditableDocumentState
+  sectionHistory?: Record<string, SectionHistoryEntry[]>
+  modifiedSectionIds?: string[]
+  artifactFilename?: string | null
 }
 
 function escapeHtml(value: string): string {
@@ -288,6 +295,32 @@ function loadLocalEditorDraft(): LocalEditorDraft | null {
     return typeof parsed.body === 'string' ? parsed : null
   } catch {
     return null
+  }
+}
+
+function buildLocalEditorDraft(input: {
+  title: string
+  body: string
+  updatedAt: string
+  templateId: string
+  generationPrompt: string
+  attachments: FileEntry[]
+  editorState: EditableDocumentState
+  sectionHistory: Record<string, SectionHistoryEntry[]>
+  modifiedSectionIds: string[]
+  artifactFilename: string | null
+}): LocalEditorDraft {
+  return {
+    title: input.title,
+    body: input.body,
+    updatedAt: input.updatedAt,
+    templateId: input.templateId,
+    generationPrompt: input.generationPrompt,
+    attachments: input.attachments,
+    editorState: cloneEditorState(input.editorState),
+    sectionHistory: JSON.parse(JSON.stringify(input.sectionHistory)) as Record<string, SectionHistoryEntry[]>,
+    modifiedSectionIds: [...input.modifiedSectionIds],
+    artifactFilename: input.artifactFilename,
   }
 }
 
@@ -470,7 +503,7 @@ export default function DocumentWorkbench() {
         if (!config.templates.some((item) => item.id === selectedTemplateId) && config.templates.length > 0) {
           setSelectedTemplateId(config.templates[0].id)
         }
-        setEditorState((prev) => prev.documentId ? prev : createEmptyEditorState(config.engine))
+        setEditorState((prev) => (prev.documentId || hasEditableDocumentContent(prev) ? prev : createEmptyEditorState(config.engine)))
       })
       .catch((error) => {
         if (disposed) return
@@ -491,42 +524,62 @@ export default function DocumentWorkbench() {
       return
     }
     const persisted = loadPersistedState(activeWorkspacePath)
-    if (persisted) {
-      const restoredState = persisted.editorState?.documentDraft
+    const localDraft = loadLocalEditorDraft()
+    const persistedState = persisted
+      ? (persisted.editorState?.documentDraft
         ? persisted.editorState
-        : updateEditableStateFromHtml(createEmptyEditorState(defaultEngine), persisted.editorState?.html || createBlankDocumentHtml())
-      setSelectedTemplateId(persisted.templateId || 'annual_report')
-      setAttachments(Array.isArray(persisted.attachments) ? persisted.attachments : [])
-      setGenerationPrompt(persisted.generationPrompt || '')
-      setEditorState({
-        ...createEmptyEditorState(defaultEngine),
-        ...restoredState,
-        selectedSectionId: restoredState.selectedSectionId || DEFAULT_SECTION_ID,
-      })
-      setModifiedSectionIds(persisted.modifiedSectionIds || [])
-      setSectionHistory(persisted.sectionHistory || {})
-      setArtifactFilename(persisted.artifactFilename || null)
-      setActiveHistoryKey(
-        restoredState.selectedSectionId
-          ? documentHistoryKey('section', restoredState.selectedSectionId)
-          : 'document',
-      )
-    } else {
-      const localDraft = loadLocalEditorDraft()
-      if (localDraft) {
-        const localState = updateEditableStateFromHtml(
+        : updateEditableStateFromHtml(createEmptyEditorState(defaultEngine), persisted.editorState?.html || createBlankDocumentHtml()))
+      : null
+    const localDraftState = localDraft
+      ? (localDraft.editorState?.documentDraft
+        ? localDraft.editorState
+        : updateEditableStateFromHtml(
           createEmptyEditorState(defaultEngine),
           localDraft.body || createBlankDocumentHtml(localDraft.title || ''),
-        )
+        ))
+      : null
+    const persistedBlockCount = persistedState?.documentArtifact?.canonicalData.blocks.length ?? 0
+    const localDraftBlockCount = localDraftState?.documentArtifact?.canonicalData.blocks.length ?? 0
+    const shouldPreferLocalDraft = localDraftBlockCount > persistedBlockCount
+
+    if (persistedState && !shouldPreferLocalDraft) {
+      setSelectedTemplateId(persisted?.templateId || 'annual_report')
+      setAttachments(Array.isArray(persisted?.attachments) ? persisted.attachments : [])
+      setGenerationPrompt(persisted?.generationPrompt || '')
+      setEditorState({
+        ...createEmptyEditorState(defaultEngine),
+        ...persistedState,
+        selectedSectionId: persistedState.selectedSectionId || DEFAULT_SECTION_ID,
+      })
+      setModifiedSectionIds(persisted?.modifiedSectionIds || [])
+      setSectionHistory(persisted?.sectionHistory || {})
+      setArtifactFilename(persisted?.artifactFilename || null)
+      setActiveHistoryKey(
+        persistedState.selectedSectionId
+          ? documentHistoryKey('section', persistedState.selectedSectionId)
+          : 'document',
+      )
+    } else if (localDraft && localDraftState) {
+        const localState = localDraftState
+        setSelectedTemplateId(localDraft.templateId || 'annual_report')
+        setAttachments(Array.isArray(localDraft.attachments) ? localDraft.attachments : [])
+        setGenerationPrompt(localDraft.generationPrompt || '')
         setEditorState({
           ...localState,
           title: localDraft.title || localState.title,
           dirty: true,
           lastSavedAt: localDraft.updatedAt,
         })
-      } else {
-        setEditorState(createEmptyEditorState(defaultEngine))
-      }
+        setModifiedSectionIds(localDraft.modifiedSectionIds || [])
+        setSectionHistory(localDraft.sectionHistory || {})
+        setArtifactFilename(localDraft.artifactFilename || null)
+        setActiveHistoryKey(
+          localState.selectedSectionId
+            ? documentHistoryKey('section', localState.selectedSectionId)
+            : 'document',
+        )
+    } else {
+      setEditorState(createEmptyEditorState(defaultEngine))
     }
     setHydrated(true)
   }, [activeWorkspacePath, defaultEngine])
@@ -549,16 +602,23 @@ export default function DocumentWorkbench() {
   useEffect(() => {
     if (!hydrated || typeof window === 'undefined') return
     const timer = window.setTimeout(() => {
-      window.localStorage.setItem(LOCAL_DRAFT_STORAGE_KEY, JSON.stringify({
+      window.localStorage.setItem(LOCAL_DRAFT_STORAGE_KEY, JSON.stringify(buildLocalEditorDraft({
         title: editorState.title,
         body: editorState.html,
         updatedAt: new Date().toISOString(),
-      } satisfies LocalEditorDraft))
+        templateId: selectedTemplateId,
+        generationPrompt,
+        attachments,
+        editorState,
+        sectionHistory,
+        modifiedSectionIds,
+        artifactFilename,
+      })))
     }, 700)
     return () => {
       window.clearTimeout(timer)
     }
-  }, [editorState.html, editorState.title, hydrated])
+  }, [artifactFilename, attachments, editorState, generationPrompt, hydrated, modifiedSectionIds, sectionHistory, selectedTemplateId])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -730,11 +790,18 @@ export default function DocumentWorkbench() {
           artifactFilename,
         }
         window.localStorage.setItem(key, JSON.stringify(payload))
-        window.localStorage.setItem(LOCAL_DRAFT_STORAGE_KEY, JSON.stringify({
+        window.localStorage.setItem(LOCAL_DRAFT_STORAGE_KEY, JSON.stringify(buildLocalEditorDraft({
           title: nextState.title,
           body: nextState.html,
           updatedAt: savedAt,
-        } satisfies LocalEditorDraft))
+          templateId: selectedTemplateId,
+          generationPrompt,
+          attachments,
+          editorState: nextState,
+          sectionHistory,
+          modifiedSectionIds,
+          artifactFilename,
+        })))
       }
       setEditorState(nextState)
       setStatusMessage('已保存到本地草稿，刷新后可恢复当前 HTML 文稿')
