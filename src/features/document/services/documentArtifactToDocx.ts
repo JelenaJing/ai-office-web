@@ -7,15 +7,39 @@
  * This is the client-side fallback export path for documents that do not have
  * a server-side documentId.  When documentId is available the server-side
  * exportDocumentArtifact API should be preferred (it produces higher-quality
- * output), but this path ensures "Export Word" always works.
+ * output), but this path ensures "Export Word" always works even for freshly
+ * typed, not-yet-saved documents.
+ *
+ * ── Why public/html-docx.js? ──────────────────────────────────────────────────
+ *
+ * html-docx-js v0.3.1 ships a UMD bundle that contains legacy JavaScript `with`
+ * statements (used by an embedded CoffeeScript-compiled template engine).
+ * Rollup's Rust-based AST parser (used by Vite 5) cannot parse `with` statements,
+ * so importing html-docx-js directly via `import` or `require()` causes the Vite
+ * production build to fail with "Cannot convert Stmt::With".
+ *
+ * Workaround: the UMD bundle is served as a static asset at /html-docx.js
+ * and injected at runtime via a <script> tag.  The UMD bundle registers itself
+ * as window.htmlDocx once loaded.  We cache the reference to avoid repeated
+ * script injection.
+ *
+ * ── License ──────────────────────────────────────────────────────────────────
+ *
+ * html-docx-js is licensed under the MIT License.
+ * Copyright (c) 2014 Evidence Prime, Artur Nowak.
+ * See node_modules/html-docx-js/LICENSE for the full text.
+ * public/html-docx.js is a verbatim copy of node_modules/html-docx-js/dist/html-docx.js.
+ *
+ * ── Future migration path ─────────────────────────────────────────────────────
+ *
+ * The preferred long-term approach is to move DOCX generation to the server:
+ *   POST /api/documents/export-docx  { artifact: DocumentArtifact }
+ * The server can use docx (npm) or the existing OOXML pipeline (documentEngineService)
+ * which already produces production-quality DOCX files.  The client-side path here
+ * is intentionally minimal and serves as a no-server-dependency fallback only.
  */
 
 import type { DocumentArtifact, DocumentCanonicalBlock } from './documentWorkbenchApi'
-
-// html-docx-js ships a UMD bundle that uses the `with` statement, which
-// Vite/Rollup cannot bundle.  We load it at runtime by injecting a <script>
-// tag that references the pre-copied /html-docx.js from the public folder.
-// The UMD bundle sets window.htmlDocx once loaded.
 type HtmlDocxLib = { asBlob: (html: string, opts?: Record<string, unknown>) => Blob }
 
 let htmlDocxCache: HtmlDocxLib | null = null
