@@ -37,6 +37,7 @@ import {
   startDocumentTask,
   waitForDocumentTask,
   type DocumentDraft,
+  type DocumentReference,
   type DocumentTaskResult,
   type DocumentTemplateOption,
   type EditableDocumentState,
@@ -45,6 +46,16 @@ import {
   createEditableStateFromTaskResult,
   updateEditableStateFromHtml,
 } from '../services/documentDraftTransforms'
+import {
+  buildFormatOp,
+  buildOperationRecord,
+  isFormatIntent,
+  isSemanticIntent,
+  parseDocumentCommand,
+  resolveCommandTarget,
+  type DocumentPatchOperation,
+} from '../services/documentCommandEngine'
+import { undoFormatOp } from '../services/documentPatchApplier'
 import { runDocumentSkill } from '../services/documentSkillAdapter'
 import { runPaperWorkflowGenerate } from '../services/paperWorkflowAdapter'
 import { fetchContentHandoff } from '../services/contentHandoffApi'
@@ -64,9 +75,21 @@ const Body = styled.div`
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
+  grid-template-columns: 300px minmax(0, 1fr) 360px;
   overflow: hidden;
   position: relative;
+`
+
+const LeftPane = styled.aside`
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 14px;
+  border-right: 1px solid #d8e3ef;
+  background: #f7fafc;
+  display: grid;
+  align-content: start;
+  gap: 12px;
 `
 
 const CenterPane = styled.div`
@@ -76,44 +99,25 @@ const CenterPane = styled.div`
   flex-direction: column;
 `
 
-/* ── Overlay system ── */
-
-const OverlayBackdrop = styled.div`
-  position: absolute;
-  inset: 0;
-  z-index: 90;
+const SidebarCard = styled.div`
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid #d8e3ef;
+  border-radius: 16px;
+  overflow: hidden;
 `
 
-const OutlineDrawerPanel = styled.aside`
-  position: absolute;
-  top: 0;
-  left: 0;
-  bottom: 0;
-  width: 296px;
-  z-index: 100;
-  background: #f7fafc;
-  border-right: 1px solid #d8e3ef;
-  overflow: auto;
-  padding: 16px;
-  box-shadow: 6px 0 24px rgba(15, 23, 42, 0.10);
+const SidebarSection = styled.section`
   display: grid;
   align-content: start;
-  gap: 0;
+  gap: 10px;
 `
 
-const FloatingPanel = styled.div`
-  position: absolute;
-  top: 0;
-  left: 0;
-  z-index: 100;
-  width: 320px;
-  max-height: calc(100vh - 120px);
-  overflow: auto;
-  background: #fff;
-  border: 1px solid #d0dce9;
-  border-radius: 16px;
-  box-shadow: 0 12px 36px rgba(15, 23, 42, 0.14);
-  padding: 16px;
+const SidebarHeader = styled.div`
+  padding: 14px 16px 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: #516679;
+  letter-spacing: 0.02em;
 `
 
 const StatusBar = styled.div<{ $tone?: 'ok' | 'err' }>`
@@ -257,11 +261,17 @@ function createLocalDocumentDraft(engine: string, title = ''): DocumentDraft {
 }
 
 function createBlankDocumentHtml(title = '', bodyHtml = '<p><br /></p>'): string {
+  const normalizedBody = String(bodyHtml || '').trim()
+  const resolvedBody = normalizedBody
+    ? (/data-block-id=/i.test(normalizedBody)
+        ? normalizedBody
+        : normalizedBody.replace(/<p(\s|>)/i, '<p data-block-id="body-paragraph-1" data-role="paragraph"$1'))
+    : '<p data-block-id="body-paragraph-1" data-role="paragraph"><br /></p>'
   return [
     '<article data-document-root="true" data-document-mode="draft">',
-    `<h1 data-document-title="true">${escapeHtml(title)}</h1>`,
+    `<h1 data-document-title="true" data-block-id="document-title" data-role="title">${escapeHtml(title)}</h1>`,
     `<section data-section-id="${DEFAULT_SECTION_ID}" data-section-title="正文" data-section-level="1" data-document-body="true">`,
-    bodyHtml,
+    resolvedBody,
     '</section>',
     '</article>',
   ].join('')
@@ -287,10 +297,14 @@ function createEmptyEditorState(engine: string): EditableDocumentState {
     exportUrl: null,
     title: '',
     html: createBlankDocumentHtml(),
+    documentArtifact: undefined,
     markdown: '',
     documentDraft: draft,
     outline: draft.outline,
     selectedSectionId: DEFAULT_SECTION_ID,
+    selectedBlockId: 'document-title',
+    selectedBlockRole: 'title',
+    selectedBlockText: '',
     selectedText: '',
     selectionRange: undefined,
     dirty: false,
@@ -357,9 +371,6 @@ export default function DocumentWorkbench() {
   const [sectionHistory, setSectionHistory] = useState<Record<string, SectionHistoryEntry[]>>({})
   const [activeHistoryKey, setActiveHistoryKey] = useState('document')
   const [kbPickerOpen, setKbPickerOpen] = useState(false)
-  const [outlineOpen, setOutlineOpen] = useState(false)
-  const [templatePopoverOpen, setTemplatePopoverOpen] = useState(false)
-  const [knowledgeOverlayOpen, setKnowledgeOverlayOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [statusMessage, setStatusMessage] = useState('')
   const [statusTone, setStatusTone] = useState<'ok' | 'err' | undefined>()
@@ -368,10 +379,17 @@ export default function DocumentWorkbench() {
   const [hydrated, setHydrated] = useState(false)
   const [lastAiSnapshot, setLastAiSnapshot] = useState<AiEditSnapshot | null>(null)
   const [recentAiChange, setRecentAiChange] = useState<RecentAiChange | null>(null)
+  // Command undo stack: most-recent operation first
+  const [commandUndoStack, setCommandUndoStack] = useState<DocumentPatchOperation[]>([])
+  // Last command operation result — shown in the AI panel
+  const [lastCommandOp, setLastCommandOp] = useState<DocumentPatchOperation | null>(null)
 
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
   const importDocxInputRef = useRef<HTMLInputElement | null>(null)
   const canvasRef = useRef<DocumentEditorCanvasHandle | null>(null)
+  const outlinePanelRef = useRef<HTMLElement | null>(null)
+  const templatePanelRef = useRef<HTMLElement | null>(null)
+  const knowledgePanelRef = useRef<HTMLElement | null>(null)
 
   useEffect(() => {
     let disposed = false
@@ -552,15 +570,17 @@ export default function DocumentWorkbench() {
   }, [appendHistory, lastAiSnapshot])
 
   const syncEditorStateFromTaskResult = useCallback((nextResult: DocumentTaskResult, savedAt?: string) => {
-    const nextState = createEditableStateFromTaskResult({
-      documentId: nextResult.documentId,
-      artifactId: nextResult.artifactId,
-      exportUrl: nextResult.exportUrl,
-      engine: nextResult.engine,
-      fallbackFrom: nextResult.fallbackFrom,
-      fallbackReason: nextResult.fallbackReason,
-      document: nextResult.document,
-    })
+      const nextState = createEditableStateFromTaskResult({
+        documentId: nextResult.documentId,
+        artifactId: nextResult.artifactId,
+        exportUrl: nextResult.exportUrl,
+        engine: nextResult.engine,
+        fallbackFrom: nextResult.fallbackFrom,
+        fallbackReason: nextResult.fallbackReason,
+        document: nextResult.document,
+        html: nextResult.html,
+        documentArtifact: nextResult.documentArtifact,
+      })
     setEditorState({
       ...nextState,
       selectedSectionId: nextState.selectedSectionId,
@@ -634,16 +654,18 @@ export default function DocumentWorkbench() {
         outline: latestState.outline,
       })
       const savedAt = response.savedAt || new Date().toISOString()
-      setEditorState((prev) => ({
-        ...latestState,
-        dirty: false,
-        saving: false,
-        lastSavedAt: savedAt,
-        artifactId: response.artifactId || response.artifact?.id || prev.artifactId,
-        exportUrl: response.exportUrl || prev.exportUrl,
-        documentDraft: response.document || latestState.documentDraft,
-        outline: response.outline || latestState.outline,
-      }))
+        setEditorState((prev) => ({
+          ...latestState,
+          dirty: false,
+          saving: false,
+          lastSavedAt: savedAt,
+          artifactId: response.artifactId || response.artifact?.id || prev.artifactId,
+          exportUrl: response.exportUrl || prev.exportUrl,
+          html: response.html || latestState.html,
+          documentArtifact: response.documentArtifact || latestState.documentArtifact,
+          documentDraft: response.document || latestState.documentDraft,
+          outline: response.outline || latestState.outline,
+        }))
       if (response.filename) setArtifactFilename(response.filename)
       setStatusMessage('已保存，DOCX 已更新')
       setStatusTone('ok')
@@ -876,6 +898,9 @@ export default function DocumentWorkbench() {
     setEditorState((prev) => ({
       ...prev,
       selectedSectionId: sectionId,
+      selectedBlockId: `${sectionId}-heading`,
+      selectedBlockRole: 'heading',
+      selectedBlockText: prev.documentDraft?.sections.find((section) => section.id === sectionId)?.title || '',
       selectedText: '',
         selectionRange: { sectionId, sectionTitle: prev.documentDraft?.sections.find((section) => section.id === sectionId)?.title, text: '' },
     }))
@@ -902,12 +927,18 @@ export default function DocumentWorkbench() {
 
   const handleCanvasSelectionChange = useCallback((payload: {
     selectedSectionId: string | null
+    selectedBlockId: string | null
+    selectedBlockRole?: string
+    selectedBlockText?: string
     selectedText: string
     selectionRange?: EditableDocumentState['selectionRange']
   }) => {
     setEditorState((prev) => ({
       ...prev,
       selectedSectionId: payload.selectedSectionId || prev.selectedSectionId,
+      selectedBlockId: payload.selectedBlockId || prev.selectedBlockId,
+      selectedBlockRole: payload.selectedBlockRole,
+      selectedBlockText: payload.selectedBlockText,
       selectedText: payload.selectedText,
       selectionRange: payload.selectionRange,
     }))
@@ -1042,6 +1073,213 @@ export default function DocumentWorkbench() {
     }
   }, [appendHistory, captureAiSnapshot, editorState, markSectionModified, selectedSection])
 
+  const handleInsertCitation = useCallback((reference: DocumentReference) => {
+    if (!editorState.selectedBlockId) {
+      setStatusMessage('请先把光标放到要插入引用的位置')
+      setStatusTone('err')
+      return
+    }
+    const applied = canvasRef.current?.insertCitation({
+      citationId: `citation-${Date.now()}`,
+      refId: reference.id,
+      sourceId: reference.sourceId,
+      label: reference.label,
+      renderMode: 'inline',
+    })
+    if (!applied?.applied) {
+      setStatusMessage('未能插入引用，请先选中文本或定位光标')
+      setStatusTone('err')
+      return
+    }
+    setEditorState((prev) => ({
+      ...updateEditableStateFromHtml(prev, applied.html),
+      selectedSectionId: applied.affectedSectionId || prev.selectedSectionId,
+      dirty: true,
+    }))
+    setStatusMessage(`已插入引用：${reference.label}`)
+    setStatusTone('ok')
+  }, [editorState.selectedBlockId])
+
+  /**
+   * handleCommandSubmit — routes natural-language instructions through the
+   * DocumentCommandEngine before falling back to the legacy AI submit path.
+   *
+   * Returns true if the command was handled (caller should NOT fall through).
+   * Returns false if the command engine didn't recognise the instruction.
+   */
+  const handleCommandSubmit = useCallback(async (instruction: string): Promise<boolean> => {
+    const parsed = parseDocumentCommand(instruction)
+
+    // Unknown intent or very low confidence — let the caller handle it
+    if (parsed.intent === 'unknown' && parsed.confidence < 0.4) return false
+
+    const canonicalData = editorState.documentArtifact?.canonicalData || null
+    const resolved = resolveCommandTarget({
+      descriptor: parsed.target,
+      canonicalData,
+      selectedBlockId: editorState.selectedBlockId,
+      selectedSectionId: editorState.selectedSectionId,
+    })
+
+    if (resolved.ambiguous) {
+      setStatusMessage(`目标不明确：${resolved.label}。请先选中文字或点击目标段落。`)
+      setStatusTone('err')
+      appendHistory(
+        activeHistoryKey.startsWith('section:') ? 'section' : 'document',
+        editorState.selectedSectionId,
+        { role: 'assistant', text: `⚠️ 目标不明确：${resolved.label}` },
+      )
+      return true
+    }
+
+    if (isFormatIntent(parsed.intent)) {
+      // ── Format operation (no AI) ──────────────────────────────────────────
+      const formatOp = buildFormatOp(parsed.intent, resolved.blockIds)
+      const result = canvasRef.current?.applyFormatOp(formatOp)
+      if (!result?.applied) {
+        setStatusMessage(`格式操作未能应用，目标块未找到（${resolved.label}）`)
+        setStatusTone('err')
+        return true
+      }
+      const op = buildOperationRecord({
+        operationClass: 'format',
+        intent: parsed.intent,
+        blockIds: result.affectedBlockIds,
+        aiCalled: false,
+        summary: `已对「${resolved.label}」执行：${parsed.intent}`,
+        previousTexts: result.previousTexts,
+      })
+      setCommandUndoStack((prev) => [op, ...prev.slice(0, 19)])
+      setLastCommandOp(op)
+      setEditorState((prev) => ({ ...updateEditableStateFromHtml(prev, result.html), dirty: true }))
+      const histScope = parsed.target.kind.startsWith('section') ? 'section' : 'document'
+      appendHistory(histScope, editorState.selectedSectionId, {
+        role: 'assistant',
+        text: `✅ 格式操作「${parsed.intent}」已应用至 ${resolved.label}（${result.affectedBlockIds.length} 个块）。无需 AI 调用。`,
+      })
+      setStatusMessage(`格式已更新：${resolved.label}`)
+      setStatusTone('ok')
+      return true
+    }
+
+    if (isSemanticIntent(parsed.intent)) {
+      // ── Semantic operation (AI needed) ────────────────────────────────────
+      if (!editorState.documentId) {
+        // No document yet — let caller handle generation
+        return false
+      }
+
+      // Get the text of the first resolved block as the selection text
+      const targetBlock = resolved.blocks[0]
+      if (!targetBlock || !('text' in targetBlock) || !targetBlock.text?.trim()) {
+        // Fall through to the normal AI path with the full instruction
+        return false
+      }
+
+      const aiInstruction = parsed.aiInstruction || instruction
+      setBusy(true)
+      const histScope = parsed.target.kind.startsWith('section') ? 'section' : 'selection'
+      appendHistory(histScope, editorState.selectedSectionId, { role: 'user', text: instruction })
+      captureAiSnapshot(histScope, editorState.selectedSectionId)
+      try {
+        const response = await editDocumentSelection({
+          documentId: editorState.documentId,
+          instruction: aiInstruction,
+          selectedText: targetBlock.text.trim(),
+          selectionContext: {
+            sectionId: targetBlock.sectionId ?? undefined,
+            documentTitle: editorState.title,
+            sectionTitle: targetBlock.sectionTitle,
+          },
+          document: editorState.documentDraft,
+          html: editorState.html,
+        })
+
+        // Apply as replace_block_text for the primary block
+        const applied = canvasRef.current?.applyPatch({
+          type: 'replace_block_text',
+          blockId: targetBlock.id,
+          replacementText: response.updatedText,
+        })
+        if (!applied?.applied) {
+          throw new Error('块级补丁未能应用，请重新定位光标后再试。')
+        }
+
+        const previousTexts: Record<string, string> = { [targetBlock.id]: targetBlock.text }
+        const op = buildOperationRecord({
+          operationClass: 'semantic',
+          intent: parsed.intent,
+          blockIds: [targetBlock.id],
+          aiCalled: true,
+          summary: `已对「${resolved.label}」执行：${parsed.intent}（AI）`,
+          previousTexts,
+        })
+        setCommandUndoStack((prev) => [op, ...prev.slice(0, 19)])
+        setLastCommandOp(op)
+        setEditorState((prev) => ({
+          ...updateEditableStateFromHtml(prev, applied.html),
+          selectedSectionId: applied.affectedSectionId || prev.selectedSectionId,
+          selectedBlockId: prev.selectedBlockId,
+          selectedBlockRole: prev.selectedBlockRole,
+          selectedBlockText: response.updatedText,
+          dirty: true,
+        }))
+        markSectionModified(applied.affectedSectionId || editorState.selectedSectionId)
+        setRecentAiChange({ token: Date.now(), scope: histScope, sectionId: applied.affectedSectionId || editorState.selectedSectionId })
+        appendHistory(histScope, editorState.selectedSectionId, {
+          role: 'assistant',
+          text: `✅ ${parsed.intent} 已完成（AI 调用）。作用范围：${resolved.label}。\n${response.message || ''}`,
+        })
+        setStatusMessage(`已执行：${parsed.intent} — ${resolved.label}`)
+        setStatusTone('ok')
+      } catch (error) {
+        const message = error instanceof Error ? error.message : `${parsed.intent} 操作失败`
+        appendHistory(histScope, editorState.selectedSectionId, { role: 'assistant', text: message })
+        setStatusMessage(message)
+        setStatusTone('err')
+      } finally {
+        setBusy(false)
+      }
+      return true
+    }
+
+    return false
+  }, [activeHistoryKey, appendHistory, captureAiSnapshot, editorState, markSectionModified])
+
+  /** Undo the most recent command-engine operation */
+  const handleUndoLastCommand = useCallback(() => {
+    const op = commandUndoStack[0]
+    if (!op) return
+    const root = canvasRef.current
+    if (!root) return
+
+    if (op.operationClass === 'format' && op.previousTexts && Object.keys(op.previousTexts).length > 0) {
+      // We need access to the raw DOM node — canvas exposes getHtml which calls ensureDocumentScaffold
+      // For undo we apply a replace_document with the restored HTML per-block via undoFormatOp
+      const currentHtml = canvasRef.current?.getHtml() || editorState.html
+      // Build a temp div to apply undoFormatOp
+      const tmp = document.createElement('div')
+      tmp.innerHTML = currentHtml
+      const restoredHtml = undoFormatOp(tmp, op.previousTexts)
+      const applied = canvasRef.current?.applyPatch({ type: 'replace_document', html: restoredHtml })
+      if (applied?.applied) {
+        setEditorState((prev) => ({ ...updateEditableStateFromHtml(prev, applied.html), dirty: true }))
+      }
+    } else if (op.operationClass === 'semantic' && op.previousTexts) {
+      // Restore each block's previous text
+      for (const [blockId, text] of Object.entries(op.previousTexts)) {
+        canvasRef.current?.applyPatch({ type: 'replace_block_text', blockId, replacementText: text })
+      }
+      const restored = canvasRef.current?.getHtml() || editorState.html
+      setEditorState((prev) => ({ ...updateEditableStateFromHtml(prev, restored), dirty: true }))
+    }
+
+    setCommandUndoStack((prev) => prev.slice(1))
+    setLastCommandOp(commandUndoStack[1] || null)
+    setStatusMessage('已撤销上一次指令操作')
+    setStatusTone('ok')
+  }, [commandUndoStack, editorState.html])
+
   async function runAiSubmit(instruction: string, scope: DocumentAiScope) {
     if (!editorState.documentId || !editorState.documentDraft) {
       setStatusMessage('请先生成文稿')
@@ -1111,6 +1349,68 @@ export default function DocumentWorkbench() {
       return
     }
 
+    const canRewriteCurrentBlock = Boolean(
+      selectedSection
+      && editorState.selectedBlockId
+      && editorState.selectedBlockText?.trim()
+      && ['paragraph', 'quote', 'list-item'].includes(editorState.selectedBlockRole || ''),
+    )
+    if (canRewriteCurrentBlock && selectedSection) {
+      appendHistory('section', selectedSection.id, { role: 'user', text: instruction })
+      setActiveHistoryKey(documentHistoryKey('section', selectedSection.id))
+      captureAiSnapshot('section', selectedSection.id)
+      setBusy(true)
+      try {
+        const response = await editDocumentSelection({
+          documentId: editorState.documentId,
+          instruction,
+          selectedText: editorState.selectedBlockText!.trim(),
+          selectionContext: {
+            sectionId: selectedSection.id,
+            documentTitle: editorState.title,
+            sectionTitle: selectedSection.title,
+          },
+          document: editorState.documentDraft,
+          html: editorState.html,
+        })
+        const applied = canvasRef.current?.applyPatch({
+          type: 'replace_block_text',
+          blockId: editorState.selectedBlockId!,
+          replacementText: response.updatedText,
+        })
+        if (!applied?.applied) {
+          throw new Error('未能把块级补丁应用到当前文稿，请重新定位光标后再试。')
+        }
+        setEditorState((prev) => ({
+          ...updateEditableStateFromHtml(prev, applied.html),
+          selectedSectionId: applied.affectedSectionId || prev.selectedSectionId,
+          selectedBlockId: prev.selectedBlockId,
+          selectedBlockRole: prev.selectedBlockRole,
+          selectedBlockText: response.updatedText,
+          selectedText: '',
+          selectionRange: undefined,
+          dirty: true,
+        }))
+        markSectionModified(applied.affectedSectionId || selectedSection.id)
+        setRecentAiChange({
+          token: Date.now(),
+          scope: 'section',
+          sectionId: applied.affectedSectionId || selectedSection.id,
+        })
+        appendHistory('section', selectedSection.id, { role: 'assistant', text: '已按当前 block 更新内容。' })
+        setStatusMessage('已按当前 block 更新内容')
+        setStatusTone('ok')
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '块级改写失败'
+        appendHistory('section', selectedSection.id, { role: 'assistant', text: message })
+        setStatusMessage(message)
+        setStatusTone('err')
+      } finally {
+        setBusy(false)
+      }
+      return
+    }
+
     if (!selectedSection) {
       setStatusMessage('请先选择章节')
       setStatusTone('err')
@@ -1149,6 +1449,8 @@ export default function DocumentWorkbench() {
         exportUrl: response.exportUrl,
         filename: response.filename,
         document: response.document,
+        html: response.html,
+        documentArtifact: response.documentArtifact,
         outline: response.outline,
         templateId: template?.id,
         templateLabel: template?.label,
@@ -1246,18 +1548,28 @@ export default function DocumentWorkbench() {
       setStatusTone('err')
       return
     }
+    // Try command engine first when there is an existing document
     if (editorState.documentId) {
+      const handled = await handleCommandSubmit(prompt)
+      if (handled) {
+        setGenerationPrompt('')
+        return
+      }
+      // Fall through to legacy path
       if (editorState.selectedText.trim()) {
         await handleAiSubmit(prompt, 'selection')
+        setGenerationPrompt('')
         return
       }
       if (editorState.selectedSectionId) {
         await handleAiSubmit(prompt, 'section')
+        setGenerationPrompt('')
         return
       }
     }
     await handleGenerate(prompt)
-  }, [editorState.documentId, editorState.selectedSectionId, editorState.selectedText, generationPrompt, handleAiSubmit, handleGenerate])
+    setGenerationPrompt('')
+  }, [editorState.documentId, editorState.selectedSectionId, editorState.selectedText, generationPrompt, handleAiSubmit, handleCommandSubmit, handleGenerate])
 
   return (
     <Shell data-testid="document-workbench">
@@ -1270,9 +1582,9 @@ export default function DocumentWorkbench() {
         saving={editorState.saving}
         lastSavedAt={editorState.lastSavedAt || null}
         exportError={exportError}
-        onOpenOutline={() => setOutlineOpen((v) => !v)}
-        onOpenTemplate={() => setTemplatePopoverOpen((v) => !v)}
-        onOpenKnowledge={() => setKnowledgeOverlayOpen((v) => !v)}
+        onOpenOutline={() => outlinePanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+        onOpenTemplate={() => templatePanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+        onOpenKnowledge={() => knowledgePanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
         onImportDocx={handleImportDocx}
         onDownloadDocx={() => void handleDownloadDocx()}
         onExportPdf={handleExportPdf}
@@ -1285,67 +1597,56 @@ export default function DocumentWorkbench() {
       />
 
       <Body>
-        {/* Outline drawer — slides in from left */}
-        {outlineOpen && (
-          <>
-            <OverlayBackdrop onClick={() => setOutlineOpen(false)} />
-            <OutlineDrawerPanel>
+        <LeftPane>
+          <SidebarCard>
+            <SidebarSection ref={outlinePanelRef}>
+              <SidebarHeader>文档目录</SidebarHeader>
               <DocumentOutlinePanel
                 outline={editorState.outline}
                 selectedSectionId={editorState.selectedSectionId}
                 modifiedSectionIds={modifiedSectionIds}
                 onSelectSection={(sectionId) => {
                   handleSelectSection(sectionId)
-                  setOutlineOpen(false)
                 }}
               />
-            </OutlineDrawerPanel>
-          </>
-        )}
+            </SidebarSection>
+          </SidebarCard>
 
-        {/* Template popover */}
-        {templatePopoverOpen && (
-          <>
-            <OverlayBackdrop onClick={() => setTemplatePopoverOpen(false)} />
-            <FloatingPanel style={{ left: 200 }}>
+          <SidebarCard>
+            <SidebarSection ref={templatePanelRef}>
+              <SidebarHeader>模板</SidebarHeader>
               <DocumentTemplatePanel
                 templates={templates}
                 selectedTemplateId={selectedTemplateId}
                 onSelectTemplate={(id) => {
                   setSelectedTemplateId(id)
-                  setTemplatePopoverOpen(false)
                 }}
               />
-            </FloatingPanel>
-          </>
-        )}
+            </SidebarSection>
+          </SidebarCard>
 
-        {/* Knowledge overlay */}
-        {knowledgeOverlayOpen && (
-          <>
-            <OverlayBackdrop onClick={() => setKnowledgeOverlayOpen(false)} />
-            <FloatingPanel style={{ left: 340 }}>
+          <SidebarCard>
+            <SidebarSection ref={knowledgePanelRef}>
+              <SidebarHeader>知识库与附件</SidebarHeader>
               <DocumentKnowledgePanel
                 departments={departments}
                 selectedKnowledgeIds={workspaceKbIds}
                 onOpenKnowledgePicker={() => {
-                  setKnowledgeOverlayOpen(false)
                   setKbPickerOpen(true)
                 }}
               />
-              <div style={{ marginTop: 12 }}>
+              <div style={{ padding: '0 16px 16px' }}>
                 <DocumentAttachmentPanel
                   attachments={attachments}
                   onAddAttachment={() => {
-                    setKnowledgeOverlayOpen(false)
                     handleUploadAttachment()
                   }}
                   onRemoveAttachment={(fileId) => setAttachments((prev) => prev.filter((item) => item.id !== fileId))}
                 />
               </div>
-            </FloatingPanel>
-          </>
-        )}
+            </SidebarSection>
+          </SidebarCard>
+        </LeftPane>
 
         <CenterPane>
           <DocumentEditorCanvas
@@ -1361,17 +1662,30 @@ export default function DocumentWorkbench() {
         <DocumentAiEditPanel
           selectedSectionId={editorState.selectedSectionId}
           selectedSectionLabel={selectedSection?.title || '未选择章节'}
+          selectedBlockId={editorState.selectedBlockId}
+          selectedBlockRole={editorState.selectedBlockRole}
+          selectedBlockText={editorState.selectedBlockText}
           selectedText={editorState.selectedText}
           selectionLength={editorState.selectedText.trim().length}
           history={currentHistory}
+          references={editorState.documentArtifact?.references}
+          citations={editorState.documentArtifact?.citations}
           busy={busy}
           disabled={false}
           hasDocument={Boolean(editorState.documentId)}
           canUndoLastAiEdit={Boolean(lastAiSnapshot)}
+          lastCommandOp={lastCommandOp}
+          canUndoLastCommand={commandUndoStack.length > 0}
           onUndoLastAiEdit={handleUndoLastAiEdit}
+          onUndoLastCommand={handleUndoLastCommand}
           onContinueWriting={handleContinueWriting}
+          onInsertCitation={handleInsertCitation}
           onGenerate={handleAiPanelGenerate}
-          onSubmit={handleAiSubmit}
+          onSubmit={async (instruction, scope) => {
+            // Try command engine first, fall back to legacy scope-based submit
+            const handled = await handleCommandSubmit(instruction)
+            if (!handled) await handleAiSubmit(instruction, scope)
+          }}
         />
       </Body>
 

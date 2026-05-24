@@ -1,4 +1,5 @@
 import type { DocumentEditPatch } from './documentWorkbenchApi'
+import type { FormatOp } from './documentCommandEngine'
 
 export interface ApplyDocumentEditPatchResult {
   applied: boolean
@@ -16,12 +17,20 @@ function buildFragmentFromPatch(root: HTMLElement, patch: DocumentEditPatch): Do
     fragment.appendChild(mark)
     return fragment
   }
+  if (patch.type === 'replace_block_text') {
+    const fragment = root.ownerDocument.createDocumentFragment()
+    const textNode = root.ownerDocument.createTextNode(patch.replacementText)
+    fragment.appendChild(textNode)
+    return fragment
+  }
   const html = patch.type === 'replace_document'
     ? patch.html
     : patch.type === 'replace_section'
       ? patch.html || ''
       : patch.type === 'insert_at_cursor'
         ? patch.html || patch.text || ''
+        : patch.type === 'insert_citation'
+          ? patch.html
         : ''
   return range.createContextualFragment(html)
 }
@@ -92,6 +101,20 @@ function replaceDocument(root: HTMLElement, patch: Extract<DocumentEditPatch, { 
   }
 }
 
+function replaceBlockText(root: HTMLElement, patch: Extract<DocumentEditPatch, { type: 'replace_block_text' }>): ApplyDocumentEditPatchResult {
+  const block = root.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(patch.blockId)}"]`)
+  if (!block) return { applied: false, html: root.innerHTML, affectedSectionId: null }
+  if (block.tagName.toLowerCase() === 'table' || block.matches('.document-table-block')) {
+    return { applied: false, html: root.innerHTML, affectedSectionId: block.closest<HTMLElement>('[data-section-id]')?.dataset.sectionId || null }
+  }
+  block.textContent = patch.replacementText
+  return {
+    applied: true,
+    html: root.innerHTML,
+    affectedSectionId: block.closest<HTMLElement>('[data-section-id]')?.dataset.sectionId || null,
+  }
+}
+
 function appendSection(root: HTMLElement, patch: Extract<DocumentEditPatch, { type: 'append_section' }>): ApplyDocumentEditPatchResult {
   const article = root.querySelector('[data-document-root="true"]') || root
   const section = root.ownerDocument.createElement('section')
@@ -129,6 +152,17 @@ function insertAtCursor(root: HTMLElement, patch: Extract<DocumentEditPatch, { t
   }
 }
 
+function insertCitation(root: HTMLElement, patch: Extract<DocumentEditPatch, { type: 'insert_citation' }>, range?: Range | null): ApplyDocumentEditPatchResult {
+  if (!isRangeInsideRoot(root, range)) return { applied: false, html: root.innerHTML, affectedSectionId: null }
+  range.deleteContents()
+  range.insertNode(buildFragmentFromPatch(root, patch))
+  return {
+    applied: true,
+    html: root.innerHTML,
+    affectedSectionId: range.startContainer.parentElement?.closest<HTMLElement>('[data-section-id]')?.dataset.sectionId || null,
+  }
+}
+
 export function applyDocumentEditPatch(input: {
   root: HTMLElement
   patch: DocumentEditPatch
@@ -148,11 +182,87 @@ export function applyDocumentEditPatch(input: {
     }
     return replaceSelectionByText(root, patch, selectedSectionId)
   }
+  if (patch.type === 'replace_block_text') {
+    return replaceBlockText(root, patch)
+  }
   if (patch.type === 'insert_at_cursor') {
     return insertAtCursor(root, patch, savedRange)
+  }
+  if (patch.type === 'insert_citation') {
+    return insertCitation(root, patch, savedRange)
   }
   if (patch.type === 'append_section') {
     return appendSection(root, patch)
   }
   return { applied: false, html: root.innerHTML, affectedSectionId: null }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// applyFormatOp — deterministic format operations, no AI needed
+// ──────────────────────────────────────────────────────────────────────────────
+
+export interface ApplyFormatOpResult {
+  applied: boolean
+  html: string
+  affectedBlockIds: string[]
+  previousTexts: Record<string, string>
+}
+
+export function applyFormatOp(root: HTMLElement, op: FormatOp): ApplyFormatOpResult {
+  const affectedBlockIds: string[] = []
+  const previousTexts: Record<string, string> = {}
+
+  for (const blockId of op.blockIds) {
+    const block = root.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(blockId)}"]`)
+    if (!block) continue
+    previousTexts[blockId] = block.innerHTML
+    affectedBlockIds.push(blockId)
+
+    if (op.type === 'highlight') {
+      block.style.backgroundColor = 'rgba(253, 224, 71, 0.35)'
+      block.dataset.formatHighlight = 'true'
+    } else if (op.type === 'bold') {
+      block.style.fontWeight = block.style.fontWeight === 'bold' ? '' : 'bold'
+      block.dataset.formatBold = 'true'
+    } else if (op.type === 'italic') {
+      block.style.fontStyle = block.style.fontStyle === 'italic' ? '' : 'italic'
+      block.dataset.formatItalic = 'true'
+    } else if (op.type === 'center') {
+      block.style.textAlign = block.style.textAlign === 'center' ? '' : 'center'
+      block.dataset.formatCenter = 'true'
+    } else if (op.type === 'clear_formatting') {
+      block.removeAttribute('style')
+      delete block.dataset.formatHighlight
+      delete block.dataset.formatBold
+      delete block.dataset.formatItalic
+      delete block.dataset.formatCenter
+    }
+  }
+
+  return {
+    applied: affectedBlockIds.length > 0,
+    html: root.innerHTML,
+    affectedBlockIds,
+    previousTexts,
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// undoFormatOp — restore previous innerHTML for each affected block
+// ──────────────────────────────────────────────────────────────────────────────
+
+export function undoFormatOp(root: HTMLElement, previousTexts: Record<string, string>): string {
+  for (const [blockId, html] of Object.entries(previousTexts)) {
+    const block = root.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(blockId)}"]`)
+    if (block) {
+      block.innerHTML = html
+      // clean format flags
+      delete block.dataset.formatHighlight
+      delete block.dataset.formatBold
+      delete block.dataset.formatItalic
+      delete block.dataset.formatCenter
+      block.removeAttribute('style')
+    }
+  }
+  return root.innerHTML
 }

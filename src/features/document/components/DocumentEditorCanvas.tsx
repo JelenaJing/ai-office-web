@@ -7,12 +7,13 @@ import {
   type ClipboardEvent,
 } from 'react'
 import styled from 'styled-components'
-import { applyDocumentEditPatch, type ApplyDocumentEditPatchResult } from '../services/documentPatchApplier'
+import { applyDocumentEditPatch, applyFormatOp, type ApplyDocumentEditPatchResult, type ApplyFormatOpResult } from '../services/documentPatchApplier'
 import type {
   DocumentEditPatch,
   DocumentSelectionRange,
   EditableDocumentState,
 } from '../services/documentWorkbenchApi'
+import type { FormatOp } from '../services/documentCommandEngine'
 import { buildSelectionContextFromOffsets } from '../services/documentDraftTransforms'
 
 const DEFAULT_SECTION_ID = 'section-main'
@@ -226,6 +227,28 @@ const EditableRoot = styled.div`
     font-weight: 800;
   }
 
+  figure[data-block-type="image"] {
+    margin: 18px 0;
+    display: grid;
+    gap: 8px;
+    justify-items: center;
+  }
+
+  figure[data-block-type="image"] img {
+    display: block;
+    max-width: 100%;
+    max-height: 420px;
+    border-radius: 10px;
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+  }
+
+  figure[data-block-type="image"] figcaption {
+    font-size: 13px;
+    line-height: 1.6;
+    color: #60758a;
+    text-align: center;
+  }
+
   mark[data-ai-change="true"] {
     padding: 0 2px;
     border-radius: 4px;
@@ -237,6 +260,8 @@ const EditableRoot = styled.div`
 type ToolbarAction =
   | { label: string; kind: 'exec'; command: string; value?: string }
   | { label: string; kind: 'clear' }
+  | { label: string; kind: 'insert'; html: string }
+  | { label: string; kind: 'image' }
 
 const TOOLBAR_ACTIONS: ToolbarAction[] = [
   { label: '撤销', kind: 'exec', command: 'undo' },
@@ -247,6 +272,22 @@ const TOOLBAR_ACTIONS: ToolbarAction[] = [
   { label: '斜体', kind: 'exec', command: 'italic' },
   { label: '项目符号', kind: 'exec', command: 'insertUnorderedList' },
   { label: '编号列表', kind: 'exec', command: 'insertOrderedList' },
+  { label: '引用', kind: 'insert', html: '<blockquote data-block-type="quote"><p>请输入引用内容</p></blockquote><p><br /></p>' },
+  {
+    label: '表格',
+    kind: 'insert',
+    html: [
+      '<div data-block-type="table" class="document-table-block">',
+      '<div class="document-table-title">表格标题</div>',
+      '<table><tbody>',
+      '<tr><th>列 1</th><th>列 2</th></tr>',
+      '<tr><td>内容 1</td><td>内容 2</td></tr>',
+      '</tbody></table>',
+      '</div>',
+      '<p><br /></p>',
+    ].join(''),
+  },
+  { label: '图片', kind: 'image' },
   { label: '插入分隔线', kind: 'exec', command: 'insertHorizontalRule' },
   { label: '清空文档', kind: 'clear' },
 ]
@@ -273,13 +314,24 @@ const ALLOWED_PASTE_TAGS = new Set([
   'th',
   'td',
   'hr',
+  'figure',
+  'figcaption',
+  'img',
 ])
 
 export interface DocumentEditorCanvasHandle {
   scrollToSection: (sectionId: string) => void
   applyPatch: (patch: DocumentEditPatch) => ApplyDocumentEditPatchResult
+  applyFormatOp: (op: FormatOp) => ApplyFormatOpResult
   getHtml: () => string
   focusBody: () => void
+  insertCitation: (input: {
+    citationId: string
+    refId: string
+    sourceId?: string
+    label: string
+    renderMode?: 'inline' | 'badge' | 'footnote'
+  }) => ApplyDocumentEditPatchResult
 }
 
 interface DocumentEditorCanvasProps {
@@ -293,6 +345,9 @@ interface DocumentEditorCanvasProps {
   onHtmlChange: (html: string, activeSectionId: string | null) => void
   onSelectionChange: (payload: {
     selectedSectionId: string | null
+    selectedBlockId: string | null
+    selectedBlockRole?: string
+    selectedBlockText?: string
     selectedText: string
     selectionRange?: DocumentSelectionRange
   }) => void
@@ -303,14 +358,15 @@ function escapeHtml(value: string): string {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
 }
 
 function buildBlankEditorHtml(): string {
   return [
     '<article data-document-root="true" data-document-mode="draft">',
-    '<h1 data-document-title="true"></h1>',
+    '<h1 data-document-title="true" data-block-id="document-title" data-role="title"></h1>',
     `<section data-section-id="${DEFAULT_SECTION_ID}" data-section-title="正文" data-section-level="1" data-document-body="true">`,
-    '<p><br /></p>',
+    '<p data-block-id="body-paragraph-1" data-role="paragraph"><br /></p>',
     '</section>',
     '</article>',
   ].join('')
@@ -327,6 +383,11 @@ function unwrapElement(element: HTMLElement) {
 
 function clearTransientHighlights(root: HTMLElement) {
   root.querySelectorAll<HTMLElement>('mark[data-ai-change="true"]').forEach((element) => unwrapElement(element))
+}
+
+function safeImageSrc(value: string): string {
+  const normalized = String(value || '').trim()
+  return /^(https?:|data:image\/|blob:)/iu.test(normalized) ? normalized : ''
 }
 
 function sanitizePastedHtml(input: string): string {
@@ -352,8 +413,14 @@ function sanitizePastedHtml(input: string): string {
     }
     if (tag === 'br') return '<br />'
     if (tag === 'hr') return '<hr />'
+    if (tag === 'img') {
+      const src = safeImageSrc(node.getAttribute('src') || '')
+      if (!src) return ''
+      return `<img src="${escapeHtml(src)}" alt="${escapeHtml(node.getAttribute('alt') || '')}" />`
+    }
     const content = Array.from(node.childNodes).map(serialize).join('')
-    if (!content.trim()) return ''
+    if (!content.trim() && tag !== 'figure') return ''
+    if (tag === 'figure') return `<figure data-block-type="image">${content}</figure>`
     return `<${tag}>${content}</${tag}>`
   }
   return Array.from(doc.body.childNodes)
@@ -449,7 +516,89 @@ function ensureDocumentScaffold(root: HTMLElement) {
   return { article, title, bodySection }
 }
 
+function blockTypeForNode(node: HTMLElement): string {
+  const explicit = node.dataset.blockType?.trim()
+  if (explicit) return explicit
+  const tag = node.tagName.toLowerCase()
+  if (tag === 'p') return 'paragraph'
+  if (tag === 'ul') return 'bulleted-list'
+  if (tag === 'ol') return 'numbered-list'
+  if (tag === 'li') return 'list-item'
+  if (tag === 'blockquote') return 'quote'
+  if (tag === 'figure' || tag === 'img') return 'image'
+  if (tag === 'table' || node.matches('.document-table-block')) return 'table'
+  if (tag === 'hr') return 'divider'
+  return tag
+}
+
+function normalizeSectionBlocks(section: HTMLElement) {
+  Array.from(section.childNodes).forEach((node) => {
+    if (node.nodeType === Node.TEXT_NODE && node.textContent?.trim()) {
+      const paragraph = document.createElement('p')
+      paragraph.textContent = node.textContent
+      section.replaceChild(paragraph, node)
+      return
+    }
+    if (!(node instanceof HTMLElement)) return
+    if (node.matches('[data-section-heading="true"], h2, h3, h4')) return
+    if (node.tagName.toLowerCase() === 'div' && !node.matches('.document-table-block, [data-block-type="table"]')) {
+      const paragraph = document.createElement('p')
+      paragraph.innerHTML = node.innerHTML
+      section.replaceChild(paragraph, node)
+    }
+  })
+}
+
+function ensureCanonicalBlockMetadata(root: HTMLElement) {
+  const scaffold = ensureDocumentScaffold(root)
+  if (!scaffold) return
+  scaffold.title.dataset.blockId = scaffold.title.dataset.blockId || 'document-title'
+  scaffold.title.dataset.role = scaffold.title.dataset.role || 'title'
+  root.querySelectorAll<HTMLElement>('section[data-section-id]').forEach((section) => {
+    normalizeSectionBlocks(section)
+    const sectionId = section.dataset.sectionId || DEFAULT_SECTION_ID
+    const heading = section.querySelector<HTMLElement>(':scope > [data-section-heading="true"], :scope > h2, :scope > h3, :scope > h4')
+    if (heading) {
+      heading.dataset.sectionHeading = 'true'
+      heading.dataset.blockId = heading.dataset.blockId || `${sectionId}-heading`
+      heading.dataset.role = heading.dataset.role || 'heading'
+      section.dataset.sectionTitle = heading.textContent?.trim() || section.dataset.sectionTitle || '正文'
+      section.dataset.sectionLevel = section.dataset.sectionLevel || (heading.tagName === 'H3' ? '2' : '1')
+    }
+    Array.from(section.children).forEach((child, index) => {
+      if (!(child instanceof HTMLElement)) return
+      if (child.matches('[data-section-heading="true"], h2, h3, h4')) return
+      child.dataset.blockType = blockTypeForNode(child)
+      child.dataset.blockId = child.dataset.blockId || `${sectionId}-${child.dataset.blockType}-${index + 1}`
+      child.dataset.role = child.dataset.role || (
+        child.dataset.blockType === 'bulleted-list' || child.dataset.blockType === 'numbered-list'
+          ? 'list'
+          : child.dataset.blockType || child.tagName.toLowerCase()
+      )
+      if (child.tagName.toLowerCase() === 'figure') {
+        child.dataset.blockType = 'image'
+        child.dataset.role = 'image'
+      }
+      if (child.matches('.document-table-block')) {
+        child.dataset.blockType = 'table'
+        child.dataset.role = 'table'
+      }
+      if (child.matches('ul, ol')) {
+        const listKind = child.tagName.toLowerCase() === 'ol' ? 'numbered' : 'bulleted'
+        Array.from(child.querySelectorAll<HTMLElement>(':scope > li')).forEach((item, itemIndex) => {
+          item.dataset.blockType = 'list-item'
+          item.dataset.blockId = item.dataset.blockId || `${child.dataset.blockId || `${sectionId}-${child.dataset.blockType}-${index + 1}`}-item-${itemIndex + 1}`
+          item.dataset.role = 'list-item'
+          item.dataset.listKind = item.dataset.listKind || listKind
+        })
+      }
+    })
+  })
+}
+
 function bodyText(section: HTMLElement): string {
+  const hasNonTextBlock = section.querySelector('img, table, hr, ul, ol, blockquote, figure')
+  if (hasNonTextBlock) return 'non-empty'
   const content = Array.from(section.childNodes)
     .filter((node) => !(node instanceof HTMLElement && node.matches('[data-section-heading="true"], h2, h3, h4')))
     .map((node) => node.textContent || '')
@@ -460,6 +609,7 @@ function bodyText(section: HTMLElement): string {
 function updatePlaceholderState(root: HTMLElement) {
   const scaffold = ensureDocumentScaffold(root)
   if (!scaffold) return
+  ensureCanonicalBlockMetadata(root)
   scaffold.title.dataset.placeholderVisible = scaffold.title.textContent?.trim() ? 'false' : 'true'
   scaffold.bodySection.dataset.placeholderVisible = bodyText(scaffold.bodySection) ? 'false' : 'true'
 }
@@ -565,14 +715,20 @@ export const DocumentEditorCanvas = forwardRef<DocumentEditorCanvasHandle, Docum
             : selection?.anchorNode?.parentElement
       ) || null
       const sectionElement = anchorElement?.closest<HTMLElement>('section[data-section-id]') || null
+      const blockElement = anchorElement?.closest<HTMLElement>('[data-block-id]') || null
 
       if (!selection || selection.rangeCount === 0 || !root.contains(selection.anchorNode)) {
         onSelectionChange({
           selectedSectionId: sectionElement?.dataset.sectionId || null,
+          selectedBlockId: blockElement?.dataset.blockId || null,
+          selectedBlockRole: blockElement?.dataset.role || blockElement?.dataset.blockType,
+          selectedBlockText: blockElement?.textContent?.trim() || '',
           selectedText: '',
           selectionRange: sectionElement
             ? {
                 sectionId: sectionElement.dataset.sectionId,
+                blockId: blockElement?.dataset.blockId,
+                blockRole: blockElement?.dataset.role || blockElement?.dataset.blockType,
                 sectionTitle: sectionElement.dataset.sectionTitle,
                 text: '',
               }
@@ -588,6 +744,9 @@ export const DocumentEditorCanvas = forwardRef<DocumentEditorCanvasHandle, Docum
       if (!sectionElement) {
         onSelectionChange({
           selectedSectionId: null,
+          selectedBlockId: blockElement?.dataset.blockId || null,
+          selectedBlockRole: blockElement?.dataset.role || blockElement?.dataset.blockType,
+          selectedBlockText: blockElement?.textContent?.trim() || '',
           selectedText,
           selectionRange: selectedText ? { text: selectedText } : undefined,
         })
@@ -641,6 +800,29 @@ export const DocumentEditorCanvas = forwardRef<DocumentEditorCanvasHandle, Docum
         placeCaret(root, false)
         return
       }
+      if (action.kind === 'insert') {
+        insertHtmlAtSelection(root, action.html)
+        handleInput()
+        return
+      }
+      if (action.kind === 'image') {
+        const src = window.prompt('请输入图片 URL（支持 https://、blob: 或 data:image/...）')
+        const safeSrc = safeImageSrc(src || '')
+        if (!safeSrc) return
+        const caption = window.prompt('请输入图片说明（可留空）') || ''
+        insertHtmlAtSelection(
+          root,
+          [
+            '<figure data-block-type="image">',
+            `<img src="${escapeHtml(safeSrc)}" alt="${escapeHtml(caption || '图片')}" />`,
+            caption ? `<figcaption>${escapeHtml(caption)}</figcaption>` : '',
+            '</figure>',
+            '<p><br /></p>',
+          ].join(''),
+        )
+        handleInput()
+        return
+      }
       root.focus()
       document.execCommand(action.command, false, action.value)
       handleInput()
@@ -679,10 +861,13 @@ export const DocumentEditorCanvas = forwardRef<DocumentEditorCanvasHandle, Docum
           ensureDocumentScaffold(root)
           updatePlaceholderState(root)
           onHtmlChange(result.html, result.affectedSectionId)
-          onSelectionChange({
-            selectedSectionId: result.affectedSectionId,
-            selectedText: '',
-            selectionRange: result.affectedSectionId
+        onSelectionChange({
+          selectedSectionId: result.affectedSectionId,
+          selectedBlockId: null,
+          selectedBlockRole: undefined,
+          selectedBlockText: '',
+          selectedText: '',
+          selectionRange: result.affectedSectionId
               ? { sectionId: result.affectedSectionId, text: '' }
               : undefined,
           })
@@ -695,10 +880,54 @@ export const DocumentEditorCanvas = forwardRef<DocumentEditorCanvasHandle, Docum
         ensureDocumentScaffold(root)
         return root.innerHTML || buildBlankEditorHtml()
       },
+      applyFormatOp(op: FormatOp) {
+        const root = rootRef.current
+        if (!root) return { applied: false, html: '', affectedBlockIds: [], previousTexts: {} }
+        const result = applyFormatOp(root, op)
+        if (result.applied) {
+          ensureDocumentScaffold(root)
+          updatePlaceholderState(root)
+          onHtmlChange(result.html, state.selectedSectionId)
+        }
+        return result
+      },
       focusBody() {
         const root = rootRef.current
         if (!root) return
         placeCaret(root, Boolean(bodyText(ensureDocumentScaffold(root)?.bodySection || root)))
+      },
+      insertCitation(input) {
+        const root = rootRef.current
+        if (!root) return { applied: false, html: '', affectedSectionId: null }
+        const result = applyDocumentEditPatch({
+          root,
+          patch: {
+            type: 'insert_citation',
+            html: `<span class="doc-citation" data-citation-id="${escapeHtml(input.citationId)}" data-ref-id="${escapeHtml(input.refId)}" data-source-id="${escapeHtml(input.sourceId || '')}" data-render-mode="${escapeHtml(input.renderMode || 'inline')}">[${escapeHtml(input.label)}]</span>`,
+            citation: {
+              id: input.citationId,
+              refId: input.refId,
+              blockId: '',
+              text: input.label,
+              renderMode: input.renderMode || 'inline',
+              sourceId: input.sourceId,
+            },
+            reference: {
+              id: input.refId,
+              label: input.label,
+              kind: 'knowledge_base',
+              sourceId: input.sourceId || input.refId,
+            },
+          },
+          savedRange: savedRangeRef.current,
+          selectedSectionId: state.selectedSectionId,
+        })
+        if (result.applied) {
+          ensureDocumentScaffold(root)
+          updatePlaceholderState(root)
+          onHtmlChange(result.html, result.affectedSectionId)
+        }
+        return result
       },
     }), [emitSelection, onHtmlChange, onSelectionChange, state.selectedSectionId])
 
