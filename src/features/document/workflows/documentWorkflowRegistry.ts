@@ -659,3 +659,23 @@ export function getWorkflowsByCategory(): Array<{
 
   return groups
 }
+
+const FORMAL_TEMPLATE_PROMPT_RE = /模板|拜访函|贺信|正式格式/
+
+export function shouldPromptFormalTemplateChoice(
+  workflowId: DocumentWorkflowId,
+  instruction: string,
+): boolean {
+  return workflowId === 'formal_template' || FORMAL_TEMPLATE_PROMPT_RE.test(instruction.trim())
+}
+
+export function resolveFormalTemplatePresetFromInstruction(
+  instruction: string,
+): 'visit_letter' | 'congratulation_letter' | 'generic_template_rewrite' | null {
+  const text = instruction.trim()
+  if (!text) return null
+  if (/拜访函/.test(text)) return 'visit_letter'
+  if (/贺信|祝贺/.test(text)) return 'congratulation_letter'
+  if (/通用模板/.test(text)) return 'generic_template_rewrite'
+  return null
+}

@@ -1,7 +1,7 @@
 /**
  * routes/auth.ts — Auth routes: transparent proxy to AccountCenter
  *
- * ACCOUNT_CENTER_URL is read from the environment (default 10.20.5.61:13100).
+ * ACCOUNT_CENTER_BASE_URL is read from the environment (default 127.0.0.1:13100).
  * The browser never talks to AccountCenter directly — all requests go through
  * this Express server, which forwards them with the appropriate headers.
  *
@@ -23,6 +23,10 @@ import { verifyWebAuthToken } from '../features/auth/services/webAuthToken'
 import { deriveCandidateMailboxes } from '../features/email/services/emailProviderPresets'
 import { accountFromCandidate, autoBindMailboxForUser } from '../features/email/services/mailboxAutoBinder'
 import { testMailboxCredential } from '../features/email/services/emailMvp'
+import {
+  ACCOUNT_CENTER_UNREACHABLE_MESSAGE,
+  buildAccountCenterUrl,
+} from '../lib/accountCenter'
 
 const router = Router()
 
@@ -46,16 +50,12 @@ interface AccountCenterAttemptError {
   message: string
 }
 
-function getAcUrl(): string {
-  return process.env.ACCOUNT_CENTER_URL ?? 'http://10.20.5.61:13100'
-}
-
 async function requestAccountCenterLogin(username: string, password: string): Promise<{
   ok: boolean
   status: number
   data: AccountCenterLoginResponse
 }> {
-  const upstream = await fetch(`${getAcUrl()}/api/auth/login`, {
+  const upstream = await fetch(buildAccountCenterUrl('/api/auth/login'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, password }),
@@ -95,7 +95,7 @@ async function proxyAC(
   path: string,
   body?: unknown,
 ): Promise<void> {
-  const url = `${getAcUrl()}${path}`
+  const url = buildAccountCenterUrl(path)
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
 
   const auth = req.headers['authorization']
@@ -121,7 +121,7 @@ async function proxyAC(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error(`[auth-proxy] ${method} ${path} →`, msg)
-    res.status(502).json({ message: `AccountCenter 不可达：${msg}` })
+    res.status(502).json({ message: ACCOUNT_CENTER_UNREACHABLE_MESSAGE })
   }
 }
 
@@ -166,7 +166,7 @@ router.post('/login', async (req, res) => {
     } catch (err) {
       accountCenterErrors.push({
         login,
-        message: `AccountCenter 不可达：${err instanceof Error ? err.message : String(err)}`,
+        message: ACCOUNT_CENTER_UNREACHABLE_MESSAGE,
       })
     }
   }

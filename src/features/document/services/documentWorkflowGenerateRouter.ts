@@ -1,10 +1,11 @@
-import { runDocumentGenerate, type DocumentGenerateInput, type DocumentSkillResult } from './documentEditSkills'
+import type { DocumentGenerateInput } from './documentEditSkills'
 import {
   runPaperWorkflowGenerate,
   type PaperWorkflowGenerateResult,
   type PaperWorkflowMode,
 } from './paperWorkflowAdapter'
 import { runFormalTemplateGenerate, type FormalTemplateGenerateResult } from './formalTemplateAdapter'
+import { runDocumentSkill } from './documentSkillAdapter'
 
 export interface WorkflowGenerateInput extends DocumentGenerateInput {
   signal?: AbortSignal
@@ -31,7 +32,7 @@ export interface WorkflowGenerateResult {
     steps: string[]
     partialMissing?: string[]
   }
-  documentResult?: DocumentSkillResult
+  patch?: unknown
   formalTemplateResult?: FormalTemplateGenerateResult
 }
 
@@ -99,17 +100,37 @@ export async function runWorkflowGenerate(input: WorkflowGenerateInput): Promise
     }
   }
 
-  const result = await runDocumentGenerate(input)
-  if (!result.success) {
-    throw new Error(result.error || '生成失败')
-  }
+  const result = await runDocumentSkill({
+    instruction: input.instruction,
+    currentHtml: '',
+    currentText: input.currentDocumentText ?? input.documentText ?? '',
+    selectedText: input.selectedText,
+    workflowId: input.workflowId ?? 'general',
+    knowledgeBaseIds: input.knowledgeBaseIds ?? [],
+    fileIds: input.fileIds ?? [],
+    workspacePath: input.workspacePath,
+  }, {
+    operation: 'generate',
+    title: input.title,
+    language: input.language,
+    outputLanguage: input.outputLanguage,
+    extraContext: input.extraContext,
+    generationMode: input.generationMode,
+    templateDocument: input.templateDocument ?? undefined,
+    documentTypePreset: input.documentTypePreset ?? undefined,
+    templateSkillId: input.templateSkillId,
+    templateManifest: input.templateManifest,
+    workflowLabel: input.workflowLabel,
+    workflowFields: input.workflowFields,
+    outlineSections: input.outlineSections,
+    documentKind: input.documentKind,
+  })
 
   return {
     mode: 'document',
-    html: result.data?.html,
-    markdown: result.data?.markdown,
-    artifact: result.artifact,
-    message: '初稿已生成',
-    documentResult: result,
+    html: result.html,
+    markdown: result.markdown,
+    message: result.message || '初稿已生成',
+    patch: result.patch,
   }
 }

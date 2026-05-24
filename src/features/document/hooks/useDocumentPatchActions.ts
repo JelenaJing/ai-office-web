@@ -5,13 +5,13 @@ import { useCallback, useState } from 'react'
 import {
   applyWebDocumentPatch,
   patchResultMessage,
-  runDocumentEdit,
 } from '../services/documentEditSkills'
-import type { DocumentEditInput, DocumentTypePresetPayload } from '../services/documentEditSkills'
+import type { DocumentTypePresetPayload } from '../services/documentEditSkills'
 import type { A4EditorHandle } from '../components/A4RichTextEditor'
 import type { WebDocumentSkillManifest } from '../webDocumentSkillTypes'
 import type { WebDocumentSession } from '../webDocumentTypes'
 import type { DocumentEditMode, WebDocumentPatch } from '../webDocumentPatchTypes'
+import { runDocumentSkill } from '../services/documentSkillAdapter'
 
 export interface UseDocumentPatchActionsOptions {
   editorRef: React.RefObject<A4EditorHandle | null>
@@ -61,6 +61,43 @@ export function useDocumentPatchActions(
   const [undoHtml, setUndoHtml] = useState<string | null>(null)
   const [lastMessage, setLastMessage] = useState('')
   const [lastMessageTone, setLastMessageTone] = useState<'ok' | 'err' | undefined>()
+
+  const toPatch = useCallback((value: unknown): WebDocumentPatch | null => {
+    if (!value || typeof value !== 'object') return null
+    const record = value as Record<string, unknown>
+    const type = record.type
+    if (typeof type !== 'string') return null
+    if (type === 'replace_document' && typeof record.html === 'string') {
+      return {
+        type: 'replace_document',
+        html: record.html,
+        markdown: typeof record.markdown === 'string' ? record.markdown : undefined,
+      }
+    }
+    if (type === 'replace_selection' && typeof record.html === 'string') {
+      return {
+        type: 'replace_selection',
+        html: record.html,
+        markdown: typeof record.markdown === 'string' ? record.markdown : undefined,
+      }
+    }
+    if (type === 'insert_at_cursor' && typeof record.html === 'string') {
+      return {
+        type: 'insert_at_cursor',
+        html: record.html,
+        markdown: typeof record.markdown === 'string' ? record.markdown : undefined,
+      }
+    }
+    if (type === 'append_section' && typeof record.html === 'string') {
+      return {
+        type: 'append_section',
+        title: typeof record.title === 'string' ? record.title : undefined,
+        html: record.html,
+        markdown: typeof record.markdown === 'string' ? record.markdown : undefined,
+      }
+    }
+    return null
+  }, [])
 
   const syncSessionHtml = useCallback(
     (html: string, markdown?: string) => {
@@ -131,32 +168,31 @@ export function useDocumentPatchActions(
       setLastMessage(statusWhileRunning)
       setLastMessageTone(undefined)
 
-      const editInput: DocumentEditInput = {
-        instruction,
-        mode,
-        workspacePath,
-        title,
-        selectedText: ed?.getSelectionText(),
-        selectedHtml: ed?.getSelectionHtml(),
-        documentText: ed?.getText(),
-        documentHtml: ed?.getHtml(),
-        templateSkillId: template.id,
-        templateManifest: template as unknown as Record<string, unknown>,
-        knowledgeBaseIds,
-        fileIds,
-        documentTypePreset: documentTypePreset ?? undefined,
-      }
-
       try {
-        const result = await runDocumentEdit(editInput)
-        if (!result.success) {
-          const msg = result.error || '编辑失败'
-          setLastMessage(msg)
-          setLastMessageTone('err')
-          onStatus?.(msg, 'err')
-          return false
-        }
-        const patch = result.data?.patch
+        const output = await runDocumentSkill({
+          instruction,
+          currentHtml: ed?.getHtml() ?? '',
+          currentText: ed?.getText() ?? '',
+          selectedText: ed?.getSelectionText(),
+          workflowId: documentTypePreset?.id || 'general',
+          knowledgeBaseIds,
+          fileIds,
+          workspacePath,
+        }, {
+          operation: 'edit',
+          editMode: mode,
+          title,
+          documentTypePreset: documentTypePreset ?? undefined,
+          templateSkillId: template.id,
+          templateManifest: template as unknown as Record<string, unknown>,
+        })
+        const patch = output.mode === 'replace_document'
+          ? {
+            type: 'replace_document',
+            html: output.html ?? '',
+            markdown: output.markdown,
+          } satisfies WebDocumentPatch
+          : toPatch(output.patch)
         if (!patch) {
           const msg = '未返回文稿补丁'
           setLastMessage(msg)
@@ -164,7 +200,7 @@ export function useDocumentPatchActions(
           onStatus?.(msg, 'err')
           return false
         }
-        applyPatchWithUndo(patch)
+        applyPatchWithUndo(patch, output.message ?? patchResultMessage(patch))
         return true
       } catch (e) {
         const msg = e instanceof Error ? e.message : '编辑失败'
@@ -186,6 +222,7 @@ export function useDocumentPatchActions(
       documentTypePreset,
       applyPatchWithUndo,
       onStatus,
+      toPatch,
     ],
   )
 

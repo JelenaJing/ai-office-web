@@ -13,8 +13,8 @@
 /**
  * Returns the AccountCenter base URL for the current runtime:
  *
- * - Web mode  (shim installed) → '' (empty string)
- *   Requests resolve to the same origin.  Vite dev-server proxies /api/* to
+ * - Web mode / plain browser → '' (empty string)
+ *   Requests resolve to the same origin. Vite dev-server proxies /api/* to
  *   localhost:3001, which then forwards to the real AccountCenter.
  *
  * - Desktop mode (real Electron API) → 'http://10.20.5.61:13100'
@@ -24,12 +24,21 @@
  * so that the shim installed by web-main.tsx is visible by the time any
  * network request fires.
  */
+const IS_WEB_RUNTIME_BUILD = import.meta.env.VITE_RUNTIME_TARGET === 'web'
+
 export function getAccountCenterBaseUrl(): string {
+  if (IS_WEB_RUNTIME_BUILD) {
+    return ''
+  }
   if (typeof window !== 'undefined') {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const api = (window as any).electronAPI
     if (api && api.__isWebShim) {
       // Running in a browser with the web shim — use same-origin proxy
+      return ''
+    }
+    if (!api && /^https?:$/.test(window.location.protocol)) {
+      // Running in a plain browser without Electron preload — still use same-origin proxy
       return ''
     }
   }

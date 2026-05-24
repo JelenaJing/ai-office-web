@@ -171,6 +171,9 @@ export default defineConfig(({ mode }) => {
   const nanobananaKey = resolveKey(imgProviders.nanobanana?.builtinKeyEnvNames ?? [], env, 'nanobananaApiKey', localBuiltinKeys)
 
   return {
+    define: {
+      'import.meta.env.VITE_RUNTIME_TARGET': JSON.stringify('electron'),
+    },
     build: {
       rollupOptions: {
         output: {

@@ -23,33 +23,29 @@ import type {
   ChatStatus,
 } from '../types/personDirectory'
 
-/* ---------- 内部工具 ---------- */
-
-function serverLabel(): string {
-  const url = getAccountCenterBaseUrl()
-  if (!url && typeof window !== 'undefined') return window.location.host
-  try {
-    return new URL(url).host
-  } catch {
-    return url || 'API server'
-  }
-}
+const ACCOUNT_CENTER_LOGIN_PATH = '/api/account-center/login'
+const WEB_BACKEND_UNREACHABLE_MESSAGE = '无法连接 AI Office Web 后端'
+const ACCOUNT_CENTER_UNREACHABLE_MESSAGE = '无法连接内部账号中心，请检查 13100 服务'
 
 /** fetch + AbortController timeout wrapper */
 async function fetchWithTimeout(
   url: string,
   options: RequestInit,
   timeoutMs: number,
+  usesSameOriginProxy: boolean,
 ): Promise<Response> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
     return await fetch(url, { ...options, signal: controller.signal })
   } catch (err) {
+    const message = usesSameOriginProxy
+      ? WEB_BACKEND_UNREACHABLE_MESSAGE
+      : ACCOUNT_CENTER_UNREACHABLE_MESSAGE
     if ((err as Error).name === 'AbortError') {
-      throw Object.assign(new Error(`请求超时（${timeoutMs / 1000}s），无法连接 AccountCenter：${serverLabel()}`), { code: 'REQUEST_TIMEOUT' })
+      throw Object.assign(new Error(message), { code: 'REQUEST_TIMEOUT' })
     }
-    throw new Error(`无法连接内部账号中心：${serverLabel()}`)
+    throw new Error(message)
   } finally {
     clearTimeout(timer)
   }
@@ -64,7 +60,8 @@ async function request<T>(
   // is visible and returns '' for same-origin routing.
   const baseUrl = getAccountCenterBaseUrl()
   const url = `${baseUrl}${path}`
-  const isLoginEndpoint = path === '/api/auth/login'
+  const isLoginEndpoint = path === ACCOUNT_CENTER_LOGIN_PATH
+  const usesSameOriginProxy = !baseUrl
   let response: Response
   try {
     response = await fetchWithTimeout(
@@ -77,16 +74,15 @@ async function request<T>(
         ...options,
       },
       timeoutMs,
+      usesSameOriginProxy,
     )
   } catch (err) {
-    if (isLoginEndpoint && !baseUrl) {
-      throw new Error('无法连接 Web 后端，请确认 server 3001 已启动')
-    }
     throw err
   }
 
   if (!response.ok) {
     let errorBody: {
+      code?: string
       message?: string
       error?: string
       accountCenterErrors?: Array<{ login: string; status?: number; message: string }>
@@ -98,21 +94,18 @@ async function request<T>(
       // ignore parse failure
     }
     const msg = errorBody.message || errorBody.error || response.statusText
+    if (errorBody.code === 'ACCOUNT_CENTER_UNREACHABLE' || response.status === 502 || msg.includes('账号中心服务不可达')) {
+      throw new Error(ACCOUNT_CENTER_UNREACHABLE_MESSAGE)
+    }
     if (isLoginEndpoint) {
-      if (response.status === 401 || response.status === 403) {
-        const candidates = errorBody.mailboxFallback?.candidates?.map((item) => {
-          const detail = item.error || item.imap || item.smtp || item.status
-          return `${item.email}（${item.provider}）：${detail}`
-        }) ?? []
-        const acErrors = errorBody.accountCenterErrors?.map((item) => `${item.login}: ${item.message}`) ?? []
-        const details = [...acErrors, ...candidates]
-        throw new Error(`${msg || '账号或密码错误'}${details.length > 0 ? `\n${details.join('\n')}` : ''}`)
+      if (response.status === 401) {
+        throw new Error('用户名或密码错误')
       }
-      if (response.status === 502 || msg.includes('AccountCenter 不可达')) {
-        throw new Error('AccountCenter 不可达')
+      if (response.status === 403) {
+        throw new Error(msg.includes('禁用') ? msg : '用户名或密码错误')
       }
       if (response.status >= 500) {
-        throw new Error('无法连接 Web 后端，请确认 server 3001 已启动')
+        throw new Error(WEB_BACKEND_UNREACHABLE_MESSAGE)
       }
     }
     if (response.status === 401) {
@@ -149,7 +142,7 @@ export interface LoginResult {
 
 /** 登录 AccountCenter，返回 token 和用户信息 */
 export async function login(username: string, password: string): Promise<LoginResult> {
-  return request<LoginResult>('/api/auth/login', {
+  return request<LoginResult>(ACCOUNT_CENTER_LOGIN_PATH, {
     method: 'POST',
     body: JSON.stringify({ username, password }),
   })

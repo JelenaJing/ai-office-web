@@ -252,7 +252,7 @@ export default function LoginGate() {
           </LoginBtn>
         </form>
 
-        <Footer>AI Office 3.0 · AccountCenter / 邮箱双重判定登录</Footer>
+        <Footer>AI Office 3.0 · AccountCenter · Web Proxy 登录</Footer>
       </Card>
     </Screen>
   )

@@ -1,24 +1,18 @@
-/**
- * AICommandBox — Word-like 文稿 AI 助手（含流式初稿、快捷操作、撤销）
- */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import styled from 'styled-components'
-import { Download, Sparkles, Square, Undo2 } from 'lucide-react'
+import { ArrowUp, Sparkles, Square } from 'lucide-react'
 import type { A4EditorHandle } from './A4RichTextEditor'
-import {
-  AI_MODE_HINT_LABELS,
-  inferDocumentEditMode,
-} from '../services/documentEditSkills'
 import { type DocumentExportFormat } from '../services/docxWebGeneration'
-import { sessionFromSkillResult } from '../services/docxWebGeneration'
 import { createDocumentTypewriter, type TypewriterController } from '../services/typewriterDocument'
 import type { WebDocumentSkillManifest } from '../webDocumentSkillTypes'
 import type { WebDocumentSession } from '../webDocumentTypes'
-import type { DocumentEditMode } from '../webDocumentPatchTypes'
+import type { DocumentEditMode, WebDocumentPatch } from '../webDocumentPatchTypes'
 import type { UseDocumentPatchActionsReturn } from '../hooks/useDocumentPatchActions'
 import {
   getWorkflow,
   getWorkflowQuickActions,
+  resolveFormalTemplatePresetFromInstruction,
+  shouldPromptFormalTemplateChoice,
   type DocumentWorkflowId,
   type WorkflowQuickAction,
 } from '../workflows/documentWorkflowRegistry'
@@ -32,82 +26,195 @@ import {
 const Panel = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 12px;
   height: 100%;
   min-height: 0;
+  border: 1px solid #dce5ef;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #f9fbfe 0%, #f4f8fc 100%);
+  overflow: hidden;
 `
 
-const AssistantCard = styled.div`
-  padding: 12px;
-  border-radius: 12px;
-  background: linear-gradient(180deg, #eff6ff 0%, #f8fafc 100%);
-  border: 1px solid #bfdbfe;
+const Header = styled.div`
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #dce5ef;
+  background: rgba(255, 255, 255, 0.82);
+`
+
+const HeaderTitle = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 800;
+  color: #1e3a5f;
+`
+
+const HeaderMeta = styled.div`
+  font-size: 11px;
+  font-weight: 700;
+  color: #607487;
+  background: #eef4fb;
+  border: 1px solid #d6e0ea;
+  border-radius: 999px;
+  padding: 4px 10px;
+`
+
+const MessagesScroll = styled.div`
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+  display: grid;
+  gap: 10px;
+
+  &::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: rgba(110, 140, 175, 0.38);
+    border-radius: 999px;
+  }
+`
+
+const MessageBubble = styled.div<{ $role: ChatMessage['role']; $pending?: boolean }>`
+  max-width: 88%;
+  justify-self: ${({ $role }) => ($role === 'user' ? 'end' : 'start')};
+  border-radius: 16px;
+  padding: 11px 14px;
+  background: ${({ $role }) => {
+    if ($role === 'user') return 'linear-gradient(180deg, #4a8cd6 0%, #3570b8 100%)'
+    if ($role === 'assistant') return '#ffffff'
+    return '#fff8ed'
+  }};
+  color: ${({ $role }) => ($role === 'user' ? '#ffffff' : $role === 'assistant' ? '#24384d' : '#8a5f1f')};
+  border: 1px solid ${({ $role }) => ($role === 'assistant' ? '#dce5ef' : $role === 'system' ? '#edd4a6' : 'transparent')};
+  box-shadow: ${({ $role }) => ($role === 'assistant' ? '0 6px 18px rgba(30, 58, 95, 0.06)' : 'none')};
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 13px;
+  line-height: 1.65;
+  opacity: ${({ $pending }) => ($pending ? 0.72 : 1)};
+`
+
+const MessageMeta = styled.div<{ $role: ChatMessage['role'] }>`
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: ${({ $role }) => ($role === 'user' ? 'rgba(255,255,255,0.78)' : $role === 'assistant' ? '#607487' : '#9a6a1f')};
+`
+
+const MessageActionRow = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+`
+
+const MessageActionButton = styled.button<{ $role: ChatMessage['role'] }>`
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid ${({ $role }) => ($role === 'assistant' ? '#c7d7ea' : '#e7c98d')};
+  background: #ffffff;
+  color: ${({ $role }) => ($role === 'assistant' ? '#2c5a8b' : '#8a5f1f')};
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+`
+
+const Composer = styled.div`
+  padding: 12px 16px 16px;
+  border-top: 1px solid #dce5ef;
+  background: rgba(255, 255, 255, 0.9);
+  display: grid;
+  gap: 10px;
+`
+
+const QuickChipRow = styled.div`
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 `
 
-const AssistantHeader = styled.div`
+const QuickChip = styled.button`
+  min-height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid #d6e0ea;
+  background: #ffffff;
+  color: #4b6278;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+`
+
+const InputShell = styled.div`
+  border: 1px solid #d6e0ea;
+  border-radius: 18px;
+  background: #ffffff;
+  box-shadow: 0 6px 18px rgba(30, 58, 95, 0.05);
+  padding: 12px 14px 10px;
+`
+
+const Input = styled.textarea`
+  width: 100%;
+  min-height: 74px;
+  max-height: 140px;
+  resize: vertical;
+  border: none;
+  background: transparent;
+  color: #304255;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  font-family: inherit;
+  outline: none;
+
+  &::placeholder {
+    color: #9aa9b7;
+  }
+`
+
+const ComposerFooter = styled.div`
+  margin-top: 8px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
 `
 
-const AssistantTitle = styled.div`
-  font-size: 14px;
-  font-weight: 700;
-  color: #0f172a;
+const FooterHint = styled.div`
+  font-size: 12px;
+  color: #607487;
+  line-height: 1.5;
 `
 
-const AssistantBadge = styled.span`
-  padding: 3px 8px;
+const SendButton = styled.button<{ $stop?: boolean }>`
+  width: 38px;
+  height: 38px;
   border-radius: 999px;
-  background: #dbeafe;
-  color: #1d4ed8;
-  font-size: 11px;
-  font-weight: 700;
-`
-
-const AssistantHint = styled.div`
-  font-size: 12px;
-  color: #334155;
-  line-height: 1.55;
-`
-
-const ModeHint = styled.div`
-  font-size: 12px;
-  color: #475569;
-  padding: 8px 10px;
-  background: #f1f5f9;
-  border-radius: 8px;
-  line-height: 1.45;
-`
-
-const SectionTitle = styled.div`
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  color: #64748b;
-  text-transform: uppercase;
-`
-
-const QuickGrid = styled.div`
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-`
-
-const QuickBtn = styled.button`
-  min-height: 38px;
-  padding: 8px 10px;
-  border-radius: 10px;
-  border: 1px solid #cbd5e1;
-  background: #fff;
-  color: #1e293b;
-  font-size: 12px;
-  font-weight: 600;
-  text-align: left;
+  border: 1px solid ${({ $stop }) => ($stop ? '#d9ba77' : '#7aa8dc')};
+  background: ${({ $stop }) => ($stop ? '#fff7e5' : 'linear-gradient(180deg, #6ba3e0 0%, #4a8cd6 100%)')};
+  color: ${({ $stop }) => ($stop ? '#8a601f' : '#ffffff')};
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: ${({ $stop }) => ($stop ? 'none' : '0 6px 16px rgba(74, 140, 214, 0.2)')};
   cursor: pointer;
 
   &:disabled {
@@ -116,126 +223,27 @@ const QuickBtn = styled.button`
   }
 `
 
-const PromptArea = styled.textarea`
-  width: 100%;
-  min-height: 120px;
-  flex: 1;
-  box-sizing: border-box;
-  padding: 12px 14px;
-  border: 1px solid #c8d8e8;
-  border-radius: 10px;
-  font-size: 14px;
-  resize: none;
-  font-family: inherit;
-  line-height: 1.6;
-  background: #fff;
-`
+type ChatActionId =
+  | 'export_docx'
+  | 'export_md'
+  | 'export_html'
+  | 'polish'
+  | 'continue'
+  | 'undo'
+  | 'select_visit_letter'
+  | 'select_congratulation_letter'
+  | 'select_generic_template'
 
-const BtnRow = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-`
-
-const CmdBtn = styled.button<{ $primary?: boolean; $danger?: boolean }>`
-  height: 34px;
-  padding: 0 12px;
-  border-radius: 8px;
-  border: 1px solid ${(p) => (p.$danger ? '#dc2626' : p.$primary ? '#2563eb' : '#94a3b8')};
-  background: ${(p) => (p.$danger ? '#fff1f2' : p.$primary ? '#2563eb' : '#fff')};
-  color: ${(p) => (p.$danger ? '#b91c1c' : p.$primary ? '#fff' : '#334155')};
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-
-  &:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
-`
-
-const ResultBox = styled.div<{ $tone: 'ok' | 'err' | 'info' }>`
-  font-size: 12px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  line-height: 1.5;
-  background: ${(p) => (
-    p.$tone === 'err' ? '#fef2f2' : p.$tone === 'ok' ? '#ecfdf5' : '#eff6ff'
-  )};
-  color: ${(p) => (
-    p.$tone === 'err' ? '#b91c1c' : p.$tone === 'ok' ? '#166534' : '#1d4ed8'
-  )};
-  border: 1px solid ${(p) => (
-    p.$tone === 'err' ? '#fecaca' : p.$tone === 'ok' ? '#bbf7d0' : '#bfdbfe'
-  )};
-`
-
-const ActionCard = styled.div`
-  padding: 12px;
-  border-radius: 12px;
-  border: 1px solid #c7f9cc;
-  background: #f0fdf4;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-`
-
-const ActionTitle = styled.div`
-  font-size: 13px;
-  font-weight: 700;
-  color: #166534;
-`
-
-const ActionBody = styled.div`
-  font-size: 12px;
-  color: #166534;
-  line-height: 1.55;
-`
-
-const ActionButtons = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-`
-
-const ActionBtn = styled.button`
-  height: 32px;
-  padding: 0 10px;
-  border-radius: 8px;
-  border: 1px solid #86efac;
-  background: #fff;
-  color: #166534;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-`
-
-type ResultTone = 'ok' | 'err' | 'info'
-
-const KbContextNote = styled.div<{ $tone: 'ok' | 'warn' }>`
-  font-size: 11px;
-  padding: 6px 10px;
-  border-radius: 6px;
-  background: ${({ $tone }) => $tone === 'warn' ? '#fef9c3' : '#f0fdf4'};
-  color: ${({ $tone }) => $tone === 'warn' ? '#92400e' : '#166534'};
-  border: 1px solid ${({ $tone }) => $tone === 'warn' ? '#fde68a' : '#bbf7d0'};
-  line-height: 1.5;
-`
-
-interface AssistantState {
-  badge: string
-  hint: string
+type ChatMessage = {
+  id: string
+  role: 'user' | 'assistant' | 'system'
+  text: string
+  createdAt: string
+  pending?: boolean
+  actions?: Array<{
+    label: string
+    action: ChatActionId
+  }>
 }
 
 export interface AICommandBoxProps {
@@ -248,12 +256,7 @@ export interface AICommandBoxProps {
   session: WebDocumentSession
   onSessionUpdate: (session: WebDocumentSession) => void
   onStatus?: (message: string, tone?: 'ok' | 'err') => void
-  /** 当前文档导出并立即下载 (顶部工具栏) */
   onExportCurrentDocument: (format: DocumentExportFormat) => Promise<void>
-  /**
-   * 可选别名 —— 生成完成卡片里的下载按钮使用此回调；
-   * 未传时自动降级到 onExportCurrentDocument。
-   */
   onExportRequest?: (format: DocumentExportFormat) => void | Promise<void>
   exportBusyFormat?: DocumentExportFormat | null
   disabled?: boolean
@@ -261,8 +264,23 @@ export interface AICommandBoxProps {
   templateDocument?: import('../services/documentEditSkills').TemplateDocumentPayload | null
   documentTypePreset?: import('../services/documentEditSkills').DocumentTypePresetPayload | null
   patchActions: UseDocumentPatchActionsReturn
-  /** Current document workflow type; controls which quick actions are shown */
   workflowId?: DocumentWorkflowId
+}
+
+function createMessage(
+  role: ChatMessage['role'],
+  text: string,
+  actions?: ChatMessage['actions'],
+  pending = false,
+): ChatMessage {
+  return {
+    id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    role,
+    text,
+    createdAt: new Date().toISOString(),
+    pending,
+    actions,
+  }
 }
 
 function buildSessionSnapshot(input: {
@@ -286,6 +304,41 @@ function buildSessionSnapshot(input: {
   }
 }
 
+function toPatch(value: unknown): WebDocumentPatch | null {
+  if (!value || typeof value !== 'object') return null
+  const record = value as Record<string, unknown>
+  if (record.type === 'replace_document' && typeof record.html === 'string') {
+    return {
+      type: 'replace_document',
+      html: record.html,
+      markdown: typeof record.markdown === 'string' ? record.markdown : undefined,
+    }
+  }
+  if (record.type === 'replace_selection' && typeof record.html === 'string') {
+    return {
+      type: 'replace_selection',
+      html: record.html,
+      markdown: typeof record.markdown === 'string' ? record.markdown : undefined,
+    }
+  }
+  if (record.type === 'insert_at_cursor' && typeof record.html === 'string') {
+    return {
+      type: 'insert_at_cursor',
+      html: record.html,
+      markdown: typeof record.markdown === 'string' ? record.markdown : undefined,
+    }
+  }
+  if (record.type === 'append_section' && typeof record.html === 'string') {
+    return {
+      type: 'append_section',
+      title: typeof record.title === 'string' ? record.title : undefined,
+      html: record.html,
+      markdown: typeof record.markdown === 'string' ? record.markdown : undefined,
+    }
+  }
+  return null
+}
+
 export function AICommandBox({
   editorRef,
   workspacePath,
@@ -305,31 +358,33 @@ export function AICommandBox({
   patchActions,
   workflowId = 'general',
 }: AICommandBoxProps) {
-  // 生成完成卡片的下载按钮优先使用 onExportRequest，否则降级到 onExportCurrentDocument
-  const handleCardExport = useCallback(
-    (format: DocumentExportFormat) => {
-      if (onExportRequest) return void onExportRequest(format)
-      return void onExportCurrentDocument(format)
-    },
-    [onExportRequest, onExportCurrentDocument],
-  )
+  const currentWorkflow = useMemo(() => getWorkflow(workflowId), [workflowId])
+  const workflowActions = useMemo(() => getWorkflowQuickActions(workflowId), [workflowId])
+
   const [instruction, setInstruction] = useState('')
   const [busy, setBusy] = useState(false)
-  const [selectionTick, setSelectionTick] = useState(0)
-  const [resultMsg, setResultMsg] = useState('')
-  const [resultTone, setResultTone] = useState<ResultTone>('info')
-  const [resultCard, setResultCard] = useState<{ title: string; body: string } | null>(null)
   const [streaming, setStreaming] = useState(false)
-  const [lastKbContext, setLastKbContext] = useState<{
-    kbCount: number; fileCount: number; hasContext: boolean; isRagEnabled: boolean
-  } | null>(null)
+  const [selectionTick, setSelectionTick] = useState(0)
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    createMessage('assistant', `我是 AI 文稿助手。当前工作流：${currentWorkflow.label}。你可以直接让我生成初稿、优化全文、继续写，或导出 Word。`),
+  ])
   const [formalTemplatePresetId, setFormalTemplatePresetId] = useState<string>('visit_letter')
   const [formalTemplatePresets, setFormalTemplatePresets] = useState<FormalTemplatePreset[]>([])
-  const [formalTemplatePresetError, setFormalTemplatePresetError] = useState<string>('')
+  const [formalTemplatePresetError, setFormalTemplatePresetError] = useState('')
+
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
+  const messagesRef = useRef<HTMLDivElement | null>(null)
+  const pendingMessageIdRef = useRef<string | null>(null)
   const streamControllerRef = useRef<TypewriterController | null>(null)
+  const contextSignatureRef = useRef<string>('')
+  const workflowSignatureRef = useRef<string>('')
+  const formalPromptSignatureRef = useRef<string>('')
 
   const readEditor = () => editorRef.current
+
+  useEffect(() => {
+    messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' })
+  }, [messages])
 
   const refreshSelectionState = useCallback(() => {
     setSelectionTick((tick) => tick + 1)
@@ -345,8 +400,86 @@ export function AICommandBox({
     }
   }, [refreshSelectionState])
 
+  const appendMessage = useCallback((role: ChatMessage['role'], text: string, actions?: ChatMessage['actions']) => {
+    setMessages((prev) => [...prev, createMessage(role, text, actions)])
+  }, [])
+
+  const upsertPendingAssistant = useCallback((text: string) => {
+    setMessages((prev) => {
+      if (pendingMessageIdRef.current) {
+        return prev.map((message) => (
+          message.id === pendingMessageIdRef.current
+            ? { ...message, text, pending: true }
+            : message
+        ))
+      }
+      const next = createMessage('assistant', text, undefined, true)
+      pendingMessageIdRef.current = next.id
+      return [...prev, next]
+    })
+  }, [])
+
+  const resolvePendingAssistant = useCallback((text: string, actions?: ChatMessage['actions']) => {
+    setMessages((prev) => {
+      if (!pendingMessageIdRef.current) {
+        return [...prev, createMessage('assistant', text, actions)]
+      }
+      const pendingId = pendingMessageIdRef.current
+      pendingMessageIdRef.current = null
+      return prev.map((message) => (
+        message.id === pendingId
+          ? { ...message, text, actions, pending: false }
+          : message
+      ))
+    })
+  }, [])
+
+  const clearPendingAssistant = useCallback(() => {
+    setMessages((prev) => prev.filter((message) => message.id !== pendingMessageIdRef.current))
+    pendingMessageIdRef.current = null
+  }, [])
+
+  const announceContext = useCallback(() => {
+    if (knowledgeBaseIds.length === 0 && fileIds.length === 0) return
+    const signature = `${knowledgeBaseIds.length}:${fileIds.length}`
+    if (contextSignatureRef.current === signature) return
+    contextSignatureRef.current = signature
+    appendMessage(
+      'system',
+      `已使用 ${knowledgeBaseIds.length} 个知识库、${fileIds.length} 个文件作为上下文。`,
+    )
+  }, [appendMessage, fileIds.length, knowledgeBaseIds.length])
+
+  const buildFollowUpActions = useCallback((): ChatMessage['actions'] => ([
+    { label: '导出 Word', action: 'export_docx' },
+    { label: '导出 Markdown', action: 'export_md' },
+    { label: '导出 HTML', action: 'export_html' },
+    { label: '继续写', action: 'continue' },
+    { label: '优化全文', action: 'polish' },
+    { label: '撤销上一次修改', action: 'undo' },
+  ]), [])
+
+  const selectedFormalTemplatePreset = useMemo(
+    () => formalTemplatePresets.find((preset) => preset.id === formalTemplatePresetId) ?? null,
+    [formalTemplatePresetId, formalTemplatePresets],
+  )
+
+  const formalPromptNeeded = shouldPromptFormalTemplateChoice(workflowId, instruction)
+
   useEffect(() => {
-    if (workflowId !== 'formal_template') return
+    const signature = `${workflowId}:${currentWorkflow.label}`
+    if (workflowSignatureRef.current === signature) return
+    workflowSignatureRef.current = signature
+    appendMessage(
+      'system',
+      workflowId === 'general'
+        ? '当前处于普通文稿模式。正文为空时会优先生成初稿；已有正文时会优先按全文编辑理解你的指令。'
+        : `当前处于「${currentWorkflow.label}」模式。你仍然可以直接对话生成、修改或导出当前文稿。`,
+    )
+  }, [appendMessage, currentWorkflow.label, workflowId])
+
+  useEffect(() => {
+    if (!formalPromptNeeded) return
     let disposed = false
     void listFormalTemplatePresets()
       .then((presets) => {
@@ -366,7 +499,50 @@ export function AICommandBox({
     return () => {
       disposed = true
     }
-  }, [workflowId])
+  }, [formalPromptNeeded, formalTemplatePresetId])
+
+  useEffect(() => {
+    if (!formalPromptNeeded) return
+    const supportedPresets = formalTemplatePresets.filter((preset) => preset.supported)
+    const signature = [
+      workflowId,
+      instruction.trim(),
+      selectedFormalTemplatePreset?.id || formalTemplatePresetId,
+      supportedPresets.map((preset) => preset.id).join(','),
+      formalTemplatePresetError,
+    ].join('|')
+    if (formalPromptSignatureRef.current === signature) return
+    formalPromptSignatureRef.current = signature
+
+    if (formalTemplatePresetError) {
+      appendMessage('system', `正式模板列表加载失败：${formalTemplatePresetError}`)
+      return
+    }
+
+    if (supportedPresets.length === 0) {
+      appendMessage('system', '正在准备正式模板选项…')
+      return
+    }
+
+    appendMessage(
+      'assistant',
+      `当前正式模板：${selectedFormalTemplatePreset?.label || '未选择'}。如需正式模板，请先确认模板类型。`,
+      [
+        { label: '使用拜访函', action: 'select_visit_letter' },
+        { label: '使用贺信', action: 'select_congratulation_letter' },
+        { label: '使用通用模板', action: 'select_generic_template' },
+      ],
+    )
+  }, [
+    appendMessage,
+    formalPromptNeeded,
+    formalTemplatePresetError,
+    formalTemplatePresetId,
+    formalTemplatePresets,
+    instruction,
+    selectedFormalTemplatePreset,
+    workflowId,
+  ])
 
   const editorState = useMemo(() => {
     void selectionTick
@@ -377,68 +553,44 @@ export function AICommandBox({
     }
   }, [selectionTick, session.html])
 
-  const modeHint = useMemo(() => {
-    const hint = inferDocumentEditMode(
-      instruction,
-      editorState.hasSelection,
-      editorState.isBodyEmpty,
-    )
-    return AI_MODE_HINT_LABELS[hint === 'generate' ? 'generate_document' : hint]
-  }, [instruction, editorState.hasSelection, editorState.isBodyEmpty])
+  const footerHint = useMemo(() => {
+    if (streaming) return '正在写入正文，可点击右侧按钮停止。'
+    if (editorState.hasSelection) return '当前有选区，AI 会优先修改选中内容。'
+    if (editorState.isBodyEmpty) return '正文为空，发送生成型指令时会优先生成初稿。'
+    return '已有正文且无选区时，会优先按全文编辑理解你的指令。'
+  }, [editorState.hasSelection, editorState.isBodyEmpty, streaming])
 
-  const assistantState = useMemo<AssistantState>(() => {
-    if (editorState.isBodyEmpty) {
-      return {
-        badge: '空文稿',
-        hint: '建议先生成初稿，AI 会把正文逐段写入编辑器，你可以随时停止并保留已生成内容。',
-      }
+  const handleExport = useCallback(async (format: DocumentExportFormat) => {
+    const labelMap: Record<DocumentExportFormat, string> = {
+      docx: 'Word',
+      markdown: 'Markdown',
+      html: 'HTML',
     }
-    if (editorState.hasSelection) {
-      return {
-        badge: '已选中内容',
-        hint: '当前更适合优化选中内容或改写这部分表达，修改后可继续全文润色。',
-      }
+    try {
+      await Promise.resolve(onExportRequest ? onExportRequest(format) : onExportCurrentDocument(format))
+      appendMessage('assistant', `已导出 ${labelMap[format]}，你可以继续修改或再次导出。`, buildFollowUpActions())
+    } catch (error) {
+      appendMessage('system', `导出 ${labelMap[format]} 失败：${error instanceof Error ? error.message : '未知错误'}`)
     }
-    return {
-      badge: '已有正文',
-      hint: '可以继续写、优化全文、改成正式语气，或在文末生成摘要和大纲。',
-    }
-  }, [editorState.hasSelection, editorState.isBodyEmpty])
-
-  const selectedFormalTemplatePreset = useMemo(
-    () => formalTemplatePresets.find((preset) => preset.id === formalTemplatePresetId) ?? null,
-    [formalTemplatePresetId, formalTemplatePresets],
-  )
-
-  const setInfo = useCallback((message: string, tone: ResultTone = 'info') => {
-    setResultMsg(message)
-    setResultTone(tone)
-  }, [])
-
-  const showSuccessCard = useCallback((titleText: string, body: string) => {
-    setResultCard({ title: titleText, body })
-    setInfo(body, 'ok')
-  }, [setInfo])
+  }, [appendMessage, buildFollowUpActions, onExportCurrentDocument, onExportRequest])
 
   const handleUndo = useCallback(() => {
+    if (!patchActions.canUndo) return
     patchActions.undoLastPatch()
-    setResultCard(null)
-    setInfo('已撤销上一次 AI 修改', 'ok')
-  }, [patchActions, setInfo])
+    appendMessage('assistant', '已撤销上一次 AI 修改。', buildFollowUpActions())
+  }, [appendMessage, buildFollowUpActions, patchActions])
 
   const stopStreaming = useCallback(() => {
+    upsertPendingAssistant('正在停止生成…')
     streamControllerRef.current?.cancel()
-  }, [])
+  }, [upsertPendingAssistant])
 
   const finishStreamingDraft = useCallback((
     base: WebDocumentSession,
     body: string,
     cancelled: boolean,
-    options?: {
-      successTitle?: string
-      successBody?: string
-      successStatus?: string
-    },
+    message: string,
+    markdown?: string,
   ) => {
     onSessionUpdate(buildSessionSnapshot({
       base,
@@ -447,49 +599,63 @@ export function AICommandBox({
       knowledgeBaseIds,
       fileIds,
       html: body,
-      markdown: base.markdown,
+      markdown,
     }))
-
-    if (cancelled) {
-      showSuccessCard('已完成：停止生成', '已停止生成，当前已写入内容已保留，可继续修改或下载。')
-      onStatus?.('已停止生成，已写入内容已保留', 'ok')
-      return
-    }
-
-    showSuccessCard(
-      options?.successTitle ?? '初稿已生成',
-      options?.successBody ?? '你可以继续修改，或直接下载当前文稿。',
+    resolvePendingAssistant(
+      cancelled
+        ? '已停止生成，当前已写入内容已保留，可继续修改或导出 Word。'
+        : message,
+      buildFollowUpActions(),
     )
-    onStatus?.(options?.successStatus ?? '初稿已生成，可继续修改或下载', 'ok')
-  }, [fileIds, knowledgeBaseIds, onSessionUpdate, onStatus, showSuccessCard, template.id, title])
+    onStatus?.(
+      cancelled ? '已停止生成，已写入内容已保留' : message,
+      'ok',
+    )
+  }, [
+    buildFollowUpActions,
+    fileIds,
+    knowledgeBaseIds,
+    onSessionUpdate,
+    onStatus,
+    resolvePendingAssistant,
+    template.id,
+    title,
+  ])
 
   const handleGenerateDraft = useCallback(async (
     promptOverride?: string,
-    options?: { paperMode?: PaperWorkflowMode; formalTemplatePresetId?: string },
+    options?: {
+      paperMode?: PaperWorkflowMode
+      formalTemplatePresetId?: string
+      workflowIdOverride?: DocumentWorkflowId
+    },
   ) => {
     const ed = readEditor()
     if (!workspacePath) {
-      setInfo('请先打开工作区', 'err')
+      appendMessage('system', '请先打开工作区。')
       onStatus?.('请先打开工作区', 'err')
       return
     }
 
     const prompt = (promptOverride ?? instruction).trim()
     if (!prompt) {
-      setInfo('请输入生成要求', 'err')
+      appendMessage('system', '请输入生成要求。')
       return
     }
 
+    const activeWorkflowId = options?.workflowIdOverride ?? workflowId
+    const activeWorkflow = getWorkflow(activeWorkflowId)
+    const isPaperWorkflow = activeWorkflowId === 'academic_paper' || activeWorkflowId === 'literature_review'
+    const isFormalTemplate = activeWorkflowId === 'formal_template'
+
+    announceContext()
     setBusy(true)
     setStreaming(false)
-    setResultCard(null)
-    const isPaperWorkflow = workflowId === 'academic_paper' || workflowId === 'literature_review'
-    const isFormalTemplate = workflowId === 'formal_template'
-    setInfo(
+    upsertPendingAssistant(
       isPaperWorkflow
-        ? workflowId === 'academic_paper'
-          ? '正在启动研究文章链路（paper workflow / research）…'
-          : '正在启动综述文章链路（paper workflow / review）…'
+        ? activeWorkflowId === 'literature_review'
+          ? '正在启动文献综述链路…'
+          : '正在启动论文链路…'
         : isFormalTemplate
         ? '正在启动正式模板链路…'
         : '正在生成初稿…',
@@ -509,291 +675,193 @@ export function AICommandBox({
         generationMode: templateDocument ? 'knowledge-template-document' : 'default',
         templateDocument: templateDocument ?? undefined,
         documentTypePreset: documentTypePreset ?? undefined,
-        workflowId,
-        workflowLabel: getWorkflow(workflowId).label,
-        outlineSections: getWorkflow(workflowId).outlineSections,
-        documentKind: workflowId,
+        workflowId: activeWorkflowId,
+        workflowLabel: activeWorkflow.label,
+        outlineSections: activeWorkflow.outlineSections,
+        documentKind: activeWorkflowId,
         paperMode: options?.paperMode,
-        formalTemplatePresetId: isFormalTemplate ? (options?.formalTemplatePresetId ?? formalTemplatePresetId) : undefined,
+        formalTemplatePresetId: isFormalTemplate
+          ? (options?.formalTemplatePresetId ?? formalTemplatePresetId)
+          : undefined,
         onStatus: (message) => {
-          setInfo(message)
+          upsertPendingAssistant(message)
           onStatus?.(message)
         },
         onProgress: ({ message }) => {
-          setInfo(message)
+          upsertPendingAssistant(message)
           onStatus?.(message)
         },
       })
 
-      let streamTargetHtml = workflowResult.html
-      let nextSession = session
-      let successTitle = '初稿已生成'
-      let successBody = '你可以继续修改，或直接下载当前文稿。'
-      let successStatus = '初稿已生成，可继续修改或下载'
-
-      if (workflowResult.mode === 'document') {
-        const result = workflowResult.documentResult
-        if (!result?.success) {
-          const msg = result?.error || '生成失败'
-          setInfo(msg, 'err')
-          onStatus?.(msg, 'err')
-          return
-        }
-
-        if (result.data?.knowledgeContext) {
-          setLastKbContext(result.data.knowledgeContext)
-        }
-
-        const patch = result.data?.patch
-        nextSession = sessionFromSkillResult(result, template, knowledgeBaseIds, fileIds) ?? session
-        streamTargetHtml = patch?.type === 'replace_document' ? patch.html : nextSession.html
-
-        if (patch && patch.type !== 'replace_document') {
-          patchActions.applyPatchWithUndo(patch)
-          setInstruction('')
-          showSuccessCard('已完成：生成初稿', '初稿已生成，可继续修改或下载。')
-          onStatus?.('初稿已生成，可继续修改或下载', 'ok')
-          refreshSelectionState()
-          return
-        }
-      } else {
-        nextSession = buildSessionSnapshot({
-          base: {
-            ...session,
-            markdown: workflowResult.markdown ?? session.markdown,
-          },
-          title,
-          templateId: template.id,
-          knowledgeBaseIds,
-          fileIds,
-          html: workflowResult.html ?? session.html,
-          markdown: workflowResult.markdown ?? session.markdown,
-        })
-        if (workflowResult.mode === 'formal_template') {
-          const partialMissing = workflowResult.diagnostics?.partialMissing ?? []
-          successTitle = '正式模板链路已完成'
-          successBody = `${selectedFormalTemplatePreset?.label || '正式模板'}已生成，结果已写入当前编辑器，可继续修改或下载。`
-          successStatus = `当前使用：${workflowResult.diagnostics?.chain || selectedFormalTemplatePreset?.runtimeLabel || '正式模板链路'}`
-          if (partialMissing.length > 0) {
-            successStatus += ` · partial：缺失 ${partialMissing.slice(0, 2).join('、')}${partialMissing.length > 2 ? ' 等' : ''}`
-          }
-        } else {
-          const partialMissing = workflowResult.diagnostics?.partialMissing ?? []
-          successTitle = workflowId === 'literature_review' ? '文献综述链路已完成' : '研究文章链路已完成'
-          successBody = workflowId === 'literature_review'
-            ? '综述文章链路已完成，结果已写入当前编辑器，可继续修改或下载。'
-            : '研究文章链路已完成，结果已写入当前编辑器，可继续修改或下载。'
-          successStatus = workflowId === 'literature_review'
-            ? '当前使用：paper workflow / review'
-            : '当前使用：paper workflow / research'
-          if (partialMissing.length > 0) {
-            successStatus += ` · partial：缺失 ${partialMissing.slice(0, 2).join('、')}${partialMissing.length > 2 ? ' 等' : ''}`
-          }
-        }
+      const patch = toPatch(workflowResult.patch)
+      if (patch && patch.type !== 'replace_document') {
+        patchActions.applyPatchWithUndo(patch)
+        setInstruction('')
+        resolvePendingAssistant(
+          workflowResult.message || '已生成初稿，你可以继续修改或导出 Word。',
+          buildFollowUpActions(),
+        )
+        refreshSelectionState()
+        return
       }
 
-      if (!streamTargetHtml || !ed) {
-        setInfo('生成完成但未返回正文', 'err')
+      const targetHtml = patch?.type === 'replace_document'
+        ? patch.html
+        : workflowResult.html
+      const targetMarkdown = patch?.type === 'replace_document'
+        ? patch.markdown
+        : workflowResult.markdown
+
+      if (!targetHtml || !ed) {
+        clearPendingAssistant()
+        appendMessage('system', '生成完成但未返回正文。')
         return
       }
 
       patchActions.captureUndoSnapshot()
       setStreaming(true)
-      if (workflowResult.mode === 'paper') {
-        setInfo(
-          workflowId === 'literature_review'
-            ? '正在生成综述正文…'
-            : '正在生成论文正文…',
-        )
-      } else if (workflowResult.mode === 'formal_template') {
-        setInfo('正在把正式模板结果写入编辑器…')
-        onStatus?.('正在把正式模板结果写入编辑器…')
-      } else {
-        setInfo('AI 正在构思…')
-        onStatus?.('AI 正在构思…')
-      }
+      upsertPendingAssistant('AI 正在写入正文…')
 
       const controller = createDocumentTypewriter({
         editorRef,
-        html: streamTargetHtml,
+        html: targetHtml,
         mode: 'replace',
         onStart: () => {
-          setInfo('AI 正在写入正文…')
+          upsertPendingAssistant('AI 正在写入正文…')
           onStatus?.('AI 正在写入正文…')
         },
         onProgress: (state) => {
-          setInfo(state.message)
+          upsertPendingAssistant(state.message)
           onStatus?.(state.message)
         },
         onError: (error) => {
-          setInfo(error.message, 'err')
+          clearPendingAssistant()
+          appendMessage('system', error.message)
           onStatus?.(error.message, 'err')
         },
       })
       streamControllerRef.current = controller
 
-      const twResult = await controller.promise
+      const typewriterResult = await controller.promise
       streamControllerRef.current = null
       setStreaming(false)
       setInstruction('')
+
+      const successMessage = workflowResult.mode === 'formal_template'
+        ? `${selectedFormalTemplatePreset?.label || '正式模板'}已生成，你可以继续修改或导出 Word。`
+        : workflowResult.mode === 'paper'
+        ? (activeWorkflowId === 'literature_review'
+          ? '文献综述已生成，你可以继续修改或导出 Word。'
+          : '论文初稿已生成，你可以继续修改或导出 Word。')
+        : (workflowResult.message || '已生成初稿，你可以继续修改或导出 Word。')
+
       finishStreamingDraft(
-        twResult.cancelled ? session : nextSession,
+        buildSessionSnapshot({
+          base: {
+            ...session,
+            markdown: targetMarkdown ?? session.markdown,
+          },
+          title,
+          templateId: template.id,
+          knowledgeBaseIds,
+          fileIds,
+          html: targetHtml,
+          markdown: targetMarkdown ?? session.markdown,
+        }),
         ed.getHtml(),
-        twResult.cancelled,
-        {
-          successTitle,
-          successBody,
-          successStatus,
-        },
+        typewriterResult.cancelled,
+        successMessage,
+        targetMarkdown ?? session.markdown,
       )
       refreshSelectionState()
     } catch (error) {
-      const msg = error instanceof Error ? error.message : '生成失败'
-      setStreaming(false)
-      setInfo(msg, 'err')
-      onStatus?.(msg, 'err')
+      clearPendingAssistant()
+      appendMessage('system', error instanceof Error ? error.message : '生成失败')
+      onStatus?.(error instanceof Error ? error.message : '生成失败', 'err')
     } finally {
       streamControllerRef.current = null
+      setStreaming(false)
       setBusy(false)
     }
   }, [
+    announceContext,
+    appendMessage,
+    buildFollowUpActions,
+    clearPendingAssistant,
     documentTypePreset,
     editorRef,
     fileIds,
     finishStreamingDraft,
+    formalTemplatePresetId,
     instruction,
     knowledgeBaseIds,
     onStatus,
     patchActions,
     refreshSelectionState,
+    resolvePendingAssistant,
+    selectedFormalTemplatePreset,
     session,
-    setInfo,
-    showSuccessCard,
     template,
     templateDocument,
     title,
+    upsertPendingAssistant,
     workflowId,
     workspacePath,
-    formalTemplatePresetId,
-    selectedFormalTemplatePreset,
   ])
 
   const executeEdit = useCallback(async (
     command: string,
     modeOverride?: DocumentEditMode,
-    successTitle = '已完成：AI 修改',
-    successBody = '文稿已更新，可继续修改或下载。',
+    successMessage = '文稿已按你的要求更新，可继续修改或导出 Word。',
   ) => {
-    const ed = readEditor()
     if (!workspacePath) {
-      setInfo('请先打开工作区', 'err')
+      appendMessage('system', '请先打开工作区。')
       onStatus?.('请先打开工作区', 'err')
       return
     }
 
     const cmd = command.trim()
     if (!cmd) {
-      setInfo('请输入 AI 指令', 'err')
+      appendMessage('system', '请输入 AI 指令。')
       return
     }
 
-    const inferred = inferDocumentEditMode(cmd, ed?.hasSelection() ?? false, ed?.isEmpty() ?? true)
-    if (inferred === 'generate') {
-      await handleGenerateDraft(cmd)
-      return
-    }
-
+    announceContext()
     setBusy(true)
-    setResultCard(null)
-    setInfo('AI 正在修改文稿…')
+    upsertPendingAssistant('AI 正在修改文稿…')
 
     try {
-      const ok = await patchActions.runAiEditAction(cmd, modeOverride ?? inferred)
+      const ok = await patchActions.runAiEditAction(cmd, modeOverride ?? 'polish_document')
       if (ok) {
         setInstruction('')
-        showSuccessCard(successTitle, successBody)
+        resolvePendingAssistant(successMessage, buildFollowUpActions())
         refreshSelectionState()
+      } else {
+        clearPendingAssistant()
       }
     } catch (error) {
-      const msg = error instanceof Error ? error.message : '编辑失败'
-      setInfo(msg, 'err')
-      onStatus?.(msg, 'err')
+      clearPendingAssistant()
+      appendMessage('system', error instanceof Error ? error.message : '编辑失败')
+      onStatus?.(error instanceof Error ? error.message : '编辑失败', 'err')
     } finally {
       setBusy(false)
     }
   }, [
-    handleGenerateDraft,
+    announceContext,
+    appendMessage,
+    buildFollowUpActions,
+    clearPendingAssistant,
     onStatus,
     patchActions,
     refreshSelectionState,
-    setInfo,
-    showSuccessCard,
+    resolvePendingAssistant,
     workspacePath,
   ])
-
-  const handleQuickAction = useCallback(async (
-    kind: 'formal_notice' | 'continue' | 'polish' | 'formal_tone' | 'outline' | 'summary',
-  ) => {
-    if (busy || disabled) return
-
-    if (kind !== 'formal_notice' && editorState.isBodyEmpty) {
-      setInfo('正文为空，请先生成初稿', 'err')
-      return
-    }
-
-    switch (kind) {
-      case 'formal_notice':
-        await handleGenerateDraft('请生成一份正式通知，包含标题、背景、工作要求、时间安排和结尾。')
-        break
-      case 'continue':
-        await executeEdit(
-          '请延续当前文稿的结构和语气继续写下去，补完整体内容。',
-          'insert_at_cursor',
-          '已完成：继续写',
-          'AI 已续写当前文稿，可继续修改或下载。',
-        )
-        break
-      case 'polish':
-        await executeEdit(
-          '请优化全文结构和语言，让表达更清晰、更像正式办公文稿。',
-          'polish_document',
-          '已完成：优化全文',
-          '全文已优化，可继续修改或下载。',
-        )
-        break
-      case 'formal_tone':
-        await executeEdit(
-          '请把全文改成正式、稳妥、适合办公场景的语气。',
-          'polish_document',
-          '已完成：改成正式语气',
-          '文稿语气已调整为更正式的表达。',
-        )
-        break
-      case 'outline':
-        await executeEdit(
-          '请在文末提取这篇文稿的大纲，使用清晰的小标题和要点列表。',
-          'insert_at_cursor',
-          '已完成：提取大纲',
-          '大纲已插入当前文稿，可继续整理或下载。',
-        )
-        break
-      case 'summary':
-        await executeEdit(
-          '请在文末补充一段简明摘要，概括全文重点和结论。',
-          'insert_at_cursor',
-          '已完成：生成摘要',
-          '摘要已插入当前文稿，可继续修改或下载。',
-        )
-        break
-      default:
-        break
-    }
-  }, [busy, disabled, editorState.isBodyEmpty, executeEdit, handleGenerateDraft, setInfo])
 
   const handleWorkflowAction = useCallback(async (qa: WorkflowQuickAction) => {
     if (busy || disabled) return
     if (qa.requiresContent && editorState.isBodyEmpty) {
-      setInfo('正文为空，请先生成初稿', 'err')
+      appendMessage('system', '正文为空，请先生成初稿。')
       return
     }
     if (qa.action === 'generate') {
@@ -801,244 +869,339 @@ export function AICommandBox({
         setFormalTemplatePresetId(qa.formalTemplatePresetId)
       }
       await handleGenerateDraft(qa.prompt, {
-        paperMode: qa.paperMode,
+        paperMode: qa.paperMode as PaperWorkflowMode | undefined,
         formalTemplatePresetId: qa.formalTemplatePresetId,
+        workflowIdOverride: workflowId,
       })
-    } else {
-      await executeEdit(
-        qa.prompt,
-        qa.mode,
-        qa.successTitle ?? '已完成：AI 修改',
-        qa.successBody ?? '文稿已更新，可继续修改或下载。',
-      )
+      return
     }
-  }, [busy, disabled, editorState.isBodyEmpty, executeEdit, handleGenerateDraft, setInfo])
+    await executeEdit(
+      qa.prompt,
+      editorState.hasSelection ? undefined : qa.mode,
+      qa.successBody ?? '文稿已更新，可继续修改或导出 Word。',
+    )
+  }, [
+    appendMessage,
+    busy,
+    disabled,
+    editorState.hasSelection,
+    editorState.isBodyEmpty,
+    executeEdit,
+    handleGenerateDraft,
+    workflowId,
+  ])
 
-  // Derive workflow-specific quick actions
-  const workflowActions = useMemo(() => getWorkflowQuickActions(workflowId), [workflowId])
-  const currentWorkflow = useMemo(() => getWorkflow(workflowId), [workflowId])
-  const supportedFormalTemplatePresets = useMemo(
-    () => formalTemplatePresets.filter((preset) => preset.supported),
-    [formalTemplatePresets],
-  )
-  const unsupportedFormalTemplatePresets = useMemo(
-    () => formalTemplatePresets.filter((preset) => !preset.supported),
-    [formalTemplatePresets],
-  )
+  const findWorkflowAction = useCallback((label: string) => {
+    return workflowActions.find((action) => action.label === label)
+  }, [workflowActions])
+
+  const runQuickChip = useCallback(async (kind: 'generate' | 'polish' | 'formal_tone' | 'export_docx') => {
+    if (busy || disabled) return
+    if (kind === 'export_docx') {
+      appendMessage('user', '导出 Word')
+      await handleExport('docx')
+      return
+    }
+    if (kind === 'generate') {
+      appendMessage('user', '生成初稿')
+      await handleGenerateDraft(instruction.trim() || currentWorkflow.defaultPrompt)
+      return
+    }
+    if (kind === 'polish') {
+      appendMessage('user', '优化全文')
+      const workflowAction = findWorkflowAction('优化全文')
+      if (workflowAction) {
+        await handleWorkflowAction(workflowAction)
+      } else {
+        await executeEdit(
+          '请优化全文结构和语言，让表达更清晰、更像正式办公文稿。',
+          editorState.hasSelection ? undefined : 'polish_document',
+          '全文已优化，可继续修改或导出 Word。',
+        )
+      }
+      return
+    }
+    appendMessage('user', '改成正式语气')
+    await executeEdit(
+      '请把全文改成正式、稳妥、适合办公场景的语气。',
+      editorState.hasSelection ? undefined : 'polish_document',
+      '文稿语气已调整为更正式的表达，可继续修改或导出 Word。',
+    )
+  }, [
+    appendMessage,
+    busy,
+    currentWorkflow.defaultPrompt,
+    disabled,
+    editorState.hasSelection,
+    executeEdit,
+    findWorkflowAction,
+    handleExport,
+    handleGenerateDraft,
+    handleWorkflowAction,
+    instruction,
+  ])
+
+  const handleMessageAction = useCallback(async (action: ChatActionId) => {
+    if (busy && !streaming) return
+    switch (action) {
+      case 'export_docx':
+        await handleExport('docx')
+        break
+      case 'export_md':
+        await handleExport('markdown')
+        break
+      case 'export_html':
+        await handleExport('html')
+        break
+      case 'polish':
+        await runQuickChip('polish')
+        break
+      case 'continue':
+        appendMessage('user', '继续写')
+        await executeEdit(
+          '请延续当前文稿的结构和语气继续写下去，补完整体内容。',
+          editorState.hasSelection ? undefined : 'insert_at_cursor',
+          '已续写当前文稿，可继续修改或导出 Word。',
+        )
+        break
+      case 'undo':
+        handleUndo()
+        break
+      case 'select_visit_letter':
+        setFormalTemplatePresetId('visit_letter')
+        appendMessage('system', '已选择正式模板：拜访函。')
+        break
+      case 'select_congratulation_letter':
+        setFormalTemplatePresetId('congratulation_letter')
+        appendMessage('system', '已选择正式模板：贺信。')
+        break
+      case 'select_generic_template':
+        setFormalTemplatePresetId('generic_template_rewrite')
+        appendMessage('system', '已选择正式模板：通用模板改写。')
+        break
+      default:
+        break
+    }
+  }, [
+    appendMessage,
+    busy,
+    editorState.hasSelection,
+    executeEdit,
+    handleExport,
+    handleUndo,
+    runQuickChip,
+    streaming,
+  ])
+
+  const dispatchInstruction = useCallback(async (rawInstruction: string) => {
+    const text = rawInstruction.trim()
+    if (!text || busy || disabled) return
+
+    appendMessage('user', text)
+    setInstruction('')
+
+    if (/导出\s*(word|docx)|下载\s*word/i.test(text)) {
+      await handleExport('docx')
+      return
+    }
+    if (/导出\s*(markdown|md)/i.test(text)) {
+      await handleExport('markdown')
+      return
+    }
+    if (/导出\s*html/i.test(text)) {
+      await handleExport('html')
+      return
+    }
+
+    const formalTemplatePreset = resolveFormalTemplatePresetFromInstruction(text)
+    if (shouldPromptFormalTemplateChoice(workflowId, text)) {
+      if (formalTemplatePreset) {
+        setFormalTemplatePresetId(formalTemplatePreset)
+        await handleGenerateDraft(text, {
+          workflowIdOverride: 'formal_template',
+          formalTemplatePresetId: formalTemplatePreset,
+        })
+        return
+      }
+      if (workflowId === 'formal_template') {
+        await handleGenerateDraft(text, { workflowIdOverride: 'formal_template' })
+        return
+      }
+      appendMessage('assistant', '这是正式模板需求。请先确认模板类型，然后我会按正式模板链路生成文稿。', [
+        { label: '使用拜访函', action: 'select_visit_letter' },
+        { label: '使用贺信', action: 'select_congratulation_letter' },
+        { label: '使用通用模板', action: 'select_generic_template' },
+      ])
+      return
+    }
+
+    const exactWorkflowAction = workflowActions.find((action) => text.includes(action.label))
+    if (exactWorkflowAction) {
+      await handleWorkflowAction(exactWorkflowAction)
+      return
+    }
+
+    if (/优化全文|全文优化|润色全文/.test(text)) {
+      await executeEdit(
+        text,
+        editorState.hasSelection ? undefined : 'polish_document',
+        '全文已优化，可继续修改或导出 Word。',
+      )
+      return
+    }
+
+    if (/继续写|续写/.test(text)) {
+      await executeEdit(
+        text,
+        editorState.hasSelection ? undefined : 'insert_at_cursor',
+        '已续写当前文稿，可继续修改或导出 Word。',
+      )
+      return
+    }
+
+    if (/正式语气|改成正式|正式一点/.test(text)) {
+      await executeEdit(
+        text,
+        editorState.hasSelection ? undefined : 'polish_document',
+        '文稿语气已调整为更正式的表达，可继续修改或导出 Word。',
+      )
+      return
+    }
+
+    if (/生成|起草|写一份|写一篇|请写|请生成/.test(text)) {
+      await handleGenerateDraft(text)
+      return
+    }
+
+    if (editorState.isBodyEmpty) {
+      await handleGenerateDraft(text)
+      return
+    }
+
+    await executeEdit(
+      text,
+      editorState.hasSelection ? undefined : 'polish_document',
+      '文稿已按你的要求更新，可继续修改或导出 Word。',
+    )
+  }, [
+    appendMessage,
+    busy,
+    disabled,
+    editorState.hasSelection,
+    editorState.isBodyEmpty,
+    executeEdit,
+    handleExport,
+    handleGenerateDraft,
+    handleWorkflowAction,
+    workflowActions,
+    workflowId,
+  ])
 
   const handleSend = useCallback(async () => {
-    await executeEdit(
-      instruction,
-      undefined,
-      '已完成：执行 AI 修改',
-      '文稿已按你的要求更新，可继续修改或下载。',
-    )
-  }, [executeEdit, instruction])
+    await dispatchInstruction(instruction)
+  }, [dispatchInstruction, instruction])
 
   return (
     <Panel data-testid="ai-command-box">
-      <AssistantCard>
-        <AssistantHeader>
-          <AssistantTitle>AI 文稿助手</AssistantTitle>
-          <AssistantBadge>{assistantState.badge}</AssistantBadge>
-        </AssistantHeader>
-        <AssistantHint>{assistantState.hint}</AssistantHint>
-        {workflowId !== 'general' && (
-          <div style={{ fontSize: 12, color: '#6366f1', fontWeight: 600, marginTop: 2 }}>
-            📄 {currentWorkflow.label}
-            {workflowId === 'academic_paper' ? ' · 当前使用：研究文章链路' : ''}
-            {workflowId === 'literature_review' ? ' · 当前使用：综述文章链路' : ''}
-            {workflowId === 'formal_template' && (
-              <span style={{ fontWeight: 600, color: '#6366f1', marginLeft: 6 }}>
-                · 当前使用：
-                {selectedFormalTemplatePreset?.runtimeKind === 'schema-first'
-                  ? ' schema-first 正式模板链路'
-                  : ' template document rewrite 链路'}
-              </span>
-            )}
-          </div>
-        )}
-      </AssistantCard>
+      <Header>
+        <HeaderTitle>
+          <Sparkles size={16} />
+          AI 文稿助手
+        </HeaderTitle>
+        <HeaderMeta>{currentWorkflow.label}</HeaderMeta>
+      </Header>
 
-      <ModeHint>{modeHint}</ModeHint>
+      <MessagesScroll ref={messagesRef}>
+        {messages.map((message) => (
+          <MessageBubble key={message.id} $role={message.role} $pending={message.pending}>
+            <MessageMeta $role={message.role}>
+              {message.role === 'user' ? '你' : message.role === 'assistant' ? 'AI 助手' : '系统'}
+            </MessageMeta>
+            {message.text}
+            {message.actions?.length ? (
+              <MessageActionRow>
+                {message.actions.map((action) => (
+                  <MessageActionButton
+                    key={`${message.id}-${action.action}-${action.label}`}
+                    type="button"
+                    $role={message.role}
+                    disabled={disabled || Boolean(exportBusyFormat)}
+                    onClick={() => void handleMessageAction(action.action)}
+                  >
+                    {action.label}
+                  </MessageActionButton>
+                ))}
+              </MessageActionRow>
+            ) : null}
+          </MessageBubble>
+        ))}
+      </MessagesScroll>
 
-      {workflowId === 'formal_template' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <SectionTitle>选择模板类型</SectionTitle>
-          <select
-            value={formalTemplatePresetId}
-            onChange={(e) => setFormalTemplatePresetId(e.target.value)}
+      <Composer>
+        <QuickChipRow>
+          <QuickChip
+            type="button"
             disabled={busy || disabled}
-            style={{
-              fontSize: 13,
-              padding: '6px 10px',
-              borderRadius: 8,
-              border: '1px solid #d1d5db',
-              background: '#fff',
-              color: '#1e293b',
-              cursor: 'pointer',
-              outline: 'none',
-            }}
+            onClick={() => void runQuickChip('generate')}
           >
-            {(formalTemplatePresets.length > 0 ? formalTemplatePresets : [
-              {
-                id: 'visit_letter',
-                label: '拜访函',
-                description: '',
-                category: 'letter',
-                templateKind: 'visit-letter',
-                runtimeKind: 'schema-first',
-                runtimeLabel: 'schema-first / visit-letter / base-replace',
-                supported: true,
-              } as FormalTemplatePreset,
-            ]).map((preset) => (
-              <option key={preset.id} value={preset.id} disabled={!preset.supported}>
-                {preset.label}{preset.supported ? '' : '（未接入）'}
-              </option>
-            ))}
-          </select>
-          <div style={{ fontSize: 11, color: '#64748b', lineHeight: 1.6 }}>
-            {selectedFormalTemplatePreset
-              ? `当前模板运行时：${selectedFormalTemplatePreset.runtimeLabel}`
-              : '正在加载正式模板列表…'}
-          </div>
-          {formalTemplatePresetError && (
-            <div style={{ fontSize: 11, color: '#b91c1c', lineHeight: 1.6 }}>
-              模板列表加载失败：{formalTemplatePresetError}
-            </div>
-          )}
-          {supportedFormalTemplatePresets.length > 0 && (
-            <div style={{ fontSize: 11, color: '#475569', lineHeight: 1.6 }}>
-              可用模板：
-              {supportedFormalTemplatePresets.map((preset) => `${preset.label}（${preset.runtimeLabel}）`).join('、')}
-            </div>
-          )}
-          {unsupportedFormalTemplatePresets.length > 0 && (
-            <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.6 }}>
-              暂不可用：
-              {unsupportedFormalTemplatePresets
-                .map((preset) => `${preset.label}（${preset.unavailableReason || '未接入'}）`)
-                .join('；')}
-            </div>
-          )}
-        </div>
-      )}
+            生成初稿
+          </QuickChip>
+          <QuickChip
+            type="button"
+            disabled={busy || disabled || (editorState.isBodyEmpty && !instruction.trim())}
+            onClick={() => void runQuickChip('polish')}
+          >
+            优化全文
+          </QuickChip>
+          <QuickChip
+            type="button"
+            disabled={busy || disabled || (editorState.isBodyEmpty && !instruction.trim())}
+            onClick={() => void runQuickChip('formal_tone')}
+          >
+            改成正式语气
+          </QuickChip>
+          <QuickChip
+            type="button"
+            disabled={busy || disabled || Boolean(exportBusyFormat)}
+            onClick={() => void runQuickChip('export_docx')}
+          >
+            导出 Word
+          </QuickChip>
+        </QuickChipRow>
 
-      <div>
-        <SectionTitle>快捷操作</SectionTitle>
-        <QuickGrid style={{ marginTop: 8 }}>
-          {workflowActions.map((qa, idx) => (
-            <QuickBtn
-              key={idx}
+        <InputShell>
+          <Input
+            ref={inputRef}
+            value={instruction}
+            onChange={(event) => setInstruction(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault()
+                void handleSend()
+              }
+            }}
+            placeholder="直接对话，例如：生成一份正式通知、优化全文、继续写、导出 Word。"
+            disabled={busy || disabled}
+          />
+          <ComposerFooter>
+            <FooterHint>{footerHint}</FooterHint>
+            <SendButton
               type="button"
-              disabled={busy || disabled || (!!qa.requiresContent && editorState.isBodyEmpty)}
-              onClick={() => void handleWorkflowAction(qa)}
-            >
-              {qa.label}
-            </QuickBtn>
-          ))}
-        </QuickGrid>
-      </div>
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0, flex: 1 }}>
-        <SectionTitle>对话式指令</SectionTitle>
-        <PromptArea
-          ref={inputRef}
-          value={instruction}
-          onChange={(e) => setInstruction(e.target.value)}
-          placeholder="告诉我你想怎么改这篇文稿，例如：改得更正式、补充背景、生成结尾。"
-          disabled={busy || disabled}
-        />
-      </div>
-
-      <BtnRow>
-        <CmdBtn $primary type="button" disabled={busy || disabled} onClick={() => void handleSend()}>
-          <Sparkles size={14} />
-          {busy && !streaming ? '执行中…' : '发送给 AI 助手'}
-        </CmdBtn>
-        {streaming ? (
-          <CmdBtn $danger type="button" disabled={disabled} onClick={stopStreaming}>
-            <Square size={14} />
-            停止生成
-          </CmdBtn>
-        ) : (
-          <CmdBtn type="button" disabled={busy || disabled} onClick={() => void handleGenerateDraft()}>
-            {busy ? '生成中…' : '生成初稿'}
-          </CmdBtn>
-        )}
-        <CmdBtn type="button" disabled={!patchActions.canUndo || busy || disabled} onClick={handleUndo}>
-          <Undo2 size={14} />
-          撤销
-        </CmdBtn>
-      </BtnRow>
-
-      {resultMsg ? <ResultBox $tone={resultTone}>{resultMsg}</ResultBox> : null}
-
-      {resultCard ? (
-        <ActionCard>
-          <ActionTitle>{resultCard.title}</ActionTitle>
-          <ActionBody>{resultCard.body}</ActionBody>
-          <ActionButtons>
-            <ActionBtn
-              type="button"
-              disabled={busy || disabled || Boolean(exportBusyFormat)}
-              onClick={() => handleCardExport('docx')}
-            >
-              <Download size={14} />
-              {exportBusyFormat === 'docx' ? '正在生成 Word…' : '下载 Word'}
-            </ActionBtn>
-            <ActionBtn
-              type="button"
-              disabled={busy || disabled || Boolean(exportBusyFormat)}
-              onClick={() => handleCardExport('markdown')}
-            >
-              <Download size={14} />
-              {exportBusyFormat === 'markdown' ? '正在生成 Markdown…' : '下载 Markdown'}
-            </ActionBtn>
-            <ActionBtn
-              type="button"
-              disabled={busy || disabled || Boolean(exportBusyFormat)}
-              onClick={() => handleCardExport('html')}
-            >
-              <Download size={14} />
-              {exportBusyFormat === 'html' ? '正在生成 HTML…' : '下载 HTML'}
-            </ActionBtn>
-            <ActionBtn
-              type="button"
-              disabled={busy || disabled}
-              onClick={() => void handleQuickAction('polish')}
-            >
-              优化全文
-            </ActionBtn>
-            <ActionBtn
-              type="button"
-              disabled={busy || disabled}
+              $stop={streaming}
+              disabled={disabled || (!streaming && !instruction.trim())}
               onClick={() => {
-                inputRef.current?.focus()
-                setResultMsg('可以继续修改当前文稿。')
-                setResultTone('info')
+                if (streaming) {
+                  stopStreaming()
+                } else {
+                  void handleSend()
+                }
               }}
             >
-              继续修改
-            </ActionBtn>
-          </ActionButtons>
-        </ActionCard>
-      ) : null}
-
-      {lastKbContext && knowledgeBaseIds.length > 0 ? (
-        lastKbContext.hasContext && lastKbContext.kbCount > 0 ? (
-          <KbContextNote $tone="ok">
-            📚 已列入知识库上下文：{lastKbContext.kbCount} 个知识库
-            {lastKbContext.fileCount > 0 ? `，共 ${lastKbContext.fileCount} 个文件` : ''}
-            {!lastKbContext.isRagEnabled ? '（目录引用，非语义检索）' : ''}
-          </KbContextNote>
-        ) : (
-          <KbContextNote $tone="warn">
-            ⚠️ 当前知识库未参与本次生成
-            {lastKbContext.fileCount === 0 ? '（知识库暂无文件）' : ''}
-          </KbContextNote>
-        )
-      ) : null}
+              {streaming ? <Square size={15} /> : <ArrowUp size={16} />}
+            </SendButton>
+          </ComposerFooter>
+        </InputShell>
+      </Composer>
     </Panel>
   )
 }

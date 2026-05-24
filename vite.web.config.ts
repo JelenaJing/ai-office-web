@@ -13,6 +13,10 @@ import path from 'node:path'
  * API Server:  http://localhost:3001 (proxied via /api/*)
  */
 export default defineConfig({
+  define: {
+    'import.meta.env.VITE_RUNTIME_TARGET': JSON.stringify('web'),
+  },
+
   plugins: [react()],
 
   resolve: {
