@@ -2,10 +2,19 @@ import { Router } from 'express'
 import { requireAccountUser } from '../../../lib/authUser'
 import { getDocumentRecord, getDocumentTask, saveDocumentRecord, updateDocumentTask, createDocumentTask } from '../services/documentTaskStore'
 import { resolveDocumentKnowledgeRefs } from '../services/documentKnowledgeRefs'
-import { editDocumentSectionWithBuiltin, runBuiltinDocumentEngine } from '../services/documentBuiltinEngine'
+import {
+  editDocumentSectionWithBuiltin,
+  editDocumentSelectionWithBuiltin,
+  runBuiltinDocumentEngine,
+} from '../services/documentBuiltinEngine'
 import { buildDocumentOutline } from '../services/documentDraft'
 import { saveDocumentDraftDocxArtifact } from '../services/documentArtifactService'
-import { editDocumentSectionWithMinimax, runMinimaxDocxWithFallback } from '../services/minimaxDocxRunner'
+import {
+  editDocumentSectionWithMinimax,
+  editDocumentSelectionWithMinimax,
+  runMinimaxDocxWithFallback,
+} from '../services/minimaxDocxRunner'
+import { resolveDocumentDraftFromPayload } from '../services/documentEditablePayload'
 import { listDocumentTemplates } from '../services/documentTemplateCatalog'
 import type { DocumentEngine, DocumentFallbackMode, DocumentKnowledgeRefInput, DocumentLanguage, DocumentType } from '../types'
 
@@ -28,6 +37,22 @@ function normalizeDocumentType(value: unknown): DocumentType {
     case 'report':
     default:
       return 'report'
+  }
+}
+
+function updateRecordFromRequest(record: NonNullable<ReturnType<typeof getDocumentRecord>>, body: Record<string, unknown>) {
+  const draft = resolveDocumentDraftFromPayload({
+    record,
+    title: body.title,
+    html: body.html,
+    documentDraft: body.documentDraft || body.document,
+    outline: body.outline,
+  })
+  return {
+    ...record,
+    title: draft.title,
+    draft,
+    updatedAt: new Date().toISOString(),
   }
 }
 
@@ -157,14 +182,15 @@ router.post('/:documentId/sections/:sectionId/edit', async (req, res) => {
   }
 
   try {
-    const nextRecord = record.engine === 'builtin'
+    const requestRecord = updateRecordFromRequest(record, (req.body || {}) as Record<string, unknown>)
+    const nextRecord = requestRecord.engine === 'builtin'
       ? await editDocumentSectionWithBuiltin({
-          record,
+          record: requestRecord,
           sectionId: req.params.sectionId,
           instruction,
         })
       : await editDocumentSectionWithMinimax({
-          record,
+          record: requestRecord,
           sectionId: req.params.sectionId,
           instruction,
         })
@@ -191,6 +217,111 @@ router.post('/:documentId/sections/:sectionId/edit', async (req, res) => {
   }
 })
 
+router.post('/:documentId/edit-selection', async (req, res) => {
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+
+  const record = getDocumentRecord(req.params.documentId)
+  if (!record || record.userId !== userId) {
+    res.status(404).json({ success: false, error: '文稿不存在或无权限访问' })
+    return
+  }
+
+  const instruction = String(req.body?.instruction || '').trim()
+  const selectedText = String(req.body?.selectedText || '').trim()
+  if (!instruction) {
+    res.status(400).json({ success: false, error: 'instruction 不能为空' })
+    return
+  }
+  if (!selectedText) {
+    res.status(400).json({ success: false, error: 'selectedText 不能为空' })
+    return
+  }
+
+  try {
+    const requestRecord = updateRecordFromRequest(record, (req.body || {}) as Record<string, unknown>)
+    const replacementText = requestRecord.engine === 'builtin'
+      ? await editDocumentSelectionWithBuiltin({
+          record: requestRecord,
+          instruction,
+          selectedText,
+          selectionContext: req.body?.selectionContext,
+        })
+      : await editDocumentSelectionWithMinimax({
+          record: requestRecord,
+          instruction,
+          selectedText,
+          selectionContext: req.body?.selectionContext,
+        })
+
+    res.json({
+      success: true,
+      documentId: requestRecord.documentId,
+      sectionId: typeof req.body?.selectionContext?.sectionId === 'string' ? req.body.selectionContext.sectionId : undefined,
+      updatedText: replacementText,
+      patch: {
+        type: 'replace_selection',
+        selectedText,
+        replacementText,
+      },
+      message: '已生成选中文本替换补丁，请前端应用到当前选区。',
+    })
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+})
+
+router.post('/:documentId/save', async (req, res) => {
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+
+  const record = getDocumentRecord(req.params.documentId)
+  if (!record || record.userId !== userId) {
+    res.status(404).json({ success: false, error: '文稿不存在或无权限访问' })
+    return
+  }
+
+  try {
+    const requestRecord = updateRecordFromRequest(record, (req.body || {}) as Record<string, unknown>)
+    const exported = await saveDocumentDraftDocxArtifact({
+      userId,
+      workspacePath: requestRecord.workspacePath,
+      skillId: requestRecord.skillId,
+      documentId: requestRecord.documentId,
+      draft: requestRecord.draft,
+      knowledgeRefs: requestRecord.knowledgeRefs,
+    })
+    const savedAt = new Date().toISOString()
+    const nextRecord = {
+      ...requestRecord,
+      artifactId: exported.artifact.id,
+      exportUrl: exported.exportUrl,
+      filename: exported.filename,
+      sourceRefs: exported.artifact.sourceRefs ?? [],
+      artifactKnowledgeRefs: exported.artifact.knowledgeRefs ?? [],
+      artifact: exported.artifact,
+      updatedAt: savedAt,
+    }
+    saveDocumentRecord(nextRecord)
+    res.json({
+      success: true,
+      documentId: nextRecord.documentId,
+      savedAt,
+      artifact: nextRecord.artifact,
+      artifactId: nextRecord.artifactId,
+      exportUrl: nextRecord.exportUrl,
+      filename: nextRecord.filename,
+      document: nextRecord.draft,
+      outline: buildDocumentOutline(nextRecord.draft),
+    })
+  } catch (error) {
+    res.status(500).json({ success: false, error: error instanceof Error ? error.message : String(error) })
+  }
+})
+
 router.post('/:documentId/export', async (req, res) => {
   const userId = await requireAccountUser(req, res)
   if (!userId) return
@@ -208,16 +339,17 @@ router.post('/:documentId/export', async (req, res) => {
   }
 
   try {
+    const requestRecord = updateRecordFromRequest(record, (req.body || {}) as Record<string, unknown>)
     const exported = await saveDocumentDraftDocxArtifact({
       userId,
-      workspacePath: record.workspacePath,
-      skillId: record.skillId,
-      documentId: record.documentId,
-      draft: record.draft,
-      knowledgeRefs: record.knowledgeRefs,
+      workspacePath: requestRecord.workspacePath,
+      skillId: requestRecord.skillId,
+      documentId: requestRecord.documentId,
+      draft: requestRecord.draft,
+      knowledgeRefs: requestRecord.knowledgeRefs,
     })
     const nextRecord = {
-      ...record,
+      ...requestRecord,
       artifactId: exported.artifact.id,
       exportUrl: exported.exportUrl,
       filename: exported.filename,

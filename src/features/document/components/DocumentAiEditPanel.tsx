@@ -26,18 +26,24 @@ const Hint = styled.div`
   margin-top: 8px;
   font-size: 12px;
   color: #607487;
-  line-height: 1.6;
+  line-height: 1.7;
 `
 
-const SectionBadge = styled.div`
-  margin-top: 8px;
+const ScopeBadgeRow = styled.div`
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+`
+
+const ScopeBadge = styled.div<{ $tone?: 'warn' }>`
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 6px 10px;
   border-radius: 999px;
-  background: #edf4fb;
-  color: #31516f;
+  background: ${({ $tone }) => ($tone === 'warn' ? '#fff7e5' : '#edf4fb')};
+  color: ${({ $tone }) => ($tone === 'warn' ? '#8a5f1f' : '#31516f')};
   font-size: 12px;
   font-weight: 700;
 `
@@ -50,7 +56,7 @@ const QuickActions = styled.div`
 `
 
 const QuickButton = styled.button`
-  height: 30px;
+  min-height: 30px;
   padding: 0 12px;
   border-radius: 999px;
   border: 1px solid #d4deea;
@@ -59,6 +65,12 @@ const QuickButton = styled.button`
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
+`
+
+const DangerButton = styled(QuickButton)`
+  border-color: #f0c7c7;
+  color: #a03636;
+  background: #fff8f8;
 `
 
 const History = styled.div`
@@ -122,51 +134,35 @@ export interface SectionHistoryEntry {
   text: string
 }
 
+export type DocumentAiScope = 'selection' | 'section' | 'document'
+
 interface DocumentAiEditPanelProps {
   selectedSectionId: string | null
   selectedSectionLabel: string
-  selectedParagraphLabel: string | null
+  selectedText: string
+  selectionLength: number
   history: SectionHistoryEntry[]
   busy?: boolean
   disabled?: boolean
-  onSubmit: (instruction: string) => Promise<void> | void
+  onSubmit: (instruction: string, scope: DocumentAiScope) => Promise<void> | void
 }
 
 const QUICK_ACTIONS = [
-  '润色',
-  '扩写',
-  '压缩',
-  '改正式',
-  '加依据',
-  '生成摘要',
-  '检查逻辑',
+  { label: '改正式', prompt: '请改得更正式，符合中文办公文稿风格。' },
+  { label: '压缩成三段', prompt: '请压缩成三段以内，保留核心信息。' },
+  { label: '扩写依据', prompt: '请扩写依据表达；如果依据不足，请明确写“需要人工确认依据”。' },
+  { label: '加入政策引用', prompt: '请补充相关政策引用；如果依据不足，请明确写“需要人工确认依据”。' },
+  { label: '生成摘要', prompt: '请生成一段简洁摘要，方便快速汇报。' },
+  { label: '检查逻辑', prompt: '请检查逻辑并直接改成更严谨的表达。' },
+  { label: '改成汇报口吻', prompt: '请改成适合会议汇报的口吻。' },
+  { label: '重写当前章节', prompt: '请重写当前章节，保持主题不变但结构更清晰。', scope: 'section' as const },
 ] as const
-
-function quickActionPrompt(action: typeof QUICK_ACTIONS[number]): string {
-  switch (action) {
-    case '润色':
-      return '请对这一节进行润色，保持事实不变。'
-    case '扩写':
-      return '请在保持事实不变的前提下扩写这一节，使论述更完整。'
-    case '压缩':
-      return '请压缩这一节内容，保留核心信息，控制为三段以内。'
-    case '改正式':
-      return '请把这一节改写得更正式，符合中文办公文稿风格。'
-    case '加依据':
-      return '请补充这一节的依据表达；如果依据不足，请明确写“需要人工确认依据”。'
-    case '生成摘要':
-      return '请把这一节整理成一段简明摘要，适合给领导快速浏览。'
-    case '检查逻辑':
-      return '请检查这一节的逻辑是否连贯；如果存在跳跃、重复或论证不足，请直接改写成更严谨的表达。'
-    default:
-      return ''
-  }
-}
 
 export function DocumentAiEditPanel({
   selectedSectionId,
   selectedSectionLabel,
-  selectedParagraphLabel,
+  selectedText,
+  selectionLength,
   history,
   busy,
   disabled,
@@ -174,16 +170,29 @@ export function DocumentAiEditPanel({
 }: DocumentAiEditPanelProps) {
   const [input, setInput] = useState('')
 
-  const currentLabel = useMemo(() => {
-    return selectedParagraphLabel
-      ? `${selectedSectionLabel} / ${selectedParagraphLabel}`
-      : selectedSectionLabel
-  }, [selectedParagraphLabel, selectedSectionLabel])
+  const resolvedScope = useMemo<DocumentAiScope | null>(() => {
+    if (selectionLength > 0) return 'selection'
+    if (selectedSectionId) return 'section'
+    return null
+  }, [selectedSectionId, selectionLength])
 
-  const handleSubmit = async () => {
+  const submitLabel = resolvedScope === 'selection'
+    ? '只修改选中内容'
+    : resolvedScope === 'section'
+      ? '修改当前章节'
+      : '请先选择内容'
+
+  const submitHint = resolvedScope === 'selection'
+    ? `已选中 ${selectionLength} 个字，本次默认只修改选中内容。${selectedText ? `\n“${selectedText.slice(0, 36)}${selectedText.length > 36 ? '…' : ''}”` : ''}`
+    : selectedSectionId
+      ? `当前正在修改：${selectedSectionLabel}`
+      : '请先在中间 A4 页面选中文字或定位章节。'
+
+  const handleSubmit = async (scopeOverride?: DocumentAiScope) => {
     const instruction = input.trim()
-    if (!instruction) return
-    await onSubmit(instruction)
+    const scope = scopeOverride || resolvedScope
+    if (!instruction || !scope) return
+    await onSubmit(instruction, scope)
     setInput('')
   }
 
@@ -191,22 +200,39 @@ export function DocumentAiEditPanel({
     <Panel data-testid="document-ai-edit-panel">
       <Header>
         <Title>AI 修改面板</Title>
-        <Hint>当前正在修改：{currentLabel || '请先选择章节'}</Hint>
-        <SectionBadge>{selectedSectionId ? `sectionId: ${selectedSectionId}` : '未绑定章节'}</SectionBadge>
+        <Hint>{submitHint}</Hint>
+        <ScopeBadgeRow>
+          <ScopeBadge>{selectedSectionId ? `当前章节：${selectedSectionLabel}` : '当前章节：未绑定'}</ScopeBadge>
+          {selectionLength > 0 ? <ScopeBadge $tone="warn">已选中文字：{selectionLength} 字</ScopeBadge> : null}
+        </ScopeBadgeRow>
       </Header>
 
       <QuickActions>
         {QUICK_ACTIONS.map((action) => (
           <QuickButton
-            key={action}
+            key={action.label}
             type="button"
-            data-testid={`document-ai-quick-${action}`}
-            disabled={disabled || busy}
-            onClick={() => void onSubmit(quickActionPrompt(action))}
+            data-testid={`document-ai-quick-${action.label}`}
+            disabled={disabled || busy || (!selectedSectionId && selectionLength === 0)}
+            onClick={() => {
+              setInput(action.prompt)
+              void onSubmit(action.prompt, action.scope || resolvedScope || 'section')
+            }}
           >
-            {action}
+            {action.label}
           </QuickButton>
         ))}
+        <DangerButton
+          type="button"
+          data-testid="document-ai-rewrite-document"
+          disabled={busy || disabled}
+          onClick={() => {
+            if (!window.confirm('确认重写全文？这会用 AI 覆盖当前文稿内容。')) return
+            void onSubmit('请重写当前全文，保留主题但重构整体表达。', 'document')
+          }}
+        >
+          重写全文
+        </DangerButton>
       </QuickActions>
 
       <History>
@@ -216,7 +242,7 @@ export function DocumentAiEditPanel({
               {item.text}
             </Bubble>
           ))
-          : <div style={{ fontSize: 12, color: '#708395', lineHeight: 1.7 }}>选中某一节后，可在这里发起章节级 AI 修改；历史会按 sectionId 保留。</div>}
+          : <div style={{ fontSize: 12, color: '#708395', lineHeight: 1.7 }}>默认优先修改选中文本；未选中文本时会修改当前章节。对话历史会按章节或选中范围记录。</div>}
       </History>
 
       <Composer>
@@ -225,15 +251,15 @@ export function DocumentAiEditPanel({
           data-testid="document-ai-edit-input"
           disabled={disabled || busy}
           onChange={(event) => setInput(event.target.value)}
-          placeholder={disabled ? '请先选择章节或段落' : '例如：这一节写得更正式，压缩成三段。'}
+          placeholder={disabled ? '请先选择章节或选中内容' : '例如：改得更正式，压缩成两句话。'}
         />
         <SubmitButton
           type="button"
           data-testid="document-ai-edit-submit"
-          disabled={disabled || busy || !input.trim()}
+          disabled={disabled || busy || !input.trim() || !resolvedScope}
           onClick={() => void handleSubmit()}
         >
-          {busy ? '正在修改…' : '修改当前章节'}
+          {busy ? '正在修改…' : submitLabel}
         </SubmitButton>
       </Composer>
     </Panel>

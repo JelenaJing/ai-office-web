@@ -202,3 +202,56 @@ export async function editDocumentSectionWithBuiltin(input: {
     updatedAt: new Date().toISOString(),
   }
 }
+
+export async function editDocumentSelectionWithBuiltin(input: {
+  record: DocumentRecord
+  instruction: string
+  selectedText: string
+  selectionContext?: {
+    sectionId?: string
+    beforeText?: string
+    afterText?: string
+    documentTitle?: string
+    sectionTitle?: string
+  }
+}): Promise<string> {
+  const selectedText = String(input.selectedText || '').trim()
+  if (!selectedText) {
+    throw new Error('selectedText 不能为空')
+  }
+  if (!isLlmConfigured()) {
+    return `${selectedText}（已根据指令调整：${input.instruction.trim()}）`
+  }
+
+  const replacement = await invokeLlmText(
+    [
+      {
+        role: 'system',
+        content: [
+          '你是内置文稿引擎的选中文本级编辑器。',
+          input.record.language === 'en-US'
+            ? 'language: en-US\nstyle: formal_office_english'
+            : 'language: zh-CN\nstyle: formal_chinese_office',
+          '只允许改写用户选中的那一段文字，不允许改写其他段落。',
+          '输出只能是替换后的文本，不要解释，不要加标题，不要加引号。',
+          '如果依据不足，可以在文本中保留“需要人工确认依据”。',
+        ].join('\n\n'),
+      },
+      {
+        role: 'user',
+        content: [
+          `文稿标题：${input.selectionContext?.documentTitle || input.record.draft.title}`,
+          input.selectionContext?.sectionTitle ? `所在章节：${input.selectionContext.sectionTitle}` : '',
+          `编辑指令：${input.instruction.trim()}`,
+          buildKnowledgeRefPromptBlock(input.record.knowledgeRefs),
+          input.selectionContext?.beforeText ? `前文：${input.selectionContext.beforeText}` : '',
+          `当前选中文本：${selectedText}`,
+          input.selectionContext?.afterText ? `后文：${input.selectionContext.afterText}` : '',
+        ].filter(Boolean).join('\n\n'),
+      },
+    ],
+    { temperature: 0.35, maxTokens: 1200 },
+  )
+
+  return replacement.trim() || selectedText
+}

@@ -7,8 +7,15 @@ import { useDepartment } from '../../../contexts/DepartmentContext'
 import { KnowledgeTreePicker } from '../../../components/knowledge/KnowledgeTreePicker'
 import { platformApi } from '../../../platform'
 import type { FileEntry } from '../../../platform'
-import { DocumentAiEditPanel, type SectionHistoryEntry } from './DocumentAiEditPanel'
-import { DocumentEditorCanvas } from './DocumentEditorCanvas'
+import {
+  DocumentAiEditPanel,
+  type DocumentAiScope,
+  type SectionHistoryEntry,
+} from './DocumentAiEditPanel'
+import {
+  DocumentEditorCanvas,
+  type DocumentEditorCanvasHandle,
+} from './DocumentEditorCanvas'
 import { DocumentAttachmentPanel, DocumentKnowledgePanel } from './DocumentKnowledgePanel'
 import { DocumentOutlinePanel } from './DocumentOutlinePanel'
 import { DocumentTemplatePanel } from './DocumentTemplatePanel'
@@ -16,14 +23,22 @@ import { DocumentTopToolbar } from './DocumentTopToolbar'
 import {
   buildKnowledgeRefsFromSelection,
   editDocumentSection,
+  editDocumentSelection,
   engineLabel,
   exportDocumentArtifact,
-  getDocumentTask,
   loadDocumentWorkbenchConfig,
+  saveEditableDocument,
   startDocumentTask,
+  waitForDocumentTask,
   type DocumentTaskResult,
   type DocumentTemplateOption,
+  type EditableDocumentState,
 } from '../services/documentWorkbenchApi'
+import {
+  createEditableStateFromTaskResult,
+  updateEditableStateFromHtml,
+} from '../services/documentDraftTransforms'
+import { runDocumentSkill } from '../services/documentSkillAdapter'
 
 const Shell = styled.div`
   flex: 1;
@@ -139,9 +154,32 @@ interface PersistedWorkbenchState {
   templateId: string
   generationPrompt: string
   attachments: FileEntry[]
-  result: DocumentTaskResult | null
-  selectedSectionId: string | null
+  editorState: EditableDocumentState
   sectionHistory: Record<string, SectionHistoryEntry[]>
+  modifiedSectionIds: string[]
+  artifactFilename: string | null
+}
+
+function createEmptyEditorState(engine: string): EditableDocumentState {
+  return {
+    documentId: null,
+    artifactId: null,
+    exportUrl: null,
+    title: '',
+    html: '',
+    markdown: '',
+    documentDraft: undefined,
+    outline: [],
+    selectedSectionId: null,
+    selectedText: '',
+    selectionRange: undefined,
+    dirty: false,
+    saving: false,
+    lastSavedAt: undefined,
+    engine,
+    fallbackFrom: undefined,
+    fallbackReason: undefined,
+  }
 }
 
 function storageKey(workspacePath: string | null): string | null {
@@ -160,17 +198,19 @@ function loadPersistedState(workspacePath: string | null): PersistedWorkbenchSta
   }
 }
 
-function findNearbySections(result: DocumentTaskResult | null, sectionId: string) {
-  if (!result) return []
-  const index = result.document.sections.findIndex((section) => section.id === sectionId)
-  if (index < 0) return []
-  return result.document.sections
-    .slice(Math.max(0, index - 1), Math.min(result.document.sections.length, index + 2))
-    .map((section) => ({
-      id: section.id,
-      title: section.title,
-      content: section.content,
-    }))
+function documentHistoryKey(scope: DocumentAiScope | null, sectionId: string | null): string {
+  if (scope === 'selection') return `selection:${sectionId || 'global'}`
+  if (scope === 'section') return `section:${sectionId || 'global'}`
+  return 'document'
+}
+
+function buildDocumentPlainText(result: DocumentTaskResult | EditableDocumentState | null): string {
+  const draft = 'document' in (result || {}) ? (result as DocumentTaskResult).document : (result as EditableDocumentState | null)?.documentDraft
+  if (!draft) return ''
+  return [
+    draft.title,
+    ...draft.sections.flatMap((section) => [section.title, section.content]),
+  ].filter(Boolean).join('\n')
 }
 
 export default function DocumentWorkbench() {
@@ -183,17 +223,21 @@ export default function DocumentWorkbench() {
   const [fallbackMode, setFallbackMode] = useState<'builtin' | 'none'>('builtin')
   const [selectedTemplateId, setSelectedTemplateId] = useState('annual_report')
   const [attachments, setAttachments] = useState<FileEntry[]>([])
-  const [result, setResult] = useState<DocumentTaskResult | null>(null)
-  const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null)
-  const [selectedParagraphKey, setSelectedParagraphKey] = useState<string | null>(null)
-  const [generationPrompt, setGenerationPrompt] = useState('')
+  const [editorState, setEditorState] = useState<EditableDocumentState>(createEmptyEditorState('minimax_docx'))
+  const [artifactFilename, setArtifactFilename] = useState<string | null>(null)
+  const [modifiedSectionIds, setModifiedSectionIds] = useState<string[]>([])
   const [sectionHistory, setSectionHistory] = useState<Record<string, SectionHistoryEntry[]>>({})
+  const [activeHistoryKey, setActiveHistoryKey] = useState('document')
   const [kbPickerOpen, setKbPickerOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [statusMessage, setStatusMessage] = useState('')
   const [statusTone, setStatusTone] = useState<'ok' | 'err' | undefined>()
+  const [exportError, setExportError] = useState<string | null>(null)
+  const [generationPrompt, setGenerationPrompt] = useState('')
+  const [hydrated, setHydrated] = useState(false)
 
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
+  const canvasRef = useRef<DocumentEditorCanvasHandle | null>(null)
 
   useEffect(() => {
     let disposed = false
@@ -206,6 +250,7 @@ export default function DocumentWorkbench() {
         if (!config.templates.some((item) => item.id === selectedTemplateId) && config.templates.length > 0) {
           setSelectedTemplateId(config.templates[0].id)
         }
+        setEditorState((prev) => prev.documentId ? prev : createEmptyEditorState(config.engine))
       })
       .catch((error) => {
         if (disposed) return
@@ -218,73 +263,138 @@ export default function DocumentWorkbench() {
   }, [selectedTemplateId])
 
   useEffect(() => {
+    setHydrated(false)
     const persisted = loadPersistedState(activeWorkspacePath)
-    if (!persisted) return
-    setSelectedTemplateId(persisted.templateId || 'annual_report')
-    setGenerationPrompt(persisted.generationPrompt || '')
-    setAttachments(Array.isArray(persisted.attachments) ? persisted.attachments : [])
-    setResult(persisted.result || null)
-    setSelectedSectionId(persisted.selectedSectionId || persisted.result?.document.sections[0]?.id || null)
-    setSectionHistory(persisted.sectionHistory || {})
-  }, [activeWorkspacePath])
+    if (persisted) {
+      setSelectedTemplateId(persisted.templateId || 'annual_report')
+      setAttachments(Array.isArray(persisted.attachments) ? persisted.attachments : [])
+      setGenerationPrompt(persisted.generationPrompt || '')
+      setEditorState(persisted.editorState || createEmptyEditorState(defaultEngine))
+      setModifiedSectionIds(persisted.modifiedSectionIds || [])
+      setSectionHistory(persisted.sectionHistory || {})
+      setArtifactFilename(persisted.artifactFilename || null)
+      setActiveHistoryKey(
+        persisted.editorState?.selectedSectionId
+          ? documentHistoryKey('section', persisted.editorState.selectedSectionId)
+          : 'document',
+      )
+    }
+    setHydrated(true)
+  }, [activeWorkspacePath, defaultEngine])
 
   useEffect(() => {
     const key = storageKey(activeWorkspacePath)
-    if (!key || typeof window === 'undefined') return
+    if (!hydrated || !key || typeof window === 'undefined') return
     const payload: PersistedWorkbenchState = {
       templateId: selectedTemplateId,
       generationPrompt,
       attachments,
-      result,
-      selectedSectionId,
+      editorState,
       sectionHistory,
+      modifiedSectionIds,
+      artifactFilename,
     }
     window.localStorage.setItem(key, JSON.stringify(payload))
-  }, [activeWorkspacePath, attachments, generationPrompt, result, sectionHistory, selectedSectionId, selectedTemplateId])
+  }, [activeWorkspacePath, attachments, artifactFilename, editorState, generationPrompt, hydrated, modifiedSectionIds, sectionHistory, selectedTemplateId])
 
   const template = useMemo(
     () => templates.find((item) => item.id === selectedTemplateId) || templates[0] || null,
     [selectedTemplateId, templates],
   )
-
-  const selectedSection = useMemo(
-    () => result?.document.sections.find((section) => section.id === selectedSectionId) || null,
-    [result, selectedSectionId],
-  )
-
-  const selectedParagraphLabel = useMemo(() => {
-    if (!selectedParagraphKey || !selectedSectionId) return null
-    const [, rawIndex] = selectedParagraphKey.split(':')
-    const paragraphIndex = Number(rawIndex)
-    if (!Number.isFinite(paragraphIndex)) return null
-    return `选中段落 ${paragraphIndex + 1}`
-  }, [selectedParagraphKey, selectedSectionId])
-
   const knowledgeNameMap = useMemo(
     () => new Map(departments.map((department) => [department.id, department.name])),
     [departments],
   )
 
-  const activeEngineLabel = engineLabel(defaultEngine)
-  const activeTemplateLabel = result?.templateLabel || template?.label || '未选择'
-  const fallbackReason = useMemo(() => {
-    if (!result?.fallbackFrom) return null
-    return result.fallbackReason || '未提供原因'
-  }, [result])
-  const artifactLabel = useMemo(() => result?.filename || null, [result])
+  const selectedSection = useMemo(
+    () => editorState.documentDraft?.sections.find((section) => section.id === editorState.selectedSectionId) || null,
+    [editorState.documentDraft, editorState.selectedSectionId],
+  )
 
-  useEffect(() => {
-    if (!result) return
-    if (selectedSectionId && result.document.sections.some((section) => section.id === selectedSectionId)) return
-    setSelectedSectionId(result.document.sections[0]?.id || null)
-  }, [result, selectedSectionId])
+  const currentHistory = sectionHistory[activeHistoryKey] || []
 
-  const setHistoryForSection = useCallback((sectionId: string, updater: (history: SectionHistoryEntry[]) => SectionHistoryEntry[]) => {
+  const activeEngineLabel = engineLabel((editorState.engine as 'builtin' | 'minimax_docx') || defaultEngine)
+  const activeTemplateLabel = template?.label || '未选择'
+  const artifactLabel = artifactFilename || null
+
+  const appendHistory = useCallback((scope: DocumentAiScope | null, sectionId: string | null, entry: SectionHistoryEntry) => {
+    const key = documentHistoryKey(scope, sectionId)
     setSectionHistory((prev) => ({
       ...prev,
-      [sectionId]: updater(prev[sectionId] || []),
+      [key]: [...(prev[key] || []), entry],
     }))
   }, [])
+
+  const markSectionModified = useCallback((sectionId: string | null) => {
+    if (!sectionId) return
+    setModifiedSectionIds((prev) => prev.includes(sectionId) ? prev : [...prev, sectionId])
+  }, [])
+
+  const syncEditorStateFromTaskResult = useCallback((nextResult: DocumentTaskResult, savedAt?: string) => {
+    const nextState = createEditableStateFromTaskResult({
+      documentId: nextResult.documentId,
+      artifactId: nextResult.artifactId,
+      exportUrl: nextResult.exportUrl,
+      engine: nextResult.engine,
+      fallbackFrom: nextResult.fallbackFrom,
+      fallbackReason: nextResult.fallbackReason,
+      document: nextResult.document,
+    })
+    setEditorState({
+      ...nextState,
+      selectedSectionId: nextState.selectedSectionId,
+      selectedText: '',
+      selectionRange: undefined,
+      dirty: false,
+      saving: false,
+      lastSavedAt: savedAt,
+    })
+    setArtifactFilename(nextResult.filename)
+    setActiveHistoryKey(
+      nextState.selectedSectionId
+        ? documentHistoryKey('section', nextState.selectedSectionId)
+        : 'document',
+    )
+  }, [])
+
+  const saveCurrentDocument = useCallback(async (status = '正在保存文稿…') => {
+    if (!editorState.documentId || !editorState.documentDraft) return null
+    setEditorState((prev) => ({ ...prev, saving: true }))
+    setStatusMessage(status)
+    setStatusTone(undefined)
+    setExportError(null)
+    try {
+      const response = await saveEditableDocument({
+        documentId: editorState.documentId,
+        title: editorState.title,
+        html: editorState.html,
+        documentDraft: editorState.documentDraft,
+        outline: editorState.outline,
+      })
+      const savedAt = response.savedAt || new Date().toISOString()
+      setEditorState((prev) => ({
+        ...prev,
+        dirty: false,
+        saving: false,
+        lastSavedAt: savedAt,
+        artifactId: response.artifactId || response.artifact?.id || prev.artifactId,
+        exportUrl: response.exportUrl || prev.exportUrl,
+        documentDraft: response.document || prev.documentDraft,
+        outline: response.outline || prev.outline,
+      }))
+      if (response.filename) setArtifactFilename(response.filename)
+      setStatusMessage('已保存，DOCX 已更新')
+      setStatusTone('ok')
+      return response
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '保存失败'
+      setEditorState((prev) => ({ ...prev, saving: false }))
+      setExportError(message)
+      setStatusMessage(message)
+      setStatusTone('err')
+      return null
+    }
+  }, [editorState.documentDraft, editorState.documentId, editorState.html, editorState.outline, editorState.title])
 
   const handleUploadAttachment = useCallback(() => {
     uploadInputRef.current?.click()
@@ -320,6 +430,7 @@ export default function DocumentWorkbench() {
     }
     setBusy(true)
     setStatusTone(undefined)
+    setExportError(null)
     try {
       const task = await startDocumentTask({
         workspacePath: activeWorkspacePath,
@@ -330,21 +441,12 @@ export default function DocumentWorkbench() {
         documentType: template?.documentType || 'report',
         language: 'zh-CN',
       })
-      const nextResult = await (async () => {
-        for (;;) {
-          const state = await getDocumentTask(task.taskId)
-          setStatusMessage(state.message)
-          setStatusTone(undefined)
-          if (state.status === 'completed' && state.result) return state.result
-          if (state.status === 'failed' || state.status === 'cancelled') {
-            throw new Error(state.error || state.message || '文稿生成失败')
-          }
-          await new Promise((resolve) => window.setTimeout(resolve, 1200))
-        }
-      })()
-      setResult(nextResult)
-      setSelectedSectionId(nextResult.document.sections[0]?.id || null)
-      setSelectedParagraphKey(null)
+      const nextResult = await waitForDocumentTask(task.taskId, (state) => {
+        setStatusMessage(state.message)
+        setStatusTone(undefined)
+      })
+      syncEditorStateFromTaskResult(nextResult, new Date().toISOString())
+      setModifiedSectionIds([])
       setStatusMessage(nextResult.fallbackFrom
         ? `文稿已完成。MiniMax DOCX Skill 失败，已回退内置文稿引擎：${nextResult.fallbackReason || '未提供原因'}`
         : `${engineLabel(nextResult.engine)} 已完成。`)
@@ -355,112 +457,316 @@ export default function DocumentWorkbench() {
     } finally {
       setBusy(false)
     }
-  }, [activeWorkspacePath, attachments, generationPrompt, knowledgeNameMap, template, workspaceKbIds])
+  }, [activeWorkspacePath, attachments, generationPrompt, knowledgeNameMap, syncEditorStateFromTaskResult, template, workspaceKbIds])
 
   const handleSelectSection = useCallback((sectionId: string) => {
-    setSelectedSectionId(sectionId)
-    setSelectedParagraphKey(null)
+    setEditorState((prev) => ({
+      ...prev,
+      selectedSectionId: sectionId,
+      selectedText: '',
+        selectionRange: { sectionId, sectionTitle: prev.documentDraft?.sections.find((section) => section.id === sectionId)?.title, text: '' },
+    }))
+    setActiveHistoryKey(documentHistoryKey('section', sectionId))
+    canvasRef.current?.scrollToSection(sectionId)
   }, [])
 
-  const handleSectionEdit = useCallback(async (instruction: string) => {
-    if (!result || !selectedSection) return
+  const handleCanvasHtmlChange = useCallback((html: string, activeSectionId: string | null) => {
+    setEditorState((prev) => {
+      const next = updateEditableStateFromHtml({
+        ...prev,
+        selectedSectionId: activeSectionId || prev.selectedSectionId,
+      }, html)
+      return {
+        ...next,
+        selectedSectionId: activeSectionId || next.selectedSectionId,
+        dirty: true,
+        saving: false,
+      }
+    })
+    setExportError(null)
+    markSectionModified(activeSectionId)
+  }, [markSectionModified])
+
+  const handleCanvasSelectionChange = useCallback((payload: {
+    selectedSectionId: string | null
+    selectedText: string
+    selectionRange?: EditableDocumentState['selectionRange']
+  }) => {
+    setEditorState((prev) => ({
+      ...prev,
+      selectedSectionId: payload.selectedSectionId || prev.selectedSectionId,
+      selectedText: payload.selectedText,
+      selectionRange: payload.selectionRange,
+    }))
+    setActiveHistoryKey((prev) => {
+      if (payload.selectedText.trim()) {
+        return documentHistoryKey('selection', payload.selectedSectionId)
+      }
+      if (payload.selectedSectionId) {
+        return prev.startsWith('selection:') && prev === documentHistoryKey('selection', payload.selectedSectionId)
+          ? prev
+          : documentHistoryKey('section', payload.selectedSectionId)
+      }
+      return prev
+    })
+  }, [])
+
+  const handleDocumentRewrite = useCallback(async (instruction: string) => {
+    if (!activeWorkspacePath) {
+      setStatusMessage('请先打开工作区')
+      setStatusTone('err')
+      return
+    }
+    appendHistory('document', editorState.selectedSectionId, { role: 'user', text: instruction })
     setBusy(true)
-    setHistoryForSection(selectedSection.id, (history) => [...history, { role: 'user', text: instruction }])
+    try {
+      const output = await runDocumentSkill({
+        instruction,
+        currentHtml: editorState.html,
+        currentText: buildDocumentPlainText(editorState),
+        workflowId: 'general',
+        knowledgeBaseIds: workspaceKbIds,
+        fileIds: attachments.map((item) => item.id),
+        workspacePath: activeWorkspacePath,
+      }, {
+        operation: 'edit',
+        editMode: 'replace_document',
+        title: editorState.title,
+      })
+      if (!output.html) {
+        throw new Error(output.message || '全文重写失败：未返回新内容')
+      }
+      const applied = canvasRef.current?.applyPatch({
+        type: 'replace_document',
+        html: output.html,
+      })
+      if (!applied?.applied) {
+        throw new Error('全文重写补丁应用失败')
+      }
+      setEditorState((prev) => ({
+        ...updateEditableStateFromHtml(prev, applied.html),
+        dirty: true,
+        selectedText: '',
+        selectionRange: undefined,
+      }))
+      appendHistory('document', editorState.selectedSectionId, { role: 'assistant', text: output.message || '已重写当前全文。' })
+      setStatusMessage(output.message || '已重写当前全文')
+      setStatusTone('ok')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '全文重写失败'
+      appendHistory('document', editorState.selectedSectionId, { role: 'assistant', text: message })
+      setStatusMessage(message)
+      setStatusTone('err')
+    } finally {
+      setBusy(false)
+    }
+  }, [activeWorkspacePath, appendHistory, attachments, editorState, workspaceKbIds])
+
+  const handleAiSubmit = useCallback(async (instruction: string, scope: DocumentAiScope) => {
+    if (!editorState.documentId || !editorState.documentDraft) {
+      setStatusMessage('请先生成文稿')
+      setStatusTone('err')
+      return
+    }
+    if (scope === 'document') {
+      setActiveHistoryKey('document')
+      await handleDocumentRewrite(instruction)
+      return
+    }
+
+    if (scope === 'selection') {
+      if (!editorState.selectedText.trim()) {
+        setStatusMessage('请先选中需要修改的内容')
+        setStatusTone('err')
+        return
+      }
+      appendHistory('selection', editorState.selectedSectionId, { role: 'user', text: instruction })
+      setActiveHistoryKey(documentHistoryKey('selection', editorState.selectedSectionId))
+      setBusy(true)
+      try {
+        const response = await editDocumentSelection({
+          documentId: editorState.documentId,
+          instruction,
+          selectedText: editorState.selectedText,
+          selectionContext: {
+            sectionId: editorState.selectionRange?.sectionId,
+            beforeText: editorState.selectionRange?.beforeText,
+            afterText: editorState.selectionRange?.afterText,
+            documentTitle: editorState.title,
+            sectionTitle: editorState.selectionRange?.sectionTitle || selectedSection?.title,
+          },
+          document: editorState.documentDraft,
+          html: editorState.html,
+        })
+        const applied = canvasRef.current?.applyPatch(response.patch)
+        if (!applied?.applied) {
+          throw new Error('未能把选中文本补丁应用到当前选区，请重新选择后再试。')
+        }
+        setEditorState((prev) => ({
+          ...updateEditableStateFromHtml(prev, applied.html),
+          selectedSectionId: applied.affectedSectionId || prev.selectedSectionId,
+          selectedText: '',
+          selectionRange: undefined,
+          dirty: true,
+        }))
+        markSectionModified(applied.affectedSectionId || editorState.selectedSectionId)
+        appendHistory('selection', editorState.selectedSectionId, { role: 'assistant', text: response.message || '已修改选中内容。' })
+        setStatusMessage(response.message || '已修改选中内容')
+        setStatusTone('ok')
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '选中文本修改失败'
+        appendHistory('selection', editorState.selectedSectionId, { role: 'assistant', text: message })
+        setStatusMessage(message)
+        setStatusTone('err')
+      } finally {
+        setBusy(false)
+      }
+      return
+    }
+
+    if (!selectedSection) {
+      setStatusMessage('请先选择章节')
+      setStatusTone('err')
+      return
+    }
+
+    appendHistory('section', selectedSection.id, { role: 'user', text: instruction })
+    setActiveHistoryKey(documentHistoryKey('section', selectedSection.id))
+    setBusy(true)
     try {
       const response = await editDocumentSection({
-        documentId: result.documentId,
+        documentId: editorState.documentId,
         sectionId: selectedSection.id,
         instruction,
+        title: editorState.title,
+        html: editorState.html,
+        document: editorState.documentDraft,
+        knowledgeRefs: buildKnowledgeRefsFromSelection(workspaceKbIds, attachments, knowledgeNameMap),
         currentSection: selectedSection,
         documentContext: {
-          title: result.document.title,
-          type: result.document.type,
-          outline: result.document.outline,
-          nearbySections: findNearbySections(result, selectedSection.id),
+          title: editorState.title,
+          type: editorState.documentDraft.type,
+          outline: editorState.outline,
+          nearbySections: editorState.documentDraft.sections
+            .filter((section) => section.id !== selectedSection.id)
+            .slice(0, 3)
+            .map((section) => ({ id: section.id, title: section.title, content: section.content })),
         },
       })
-      const nextResult: DocumentTaskResult = {
-        ...result,
+      syncEditorStateFromTaskResult({
         engine: response.engine,
         skillId: response.skillId,
+        documentId: response.documentId,
         artifactId: response.artifactId,
         exportUrl: response.exportUrl,
         filename: response.filename,
         document: response.document,
         outline: response.outline,
-        fallbackFrom: response.engine === 'builtin' ? result.fallbackFrom : undefined,
-        fallbackReason: response.engine === 'builtin' ? result.fallbackReason : undefined,
-      }
-      setResult(nextResult)
-      setHistoryForSection(selectedSection.id, (history) => [
-        ...history,
-        { role: 'assistant', text: `已修改第 ${response.updatedSectionIndex || '?'} 节。` },
-      ])
-      setStatusMessage(`已修改第 ${response.updatedSectionIndex || '?'} 节`)
-      setStatusTone('ok')
-    } catch (error) {
-      setHistoryForSection(selectedSection.id, (history) => [
-        ...history,
-        { role: 'assistant', text: error instanceof Error ? error.message : '章节修改失败' },
-      ])
-      setStatusMessage(error instanceof Error ? error.message : '章节修改失败')
-      setStatusTone('err')
-    } finally {
-      setBusy(false)
-    }
-  }, [result, selectedSection, setHistoryForSection])
-
-  const downloadArtifact = useCallback(async (format: 'docx' | 'pdf') => {
-    if (!result) return
-    try {
-      setBusy(true)
-      const exported = await exportDocumentArtifact({
-        documentId: result.documentId,
-        format,
-      })
-      await platformApi.artifacts.download(exported.artifactId, exported.filename)
-      setResult((prev) => prev ? {
+        templateId: template?.id,
+        templateLabel: template?.label,
+        knowledgeRefs: editorState.documentDraft.metadata.knowledgeRefs || [],
+      }, new Date().toISOString())
+      setEditorState((prev) => ({
         ...prev,
-        artifactId: exported.artifactId,
-        exportUrl: exported.exportUrl,
-        filename: exported.filename,
-      } : prev)
-      setStatusMessage(`${format.toUpperCase()} 已下载`)
+        selectedSectionId: selectedSection.id,
+      }))
+      markSectionModified(selectedSection.id)
+      appendHistory('section', selectedSection.id, { role: 'assistant', text: '已修改该章节，DOCX 已同步更新。' })
+      setStatusMessage('已修改该章节，DOCX 已同步更新')
       setStatusTone('ok')
     } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : `${format.toUpperCase()} 导出失败`)
+      const message = error instanceof Error ? error.message : '章节修改失败'
+      appendHistory('section', selectedSection.id, { role: 'assistant', text: message })
+      setStatusMessage(message)
       setStatusTone('err')
     } finally {
       setBusy(false)
     }
-  }, [result])
+  }, [appendHistory, attachments, editorState, handleDocumentRewrite, knowledgeNameMap, markSectionModified, selectedSection, syncEditorStateFromTaskResult, template, workspaceKbIds])
 
-  const handleSave = useCallback(() => {
-    setStatusMessage('当前文稿工作台状态已保存')
-    setStatusTone('ok')
+  const handleDownloadDocx = useCallback(async () => {
+    if (!editorState.documentId) return
+    setBusy(true)
+    try {
+      let artifactId = editorState.artifactId
+      let filename = artifactFilename || 'document.docx'
+      if (editorState.dirty) {
+        const saved = await saveCurrentDocument('检测到未保存修改，正在先更新 DOCX…')
+        if (!saved) {
+          throw new Error('DOCX 更新失败，已阻止下载旧版本。')
+        }
+        artifactId = saved?.artifactId || saved?.artifact?.id || artifactId
+        filename = saved?.filename || filename
+      } else if (!artifactId) {
+        const exported = await exportDocumentArtifact({
+          documentId: editorState.documentId,
+          format: 'docx',
+          title: editorState.title,
+          html: editorState.html,
+          documentDraft: editorState.documentDraft,
+          outline: editorState.outline,
+        })
+        artifactId = exported.artifactId
+        filename = exported.filename
+        setEditorState((prev) => ({
+          ...prev,
+          artifactId: exported.artifactId,
+          exportUrl: exported.exportUrl,
+          dirty: false,
+          lastSavedAt: new Date().toISOString(),
+        }))
+        setArtifactFilename(exported.filename)
+      }
+      if (!artifactId) {
+        throw new Error('没有可下载的 DOCX 产物')
+      }
+      await platformApi.artifacts.download(artifactId, filename)
+      setStatusMessage('DOCX 已下载，内容为当前最新编辑版本')
+      setStatusTone('ok')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'DOCX 下载失败'
+      setExportError(message)
+      setStatusMessage(message)
+      setStatusTone('err')
+    } finally {
+      setBusy(false)
+    }
+  }, [artifactFilename, editorState, saveCurrentDocument])
+
+  const handleExportPdf = useCallback(() => {
+    setStatusMessage('PDF 导出暂未配置')
+    setStatusTone('err')
   }, [])
 
   return (
     <Shell data-testid="document-workbench">
-        <DocumentTopToolbar
-          engineLabel={activeEngineLabel}
-          templateLabel={activeTemplateLabel}
-          knowledgeCount={workspaceKbIds.length}
-          fallbackReason={fallbackReason}
-          artifactLabel={artifactLabel}
-          onDownloadDocx={() => void downloadArtifact('docx')}
-          onExportPdf={() => void downloadArtifact('pdf')}
-          onSave={handleSave}
-          onRegenerate={() => void handleGenerate()}
-          busy={busy || !result}
-          regenerateDisabled={!generationPrompt.trim()}
-        />
+      <DocumentTopToolbar
+        engineLabel={activeEngineLabel}
+        templateLabel={activeTemplateLabel}
+        knowledgeCount={workspaceKbIds.length}
+        fallbackReason={editorState.fallbackReason || null}
+        artifactLabel={artifactLabel}
+        dirty={editorState.dirty}
+        saving={editorState.saving}
+        lastSavedAt={editorState.lastSavedAt || null}
+        docxReady={Boolean(editorState.artifactId && !editorState.dirty)}
+        exportError={exportError}
+        onDownloadDocx={() => void handleDownloadDocx()}
+        onExportPdf={handleExportPdf}
+        onSave={() => void saveCurrentDocument()}
+        onRegenerate={() => void handleGenerate()}
+        onViewVersions={() => {}}
+        busy={busy || !editorState.documentId}
+        pdfDisabled
+        regenerateDisabled={!generationPrompt.trim()}
+      />
 
       <Body>
         <Sidebar>
           <DocumentOutlinePanel
-            document={result?.document || null}
-            selectedSectionId={selectedSectionId}
+            outline={editorState.outline}
+            selectedSectionId={editorState.selectedSectionId}
+            modifiedSectionIds={modifiedSectionIds}
             onSelectSection={handleSelectSection}
           />
           <DocumentKnowledgePanel
@@ -482,29 +788,27 @@ export default function DocumentWorkbench() {
 
         <CenterPane>
           <CanvasHeader>
-            <div>中间区域为 A4 文稿预览，不使用 textarea；点击目录可定位章节。</div>
+            <div>中间区域为 A4 可编辑文稿页面，支持直接输入、选中文本、章节定位与局部 AI 修改。</div>
             <div>{selectedSection ? `当前章节：${selectedSection.title}` : '当前章节：未选择'}</div>
           </CanvasHeader>
           <DocumentEditorCanvas
-            document={result?.document || null}
-            selectedSectionId={selectedSectionId}
-            selectedParagraphKey={selectedParagraphKey}
-            onSelectSection={handleSelectSection}
-            onSelectParagraph={(sectionId, paragraphIndex) => {
-              setSelectedSectionId(sectionId)
-              setSelectedParagraphKey(`${sectionId}:${paragraphIndex}`)
-            }}
+            ref={canvasRef}
+            state={editorState}
+            modifiedSectionIds={modifiedSectionIds}
+            onHtmlChange={handleCanvasHtmlChange}
+            onSelectionChange={handleCanvasSelectionChange}
           />
         </CenterPane>
 
         <DocumentAiEditPanel
-          selectedSectionId={selectedSectionId}
+          selectedSectionId={editorState.selectedSectionId}
           selectedSectionLabel={selectedSection?.title || '未选择章节'}
-          selectedParagraphLabel={selectedParagraphLabel}
-          history={selectedSectionId ? (sectionHistory[selectedSectionId] || []) : []}
+          selectedText={editorState.selectedText}
+          selectionLength={editorState.selectedText.trim().length}
+          history={currentHistory}
           busy={busy}
-          disabled={!selectedSection}
-          onSubmit={handleSectionEdit}
+          disabled={!editorState.documentId}
+          onSubmit={handleAiSubmit}
         />
       </Body>
 

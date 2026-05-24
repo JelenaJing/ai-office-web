@@ -392,3 +392,56 @@ export async function editDocumentSectionWithMinimax(input: {
     updatedAt: new Date().toISOString(),
   }
 }
+
+export async function editDocumentSelectionWithMinimax(input: {
+  record: DocumentRecord
+  instruction: string
+  selectedText: string
+  selectionContext?: {
+    sectionId?: string
+    beforeText?: string
+    afterText?: string
+    documentTitle?: string
+    sectionTitle?: string
+  }
+}): Promise<string> {
+  const selectedText = String(input.selectedText || '').trim()
+  if (!selectedText) {
+    throw new Error('selectedText 不能为空')
+  }
+
+  const replacement = isLlmConfigured()
+    ? await invokeLlmText(
+        [
+          {
+            role: 'system',
+            content: [
+              readSkillContext('edit'),
+              '你是 AI Office 的选中文本级文稿编辑引擎。',
+              input.record.language === 'en-US'
+                ? 'language: en-US\nstyle: formal_office_english'
+                : 'language: zh-CN\nstyle: formal_chinese_office',
+              '只允许改写用户选中的文本，不能改动其他内容，不能重写全文。',
+              '输出只能是替换后的文本，不要输出标题、解释、编号或引号。',
+              '如果依据不足，请在必要时保留“需要人工确认依据”。',
+            ].join('\n\n'),
+          },
+          {
+            role: 'user',
+            content: [
+              `文稿标题：${input.selectionContext?.documentTitle || input.record.draft.title}`,
+              input.selectionContext?.sectionTitle ? `所在章节：${input.selectionContext.sectionTitle}` : '',
+              `用户编辑指令：${input.instruction.trim()}`,
+              buildKnowledgeRefPromptBlock(input.record.knowledgeRefs),
+              input.selectionContext?.beforeText ? `前文：${input.selectionContext.beforeText}` : '',
+              `当前选中文本：${selectedText}`,
+              input.selectionContext?.afterText ? `后文：${input.selectionContext.afterText}` : '',
+            ].filter(Boolean).join('\n\n'),
+          },
+        ],
+        { temperature: 0.35, maxTokens: 1200 },
+      )
+    : `${selectedText}（已根据指令调整：${input.instruction.trim()}。需要人工确认依据。）`
+
+  return replacement.trim() || selectedText
+}

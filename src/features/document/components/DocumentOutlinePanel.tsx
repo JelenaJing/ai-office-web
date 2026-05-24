@@ -1,5 +1,5 @@
 import styled from 'styled-components'
-import type { DocumentDraft } from '../services/documentWorkbenchApi'
+import type { DocumentOutlineItem } from '../services/documentWorkbenchApi'
 
 const Panel = styled.section`
   border: 1px solid #d8e3ef;
@@ -37,25 +37,63 @@ const OutlineButton = styled.button<{ $active?: boolean; $level?: number }>`
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+`
+
+const OutlineLabel = styled.span`
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+`
+
+const OutlineMeta = styled.span`
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+`
+
+const ModifiedBadge = styled.span`
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #fff7e5;
+  color: #8a5f1f;
+  font-size: 11px;
+  font-weight: 800;
+`
+
+const TodoBadge = styled.span`
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #eef3f8;
+  color: #607487;
+  font-size: 11px;
+  font-weight: 700;
 `
 
 interface DocumentOutlinePanelProps {
-  document: DocumentDraft | null
+  outline: DocumentOutlineItem[]
   selectedSectionId: string | null
+  modifiedSectionIds: string[]
   onSelectSection: (sectionId: string) => void
 }
 
 export function DocumentOutlinePanel({
-  document,
+  outline,
   selectedSectionId,
+  modifiedSectionIds,
   onSelectSection,
 }: DocumentOutlinePanelProps) {
   return (
     <Panel data-testid="document-outline-panel">
       <Title>文档目录</Title>
-      <Description>{document ? `共 ${document.outline.length} 个章节，可点击定位到中间 A4 文稿页面。` : '生成文稿后，这里会显示章节目录。'}</Description>
+      <Description>{outline.length > 0 ? `共 ${outline.length} 个章节，可点击定位到中间 A4 文稿页面。` : '生成文稿后自动生成目录。'}</Description>
       <OutlineList>
-        {document?.outline.map((item, index) => (
+        {outline.length > 0 ? outline.map((item, index) => (
           <OutlineButton
             key={item.id}
             type="button"
@@ -64,10 +102,16 @@ export function DocumentOutlinePanel({
             $level={item.level}
             onClick={() => onSelectSection(item.id)}
           >
-            {index + 1}. {item.title}
+            <OutlineLabel>{index + 1}. {item.title}</OutlineLabel>
+            <OutlineMeta>
+              {modifiedSectionIds.includes(item.id) ? <ModifiedBadge>已修改</ModifiedBadge> : null}
+            </OutlineMeta>
           </OutlineButton>
-        )) ?? <div style={{ fontSize: 12, color: '#6b7f92' }}>生成文稿后，这里会显示章节目录。</div>}
+        )) : <div style={{ fontSize: 12, color: '#6b7f92', lineHeight: 1.7 }}>生成文稿后自动生成目录。</div>}
       </OutlineList>
+      <Description style={{ marginTop: 10, marginBottom: 0 }}>
+        <TodoBadge>TODO</TodoBadge> 拖拽重排将在后续版本开放。
+      </Description>
     </Panel>
   )
 }

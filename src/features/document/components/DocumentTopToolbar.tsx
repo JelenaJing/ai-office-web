@@ -1,5 +1,5 @@
 import styled from 'styled-components'
-import { AlertCircle, Download, FileDown, RotateCcw, Save } from 'lucide-react'
+import { AlertCircle, Clock3, Download, FileDown, RotateCcw, Save } from 'lucide-react'
 
 const Toolbar = styled.div`
   display: flex;
@@ -63,11 +63,18 @@ interface DocumentTopToolbarProps {
   knowledgeCount: number
   fallbackReason?: string | null
   artifactLabel?: string | null
+  dirty?: boolean
+  saving?: boolean
+  lastSavedAt?: string | null
+  docxReady?: boolean
+  exportError?: string | null
   onDownloadDocx: () => void
   onExportPdf: () => void
   onSave: () => void
   onRegenerate: () => void
+  onViewVersions: () => void
   busy?: boolean
+  pdfDisabled?: boolean
   regenerateDisabled?: boolean
 }
 
@@ -77,11 +84,18 @@ export function DocumentTopToolbar({
   knowledgeCount,
   fallbackReason,
   artifactLabel,
+  dirty,
+  saving,
+  lastSavedAt,
+  docxReady,
+  exportError,
   onDownloadDocx,
   onExportPdf,
   onSave,
   onRegenerate,
+  onViewVersions,
   busy,
+  pdfDisabled,
   regenerateDisabled,
 }: DocumentTopToolbarProps) {
   return (
@@ -91,6 +105,11 @@ export function DocumentTopToolbar({
         <MetaChip>模板：{templateLabel}</MetaChip>
         <MetaChip>知识库：已选择 {knowledgeCount} 个</MetaChip>
         {artifactLabel ? <MetaChip>当前产物：{artifactLabel}</MetaChip> : null}
+        {saving ? <MetaChip><Clock3 size={14} />保存中</MetaChip> : null}
+        {!saving && dirty ? <MetaChip $tone="warn">未保存修改</MetaChip> : null}
+        {!dirty && lastSavedAt ? <MetaChip>已保存：{new Date(lastSavedAt).toLocaleTimeString('zh-CN', { hour12: false })}</MetaChip> : null}
+        {docxReady ? <MetaChip>DOCX 已更新</MetaChip> : null}
+        {exportError ? <MetaChip $tone="warn">导出失败：{exportError}</MetaChip> : null}
         {fallbackReason ? (
           <MetaChip $tone="warn">
             <AlertCircle size={14} />
@@ -103,7 +122,7 @@ export function DocumentTopToolbar({
           <Download size={15} />
           下载 DOCX
         </ActionButton>
-        <ActionButton type="button" data-testid="document-export-pdf" onClick={onExportPdf} disabled={busy}>
+        <ActionButton type="button" data-testid="document-export-pdf" onClick={onExportPdf} disabled={busy || pdfDisabled}>
           <FileDown size={15} />
           导出 PDF
         </ActionButton>
@@ -119,6 +138,9 @@ export function DocumentTopToolbar({
         >
           <RotateCcw size={15} />
           重新生成
+        </ActionButton>
+        <ActionButton type="button" data-testid="document-view-versions" onClick={onViewVersions} disabled>
+          查看版本
         </ActionButton>
       </Actions>
     </Toolbar>
