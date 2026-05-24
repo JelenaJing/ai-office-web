@@ -1217,6 +1217,7 @@ export default function DocumentWorkbench() {
       />
       <input
         ref={importDocxInputRef}
+        data-testid="document-import-docx-input"
         style={hiddenInputStyles}
         type="file"
         accept=".docx"

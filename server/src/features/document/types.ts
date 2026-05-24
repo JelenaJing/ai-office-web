@@ -123,9 +123,16 @@ export interface DocumentTaskRecord {
   status: DocumentTaskStatus
   progress: number
   message: string
+  engine?: DocumentEngine
+  fallbackFrom?: 'minimax_docx'
+  fallbackReason?: string
   result?: DocumentTaskResult
   error?: string
   cancelRequested: boolean
+  startedAt?: string
+  completedAt?: string
+  failedAt?: string
+  lastProgressMessage?: string
   createdAt: number
   updatedAt: number
 }

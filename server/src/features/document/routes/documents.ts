@@ -15,7 +15,8 @@ import { saveDocumentDraftDocxArtifact } from '../services/documentArtifactServi
 import {
   editDocumentSectionWithMinimax,
   editDocumentSelectionWithMinimax,
-  runMinimaxDocxWithFallback,
+  runAcceptanceModeDocument,
+  runMinimaxDocx,
 } from '../services/minimaxDocxRunner'
 import { resolveDocumentDraftFromPayload } from '../services/documentEditablePayload'
 import { listDocumentTemplates } from '../services/documentTemplateCatalog'
@@ -30,6 +31,9 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 20 * 1024 * 1024 },
 })
+const DOCUMENT_TASK_TIMEOUT_MS = 90_000
+const MINIMAX_ATTEMPT_TIMEOUT_MS = 60_000
+const BUILTIN_ATTEMPT_TIMEOUT_MS = 30_000
 
 function resolveDocumentEngine(): { engine: DocumentEngine; fallback: DocumentFallbackMode } {
   const engine = process.env.DOCUMENT_ENGINE === 'builtin' ? 'builtin' : 'minimax_docx'
@@ -90,6 +94,100 @@ function normalizeAttachments(value: unknown): Array<{ id?: string; name?: strin
   return normalized
 }
 
+function isDocumentAcceptanceMode(): boolean {
+  return process.env.DOCUMENT_ACCEPTANCE_MODE === '1'
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms)
+    timer.unref?.()
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (error) => {
+        clearTimeout(timer)
+        reject(error)
+      },
+    )
+  })
+}
+
+async function runDocumentGeneration(input: {
+  userId: string
+  prompt: string
+  title: string
+  workspacePath: string
+  templateId?: string
+  knowledgeRefs: Awaited<ReturnType<typeof resolveDocumentKnowledgeRefs>>
+  documentType: DocumentType
+  language?: DocumentLanguage
+  engineConfig: ReturnType<typeof resolveDocumentEngine>
+}): Promise<Awaited<ReturnType<typeof runBuiltinDocumentEngine>>> {
+  if (isDocumentAcceptanceMode()) {
+    return runAcceptanceModeDocument(input)
+  }
+  if (input.engineConfig.engine === 'builtin') {
+    return withTimeout(
+      runBuiltinDocumentEngine({
+        userId: input.userId,
+        prompt: input.prompt,
+        title: input.title,
+        workspacePath: input.workspacePath,
+        templateId: input.templateId,
+        knowledgeRefs: input.knowledgeRefs,
+        documentType: input.documentType,
+        language: input.language === 'en-US' ? 'en-US' : 'zh-CN',
+      }),
+      DOCUMENT_TASK_TIMEOUT_MS,
+      `内置文稿引擎生成超时（${Math.floor(DOCUMENT_TASK_TIMEOUT_MS / 1000)} 秒）`,
+    )
+  }
+
+  try {
+    return await withTimeout(
+      runMinimaxDocx({
+        userId: input.userId,
+        prompt: input.prompt,
+        title: input.title,
+        workspacePath: input.workspacePath,
+        templateId: input.templateId,
+        knowledgeRefs: input.knowledgeRefs,
+        documentType: input.documentType,
+        language: input.language,
+      }),
+      MINIMAX_ATTEMPT_TIMEOUT_MS,
+      `MiniMax DOCX Skill 超时（${Math.floor(MINIMAX_ATTEMPT_TIMEOUT_MS / 1000)} 秒）`,
+    )
+  } catch (error) {
+    if (input.engineConfig.fallback !== 'builtin') {
+      throw error
+    }
+    const fallbackReason = error instanceof Error ? error.message : String(error)
+    const builtin = await withTimeout(
+      runBuiltinDocumentEngine({
+        userId: input.userId,
+        prompt: input.prompt,
+        title: input.title,
+        workspacePath: input.workspacePath,
+        templateId: input.templateId,
+        knowledgeRefs: input.knowledgeRefs,
+        documentType: input.documentType,
+        language: input.language === 'en-US' ? 'en-US' : 'zh-CN',
+      }),
+      BUILTIN_ATTEMPT_TIMEOUT_MS,
+      `内置文稿引擎回退后仍超时（${Math.floor(BUILTIN_ATTEMPT_TIMEOUT_MS / 1000)} 秒）`,
+    )
+    builtin.record.fallbackFrom = 'minimax_docx'
+    builtin.record.fallbackReason = fallbackReason
+    builtin.result.fallbackFrom = 'minimax_docx'
+    builtin.result.fallbackReason = fallbackReason
+    return builtin
+  }
+}
+
 router.post('/task-router', async (req, res) => {
   if (!await requireAccountUser(req, res)) return
 
@@ -147,52 +245,81 @@ router.post('/start', async (req, res) => {
   updateDocumentTask(task.taskId, {
     status: 'running',
     progress: 5,
+    engine: engineConfig.engine,
     message: engineConfig.engine === 'minimax_docx' ? '正在启动 MiniMax DOCX Skill…' : '正在启动内置文稿引擎…',
+    startedAt: new Date().toISOString(),
   })
 
   void (async () => {
+    let finalized = false
+    const watchdog = setTimeout(() => {
+      if (finalized) return
+      finalized = true
+      updateDocumentTask(task.taskId, {
+        status: 'failed',
+        progress: 100,
+        message: `文稿生成超时（${Math.floor(DOCUMENT_TASK_TIMEOUT_MS / 1000)} 秒），请重试或检查当前引擎配置`,
+        error: `文稿生成超时（${Math.floor(DOCUMENT_TASK_TIMEOUT_MS / 1000)} 秒）`,
+        failedAt: new Date().toISOString(),
+      })
+    }, DOCUMENT_TASK_TIMEOUT_MS + 5_000)
+    watchdog.unref?.()
+
     try {
+      updateDocumentTask(task.taskId, {
+        progress: 12,
+        message: '正在整理知识库与附件引用…',
+      })
       const refs = await resolveDocumentKnowledgeRefs({
         workspacePath,
         knowledgeRefs,
       })
-      const runResult = engineConfig.engine === 'builtin'
-        ? await runBuiltinDocumentEngine({
-            userId,
-            prompt,
-            title,
-            workspacePath,
-            templateId,
-            knowledgeRefs: refs,
-            documentType,
-            language: language === 'en-US' ? 'en-US' : 'zh-CN',
-          })
-        : await runMinimaxDocxWithFallback({
-            userId,
-            prompt,
-            title,
-            workspacePath,
-            templateId,
-            knowledgeRefs: refs,
-            documentType,
-            language,
-            fallback: engineConfig.fallback,
-          })
+      if (finalized) return
+      updateDocumentTask(task.taskId, {
+        progress: 28,
+        message: isDocumentAcceptanceMode()
+          ? 'DOCUMENT_ACCEPTANCE_MODE 已启用，正在生成稳定验收文稿…'
+          : engineConfig.engine === 'minimax_docx'
+            ? '正在生成文稿并准备 DOCX artifact…'
+            : '正在使用内置文稿引擎生成文稿…',
+      })
+      const runResult = await runDocumentGeneration({
+        userId,
+        prompt,
+        title,
+        workspacePath,
+        templateId,
+        knowledgeRefs: refs,
+        documentType,
+        language,
+        engineConfig,
+      })
+      if (finalized) return
       saveDocumentRecord(runResult.record)
+      finalized = true
+      clearTimeout(watchdog)
       updateDocumentTask(task.taskId, {
         documentId: runResult.record.documentId,
         status: 'completed',
         progress: 100,
         message: runResult.result.engine === 'minimax_docx' ? 'MiniMax DOCX Skill 任务已完成' : '内置文稿引擎任务已完成',
+        engine: runResult.result.engine,
+        fallbackFrom: runResult.result.fallbackFrom,
+        fallbackReason: runResult.result.fallbackReason,
         result: runResult.result,
+        completedAt: new Date().toISOString(),
       })
     } catch (error) {
+      if (finalized) return
+      finalized = true
+      clearTimeout(watchdog)
       const message = error instanceof Error ? error.message : String(error)
       updateDocumentTask(task.taskId, {
         status: 'failed',
         progress: 100,
         message,
         error: message,
+        failedAt: new Date().toISOString(),
       })
     }
   })()
@@ -223,6 +350,13 @@ router.get('/tasks/:taskId', async (req, res) => {
     status: task.status,
     progress: task.progress,
     message: task.message,
+    engine: task.engine,
+    fallbackFrom: task.fallbackFrom,
+    fallbackReason: task.fallbackReason,
+    startedAt: task.startedAt,
+    completedAt: task.completedAt,
+    failedAt: task.failedAt,
+    lastProgressMessage: task.lastProgressMessage,
     result: task.result,
     error: task.error,
   })

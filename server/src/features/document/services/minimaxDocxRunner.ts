@@ -144,6 +144,60 @@ function buildDeterministicDraft(input: {
   })
 }
 
+function buildAcceptanceModeDraft(input: {
+  prompt: string
+  title: string
+  outline: string[]
+  language: DocumentLanguage
+  documentType: DocumentType
+  templateId?: string
+  knowledgeRefs: DocumentKnowledgeRef[]
+}): DocumentDraft {
+  const annualReportSections = [
+    {
+      id: 'section-achievements',
+      title: '主要成绩',
+      content: [
+        '本年度围绕学院重点工作，持续推进教学改革、科研组织与协同育人机制优化，整体运行平稳有序。',
+        '在人才培养方面，学院完善课程建设和实践教学安排，教学质量保障机制进一步健全，重点项目推进效率明显提升。',
+        '在治理协同方面，学院强化跨部门协作与过程跟踪，形成了较为清晰的年度任务闭环，为后续工作奠定了基础。',
+      ].join('\n\n'),
+    },
+    {
+      id: 'section-problems',
+      title: '问题分析',
+      content: [
+        '当前仍存在部分重点任务推进节奏不均衡、专项工作统筹深度不足的问题，个别事项在计划执行与复盘评估之间衔接不够紧密。',
+        '部分业务数据沉淀与共享机制尚未完全打通，导致决策支撑和过程监测的及时性有待提升，部分经验成果尚未形成可复制的制度化做法。',
+        '面向下一阶段高质量发展的要求，现有资源配置、风险预警和依据支撑能力仍需进一步加强，涉及政策口径的表述需要人工确认依据。',
+      ].join('\n\n'),
+    },
+    {
+      id: 'section-next-plan',
+      title: '下一年度计划',
+      content: [
+        '下一年度将围绕重点任务清单推进落实，进一步细化时间节点、责任分工与过程评估机制，确保重点工作按期闭环。',
+        '持续加强教学、科研、管理等关键领域的数据协同和制度建设，提升资源配置效率与治理响应速度。',
+        '聚焦品牌项目培育、成果转化与风险防控，完善常态化复盘机制，对涉及政策、制度与数据依据的内容继续坚持人工确认依据后再正式发布。',
+      ].join('\n\n'),
+    },
+  ]
+  const useAnnualReport = /年度|annual/i.test(input.prompt) || input.outline.some((item) => /主要成绩|问题分析|下一年度计划/.test(item))
+  if (!useAnnualReport) {
+    return buildDeterministicDraft(input)
+  }
+  return normalizeDocumentDraft({
+    raw: { title: input.title, sections: annualReportSections },
+    title: input.title,
+    type: input.documentType,
+    language: input.language,
+    engine: 'minimax_docx',
+    templateId: input.templateId,
+    knowledgeRefs: input.knowledgeRefs,
+    preferredOutline: annualReportSections.map((section) => section.title),
+  })
+}
+
 async function generateDraftViaSkill(input: {
   prompt: string
   title: string
@@ -269,6 +323,81 @@ export async function runMinimaxDocx(input: {
     language,
     templateId: template?.id,
     templateLabel: template?.label,
+    documentType: input.documentType,
+    outline: template?.outline || [],
+    knowledgeRefs: input.knowledgeRefs,
+  })
+  draft.id = `document-${randomUUID()}`
+
+  const artifactResult = await saveDocumentDraftDocxArtifact({
+    userId: input.userId,
+    workspacePath: input.workspacePath,
+    skillId: 'minimax.docx',
+    documentId: draft.id,
+    draft,
+    knowledgeRefs: input.knowledgeRefs,
+  })
+
+  const now = new Date().toISOString()
+  const record: DocumentRecord = {
+    documentId: draft.id,
+    userId: input.userId,
+    workspacePath: input.workspacePath,
+    engine: 'minimax_docx',
+    skillId: 'minimax.docx',
+    title: draft.title,
+    language,
+    documentType: input.documentType,
+    templateId: template?.id,
+    templateLabel: template?.label,
+    knowledgeRefs: input.knowledgeRefs,
+    draft,
+    artifactId: artifactResult.artifact.id,
+    exportUrl: artifactResult.exportUrl,
+    filename: artifactResult.filename,
+    sourceRefs: artifactResult.artifact.sourceRefs ?? [],
+    artifactKnowledgeRefs: artifactResult.artifact.knowledgeRefs ?? [],
+    artifact: artifactResult.artifact,
+    createdAt: now,
+    updatedAt: now,
+  }
+
+  return {
+    record,
+    result: {
+      engine: 'minimax_docx',
+      skillId: 'minimax.docx',
+      documentId: record.documentId,
+      artifactId: record.artifactId,
+      exportUrl: record.exportUrl,
+      filename: record.filename,
+      document: record.draft,
+      outline: buildDocumentOutline(record.draft),
+      templateId: record.templateId,
+      templateLabel: record.templateLabel,
+      knowledgeRefs: record.knowledgeRefs,
+    },
+  }
+}
+
+export async function runAcceptanceModeDocument(input: {
+  userId: string
+  prompt: string
+  title?: string
+  workspacePath: string
+  templateId?: string
+  knowledgeRefs: DocumentKnowledgeRef[]
+  documentType: DocumentType
+  language?: DocumentLanguage
+}): Promise<{ record: DocumentRecord; result: DocumentTaskResult }> {
+  const language = resolveDocumentLanguage(input.prompt, input.language)
+  const template = getDocumentTemplateDefinition(input.templateId)
+  const title = input.title?.trim() || template?.defaultTitle || '办公文稿'
+  const draft = buildAcceptanceModeDraft({
+    prompt: input.prompt,
+    title,
+    language,
+    templateId: template?.id,
     documentType: input.documentType,
     outline: template?.outline || [],
     knowledgeRefs: input.knowledgeRefs,

@@ -20,6 +20,7 @@ export function createDocumentTask(): DocumentTaskRecord {
     progress: 0,
     message: '任务已排队',
     cancelRequested: false,
+    lastProgressMessage: '任务已排队',
     createdAt: now,
     updatedAt: now,
   }
@@ -34,7 +35,10 @@ export function getDocumentTask(taskId: string): DocumentTaskRecord | undefined 
 export function updateDocumentTask(taskId: string, patch: Partial<DocumentTaskRecord>): void {
   const task = tasks.get(taskId)
   if (!task) return
-  Object.assign(task, patch, { updatedAt: Date.now() })
+  Object.assign(task, patch, {
+    lastProgressMessage: patch.message ?? task.lastProgressMessage,
+    updatedAt: Date.now(),
+  })
 }
 
 export function saveDocumentRecord(record: DocumentRecord): DocumentRecord {

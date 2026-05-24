@@ -174,6 +174,13 @@ export interface DocumentTaskStatusResponse {
   status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
   progress: number
   message: string
+  engine?: DocumentEngine
+  fallbackFrom?: 'minimax_docx'
+  fallbackReason?: string
+  startedAt?: string
+  completedAt?: string
+  failedAt?: string
+  lastProgressMessage?: string
   result?: DocumentTaskResult
   error?: string
 }
@@ -327,8 +334,11 @@ export async function waitForDocumentTask(
   taskId: string,
   onProgress?: (state: DocumentTaskStatusResponse) => void,
 ): Promise<DocumentTaskResult> {
+  const deadline = Date.now() + 120_000
+  let lastState: DocumentTaskStatusResponse | null = null
   for (;;) {
     const state = await getDocumentTask(taskId)
+    lastState = state
     onProgress?.(state)
     if (state.status === 'completed' && state.result) {
       return state.result
@@ -336,8 +346,12 @@ export async function waitForDocumentTask(
     if (state.status === 'failed' || state.status === 'cancelled') {
       throw new Error(state.error || state.message || '文稿任务失败')
     }
+    if (Date.now() >= deadline) {
+      throw new Error(state.error || state.lastProgressMessage || state.message || '文稿任务轮询超时')
+    }
     await new Promise((resolve) => window.setTimeout(resolve, 1200))
   }
+  throw new Error(lastState?.error || lastState?.lastProgressMessage || lastState?.message || '文稿任务轮询异常退出')
 }
 
 export async function editDocumentSection(input: {

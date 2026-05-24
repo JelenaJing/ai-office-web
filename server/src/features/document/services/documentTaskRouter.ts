@@ -29,6 +29,10 @@ function hasEditVerb(text: string): boolean {
   return /改|改写|润色|压缩|扩写|精简|补充|调整|优化|重写|formal|rewrite/i.test(text)
 }
 
+function hasExplicitWorkflowIntent(text: string): boolean {
+  return /综述|文献综述|literature review|论文|paper|学术|拜访函|贺信|正式模板|公文模板|套打模板|填表|填这个表|表单|form|通知|安排通知|培训安排|会议纪要|纪要|年度总结|年终总结|年度工作总结|年报/.test(text)
+}
+
 function resolveDocumentType(intent: DocumentTaskIntent, fallback: DocumentType = 'report'): DocumentType {
   switch (intent) {
     case 'official_notice':
@@ -76,8 +80,9 @@ export function routeDocumentTask(input: RouteDocumentTaskInput): RouteDocumentT
   const knowledgeRefs = Array.isArray(input.knowledgeRefs) ? input.knowledgeRefs : []
   const attachments = Array.isArray(input.attachments) ? input.attachments : []
   const lower = prompt.toLowerCase()
+  const explicitWorkflowIntent = hasExplicitWorkflowIntent(prompt)
 
-  if (selectedText && hasEditVerb(prompt)) {
+  if (selectedText && hasEditVerb(prompt) && !explicitWorkflowIntent) {
     return buildResult({
       intent: 'edit_selection',
       confidence: 0.96,
@@ -87,7 +92,7 @@ export function routeDocumentTask(input: RouteDocumentTaskInput): RouteDocumentT
     })
   }
 
-  if (!selectedText && selectedSectionId && hasEditVerb(prompt)) {
+  if (!selectedText && selectedSectionId && hasEditVerb(prompt) && !explicitWorkflowIntent) {
     return buildResult({
       intent: 'edit_section',
       confidence: 0.92,
