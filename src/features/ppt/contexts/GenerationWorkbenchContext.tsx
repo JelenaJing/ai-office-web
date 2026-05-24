@@ -145,9 +145,12 @@ export interface GenerationModeSession {
   pptDeckId: string | null
   pptArtifactId: string | null
   pptDownloadUrl: string | null
-  pptEngine: 'builtin' | 'minimax_pptx_generator' | null
+  pptEngine: 'builtin' | 'minimax_pptx_generator' | 'slidev' | null
   pptFallbackFrom: 'minimax_pptx_generator' | null
   pptFallbackReason: string | null
+  pptOutputMode: 'editable_pptx' | 'web_deck' | null
+  pptPreviewUrl: string | null
+  pptSlidevMarkdown: string | null
   pptSlides: PptSlidePreview[]
   pptLiveSlides: PptSlidePreview[]
   pptTotalSlides: number
@@ -276,6 +279,9 @@ function createEmptySession(): GenerationModeSession {
     pptEngine: null,
     pptFallbackFrom: null,
     pptFallbackReason: null,
+    pptOutputMode: null,
+    pptPreviewUrl: null,
+    pptSlidevMarkdown: null,
     pptSlides: [],
     pptLiveSlides: [],
     pptTotalSlides: 0,
@@ -413,6 +419,9 @@ export function GenerationWorkbenchProvider({ children }: { children: ReactNode 
           pptEngine: s.pptEngine,
           pptFallbackFrom: s.pptFallbackFrom,
           pptFallbackReason: s.pptFallbackReason,
+          pptOutputMode: s.pptOutputMode,
+          pptPreviewUrl: s.pptPreviewUrl,
+          pptSlidevMarkdown: s.pptSlidevMarkdown,
           pptSlides: s.pptSlides,
           pptLiveSlides: s.pptLiveSlides,
           pptTotalSlides: s.pptTotalSlides,

@@ -150,6 +150,7 @@ const SendButton = styled.button`
 interface PptAiEditPanelProps {
   slide: PptSlidePreview | null
   pageNumber: number
+  engineLabel: string
   messages: PptAiMessage[]
   status: 'idle' | 'editing' | 'applying' | 'error'
   onSend: (instruction: string) => Promise<void> | void
@@ -164,7 +165,7 @@ const QUICK_ACTIONS = [
   '重新设计本页',
 ]
 
-export default function PptAiEditPanel({ slide, pageNumber, messages, status, onSend }: PptAiEditPanelProps) {
+export default function PptAiEditPanel({ slide, pageNumber, engineLabel, messages, status, onSend }: PptAiEditPanelProps) {
   const [draft, setDraft] = useState('')
   const busy = status === 'editing' || status === 'applying'
   const title = slide?.title || `第 ${pageNumber} 页`
@@ -188,6 +189,7 @@ export default function PptAiEditPanel({ slide, pageNumber, messages, status, on
       <Header>
         <Eyebrow>AI 页面级修改</Eyebrow>
         <Title>当前正在修改：第 {pageNumber} 页 / {title}</Title>
+        <Hint>{engineLabel}</Hint>
         <Hint>本次只会修改第 {pageNumber} 页</Hint>
       </Header>
 

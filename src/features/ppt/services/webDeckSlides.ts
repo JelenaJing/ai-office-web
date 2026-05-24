@@ -34,6 +34,25 @@ function pickTimeline(value: unknown): PptSlidePreview['timeline'] | undefined {
   return timeline.length > 0 ? timeline : undefined
 }
 
+function pickPreviewImages(value: unknown): Array<{ slideId?: string; index: number; previewImageUrl?: string; previewHtmlUrl?: string }> {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((entry, index) => {
+      const raw = pickObject(entry)
+      if (!raw) return null
+      const previewImageUrl = pickString(raw.previewImageUrl)
+      const previewHtmlUrl = pickString(raw.previewHtmlUrl)
+      if (!previewImageUrl && !previewHtmlUrl) return null
+      return {
+        slideId: pickString(raw.slideId),
+        index: typeof raw.index === 'number' ? raw.index : index,
+        previewImageUrl,
+        previewHtmlUrl,
+      }
+    })
+    .filter((item): item is { slideId?: string; index: number; previewImageUrl?: string; previewHtmlUrl?: string } => Boolean(item))
+}
+
 function pickTable(value: unknown): PptSlidePreview['table'] | undefined {
   const raw = pickObject(value)
   if (!raw) return undefined
@@ -131,11 +150,33 @@ export function toPptSlidePreview(slide: Record<string, unknown>, index: number,
 }
 
 export function mergeDeckIntoLiveSlides(deck: unknown, previousSlides: PptSlidePreview[]): PptSlidePreview[] {
-  const rawSlides = deck && typeof deck === 'object' && Array.isArray((deck as { slides?: unknown[] }).slides)
-    ? (deck as { slides: Array<Record<string, unknown>> }).slides
+  const rawDeck = pickObject(deck)
+  const nestedDeck = pickObject(rawDeck?.deck)
+  const previewImages = pickPreviewImages(rawDeck?.previewImages ?? nestedDeck?.previewImages)
+  const previewBySlideId = new Map<string, { previewImageUrl?: string; previewHtmlUrl?: string }>()
+  const previewByIndex = new Map<number, { previewImageUrl?: string; previewHtmlUrl?: string }>()
+  previewImages.forEach((preview) => {
+    if (preview.slideId) previewBySlideId.set(preview.slideId, preview)
+    previewByIndex.set(preview.index, preview)
+  })
+  const rawSlides = Array.isArray(rawDeck?.slides)
+    ? rawDeck.slides as Array<Record<string, unknown>>
+    : Array.isArray(nestedDeck?.slides)
+      ? nestedDeck.slides as Array<Record<string, unknown>>
     : []
   if (rawSlides.length === 0) return previousSlides
-  return rawSlides.map((slide, index) => toPptSlidePreview(slide, index, previousSlides[index]))
+  return rawSlides.map((slide, index) => {
+    const slideId = pickString(slide.id)
+    const preview = (slideId ? previewBySlideId.get(slideId) : null) || previewByIndex.get(index)
+    const nextSlide = preview
+      ? {
+          ...slide,
+          previewImageUrl: pickString(slide.previewImageUrl) || preview.previewImageUrl,
+          previewHtmlUrl: pickString(slide.previewHtmlUrl) || preview.previewHtmlUrl,
+        }
+      : slide
+    return toPptSlidePreview(nextSlide, index, previousSlides[index])
+  })
 }
 
 export function replaceSlideInPreviews(slides: PptSlidePreview[], updatedSlide: unknown): PptSlidePreview[] {

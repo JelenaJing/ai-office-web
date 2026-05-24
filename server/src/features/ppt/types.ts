@@ -14,6 +14,7 @@ export interface WebDeckSlide {
   speakerNotes?: string
   layout?: string
   previewImageUrl?: string
+  previewHtmlUrl?: string
   table?: {
     headers: string[]
     rows: string[][]
@@ -39,6 +40,13 @@ export interface WebDeckSlide {
   }
 }
 
+export interface WebDeckPreviewImage {
+  slideId?: string
+  index: number
+  previewImageUrl?: string
+  previewHtmlUrl?: string
+}
+
 export interface WebDeckDocument {
   deckId: string
   title: string
@@ -61,14 +69,23 @@ export interface WebDeckDocument {
   }
 }
 
+export type PptEngine = 'builtin' | 'minimax_pptx_generator' | 'slidev'
+export type PptOutputMode = 'editable_pptx' | 'web_deck'
+
 export interface WebDeckTaskResult {
-  engine: 'builtin' | 'minimax_pptx_generator'
+  engine: PptEngine
+  outputMode?: PptOutputMode
   deckId: string
   deck: WebDeckDocument
   slides: WebDeckSlide[]
-  slidePlan: GeneratedSlidePlan
+  previewImages: WebDeckPreviewImage[]
+  slidePlan?: GeneratedSlidePlan
   artifact: Artifact
   exportUrl: string
+  previewUrl?: string
+  slidevMarkdown?: string
+  markdownArtifactId?: string
+  htmlArtifactId?: string
   fallbackFrom?: 'minimax_pptx_generator'
   fallbackReason?: string
   relationships: {
@@ -89,9 +106,12 @@ export interface WebDeckRuntimeMeta {
   deckId: string
   userId: string
   workspacePath: string
-  engine: 'builtin' | 'minimax_pptx_generator'
+  engine: PptEngine
+  outputMode?: PptOutputMode
   skillId: string
   artifactId: string | null
   exportUrl: string | null
+  previewUrl?: string | null
+  htmlArtifactId?: string | null
   updatedAt: string
 }

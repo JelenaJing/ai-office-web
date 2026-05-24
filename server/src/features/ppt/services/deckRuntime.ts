@@ -5,11 +5,11 @@ import { randomUUID } from 'crypto'
 import { saveSkillArtifact } from '../../../lib/skillArtifact'
 import {
   buildSlidePlanFromPrompt,
-  writePptxFile,
   type GeneratedSlidePlan,
   type SlidePlanItem,
 } from './simplePptx'
-import type { WebDeckDocument, WebDeckSlide, WebDeckTaskResult } from '../types'
+import { withDeckPreviewImages, writeDeckPptxFile } from './deckRenderer'
+import type { WebDeckDocument, WebDeckPreviewImage, WebDeckSlide, WebDeckTaskResult } from '../types'
 
 export const PPT_PARTIAL_MISSING = [
   'Electron RetemplateEngine layout matching is only represented as metadata on Web',
@@ -29,6 +29,15 @@ export interface CreateDeckInput {
   sourceId?: string
   isCancelled?: () => boolean
   onStep?: (message: string, progress: number) => void
+}
+
+export interface RetemplateDeckInput {
+  userId: string
+  username?: string
+  workspacePath: string
+  deck: WebDeckDocument
+  templateId: string
+  skillId?: string
 }
 
 function assertNotCancelled(input: Pick<CreateDeckInput, 'isCancelled'>): void {
@@ -104,30 +113,42 @@ export async function exportDeckWithBuiltin(input: {
   workspacePath: string
   deck: WebDeckDocument
   skillId?: string
-}): Promise<{ artifact: WebDeckTaskResult['artifact']; exportUrl: string; deck: WebDeckDocument }> {
-  const plan = toGeneratedSlidePlanFromDeck(input.deck)
+}): Promise<{ artifact: WebDeckTaskResult['artifact']; exportUrl: string; deck: WebDeckDocument; previewImages: WebDeckPreviewImage[] }> {
+  console.info('[ppt-runtime] render start')
+  console.info(`[ppt-runtime] deckId=${input.deck.deckId}`)
+  console.info(`[ppt-runtime] templateId=${input.deck.templateId}`)
   const safeName = (input.deck.title || 'presentation').replace(/[^\w\u4e00-\u9fa5\-]+/g, '_').slice(0, 60) || 'presentation'
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-office-ppt-export-'))
   const tmpPath = path.join(tmpDir, `${safeName}.pptx`)
   try {
-    await writePptxFile(plan, tmpPath)
+    const rendered = withDeckPreviewImages(input.deck)
+    const deck = rendered.deck
+    console.info(`[ppt-runtime] previewImagesCount=${rendered.previewImages.length}`)
+    console.info(`[ppt-runtime] pptxExportPath=${tmpPath}`)
+    await writeDeckPptxFile(deck, tmpPath)
     const artifact = saveSkillArtifact({
       userId: input.userId,
       username: input.username,
       workspacePath: input.workspacePath,
       skillId: input.skillId || 'web.ppt.deck.create',
       type: 'presentation',
-      title: input.deck.title,
+      title: deck.title,
       filename: `${safeName}.pptx`,
       format: 'pptx',
       content: fs.readFileSync(tmpPath),
-      deckId: input.deck.deckId,
-      sourceRefs: input.deck.sourceRefs.map((ref) => ({ type: ref.type, id: ref.id, label: ref.label })),
+      deckId: deck.deckId,
+      sourceRefs: deck.sourceRefs.map((ref) => ({ type: ref.type, id: ref.id, label: ref.label })),
     })
     const exportUrl = artifact.exports?.[0]?.url || `/api/ppt/decks/${input.deck.deckId}/download`
-    input.deck.artifactRefs = [{ artifactId: artifact.id, type: artifact.type, relation: 'export' }]
-    input.deck.updatedAt = new Date().toISOString()
-    return { artifact, exportUrl, deck: input.deck }
+    deck.artifactRefs = [{ artifactId: artifact.id, type: artifact.type, relation: 'export' }]
+    deck.updatedAt = new Date().toISOString()
+    console.info(`[ppt-runtime] outputArtifactId=${artifact.id}`)
+    console.info(`[ppt-runtime] exportUrl=${exportUrl}`)
+    return { artifact, exportUrl, deck, previewImages: rendered.previewImages }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.info(`[ppt-runtime] builtinExportFailed=${message}`)
+    throw new Error(`内置 PPT 渲染失败：${message}`)
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true })
   }
@@ -191,7 +212,7 @@ export async function createDeckFromPrompt(input: CreateDeckInput): Promise<WebD
   emit('正在生成 DeckDocument 内容层…', 20)
   const plan = await buildSlidePlanFromPrompt(input.title, input.prompt)
   const deckId = randomUUID()
-  const templateId = input.templateId || 'web-default'
+  const templateId = input.templateId || 'business_report'
   const deck = buildDeckDocument({
     deckId,
     plan,
@@ -200,59 +221,46 @@ export async function createDeckFromPrompt(input: CreateDeckInput): Promise<WebD
     sourceId: input.sourceId,
     chain: 'web-deck-document-runtime',
   })
+  console.info(`[ppt-runtime] deckId=${deckId}`)
 
   assertNotCancelled(input)
   emit('正在渲染 DeckDocument 为 PPTX…', 70)
-  const safeName = (deck.title || 'presentation').replace(/[^\w\u4e00-\u9fa5\-]+/g, '_').slice(0, 60) || 'presentation'
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-office-ppt-'))
-  const tmpPath = path.join(tmpDir, `${safeName}.pptx`)
-  await writePptxFile(plan, tmpPath)
-
-  assertNotCancelled(input)
-  emit('正在保存 PPT Artifact…', 90)
-  const artifact = saveSkillArtifact({
+  const exported = await exportDeckWithBuiltin({
     userId: input.userId,
     username: input.username,
     workspacePath: input.workspacePath,
+    deck,
     skillId: 'web.ppt.deck.create',
-    type: 'presentation',
-    title: deck.title,
-    filename: `${safeName}.pptx`,
-    format: 'pptx',
-    content: fs.readFileSync(tmpPath),
-    deckId,
-    sourceRefs: deck.sourceRefs.map((ref) => ({ type: ref.type, id: ref.id, label: ref.label })),
   })
-  deck.artifactRefs = [
-    { artifactId: artifact.id, type: artifact.type, relation: 'export' },
-  ]
-  console.info(`[ppt-runtime] outputArtifactId=${artifact.id}`)
-  console.info(`[ppt-runtime] exportUrl=${artifact.exports?.[0]?.url || `/api/ppt/decks/${deckId}/download`}`)
 
-  fs.rmSync(tmpDir, { recursive: true, force: true })
+  assertNotCancelled(input)
+  emit('正在生成页面预览…', 85)
+  emit('正在保存 PPT Artifact…', 90)
+  console.info(`[ppt-runtime] previewImagesCount=${exported.previewImages.length}`)
 
   return {
     engine: 'builtin',
     deckId,
-    deck,
-    slides: deck.slides,
+    deck: exported.deck,
+    slides: exported.deck.slides,
+    previewImages: exported.previewImages,
     slidePlan: plan,
-    artifact,
-    exportUrl: artifact.exports?.[0]?.url || `/api/ppt/decks/${deckId}/download`,
+    artifact: exported.artifact,
+    exportUrl: exported.exportUrl,
     relationships: {
       deckId,
-      artifactId: artifact.id,
-      sourceRefs: deck.sourceRefs,
+      artifactId: exported.artifact.id,
+      sourceRefs: exported.deck.sourceRefs,
     },
     diagnostics: {
       chain: 'web-deck-document-runtime',
-      steps,
+      steps: [...steps, 'preview:svg-rendered'],
       partialMissing: [...PPT_PARTIAL_MISSING],
     },
   }
 }
 
-export function retemplateDeck(deck: WebDeckDocument, templateId: string): WebDeckDocument {
+function applyDeckTemplate(deck: WebDeckDocument, templateId: string): WebDeckDocument {
   const layouts = deck.templateManifest.layouts
   return {
     ...deck,
@@ -268,5 +276,29 @@ export function retemplateDeck(deck: WebDeckDocument, templateId: string): WebDe
       chain: 'web-deck-document-runtime',
       partialMissing: [...PPT_PARTIAL_MISSING],
     },
+  }
+}
+
+export async function retemplateDeck(input: RetemplateDeckInput): Promise<{
+  deck: WebDeckDocument
+  artifact: WebDeckTaskResult['artifact']
+  exportUrl: string
+  previewImages: WebDeckPreviewImage[]
+  tokenUsed: false
+}> {
+  const nextDeck = applyDeckTemplate(input.deck, input.templateId)
+  const exported = await exportDeckWithBuiltin({
+    userId: input.userId,
+    username: input.username,
+    workspacePath: input.workspacePath,
+    deck: nextDeck,
+    skillId: input.skillId || 'web.ppt.deck.create',
+  })
+  return {
+    deck: exported.deck,
+    artifact: exported.artifact,
+    exportUrl: exported.exportUrl,
+    previewImages: exported.previewImages,
+    tokenUsed: false,
   }
 }

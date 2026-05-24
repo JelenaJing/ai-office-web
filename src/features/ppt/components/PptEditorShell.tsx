@@ -5,6 +5,7 @@ import PptAiEditPanel from './PptAiEditPanel'
 import PptCanvasPreview from './PptCanvasPreview'
 import PptSlideNavigator from './PptSlideNavigator'
 import PptTopToolbar from './PptTopToolbar'
+import type { PptTemplateOption } from '../services/pptTemplates'
 
 const Shell = styled.div`
   flex: 1;
@@ -53,12 +54,19 @@ interface PptEditorShellProps {
   slides: PptSlidePreview[]
   activeSlideIndex: number
   engineLabel: string
+  slideEditEngineLabel: string
+  templateLabel: string
+  templateId: string | null
+  templateOptions: PptTemplateOption[]
+  statusMessage?: string | null
   dirty: boolean
   messages: Record<string, PptAiMessage[]>
   editingSlideId: string | null
   slideEditStatus: 'idle' | 'editing' | 'applying' | 'error'
+  templateBusy?: boolean
   onSelectSlide: (index: number) => void
   onDownload: () => void
+  onTemplateChange: (templateId: string) => void
   onRegenerate: () => void
   onSave: () => void
   onEditSlide: (instruction: string) => Promise<void> | void
@@ -69,12 +77,19 @@ export default function PptEditorShell({
   slides,
   activeSlideIndex,
   engineLabel,
+  slideEditEngineLabel,
+  templateLabel,
+  templateId,
+  templateOptions,
+  statusMessage,
   dirty,
   messages,
   editingSlideId,
   slideEditStatus,
+  templateBusy,
   onSelectSlide,
   onDownload,
+  onTemplateChange,
   onRegenerate,
   onSave,
   onEditSlide,
@@ -92,11 +107,18 @@ export default function PptEditorShell({
       <PptTopToolbar
         title={title}
         engineLabel={engineLabel}
+        slideEditEngineLabel={slideEditEngineLabel}
         pageLabel={pageLabel}
+        templateLabel={templateLabel}
+        templateId={templateId}
+        templateOptions={templateOptions}
+        statusMessage={statusMessage}
         dirty={dirty}
         aiPanelCollapsed={aiPanelCollapsed}
         canSave={dirty}
+        templateBusy={templateBusy}
         onDownload={onDownload}
+        onTemplateChange={onTemplateChange}
         onRegenerate={onRegenerate}
         onSave={onSave}
         onToggleAiPanel={() => setAiPanelCollapsed((value) => !value)}
@@ -113,11 +135,12 @@ export default function PptEditorShell({
         <RightPaneWrap $collapsed={aiPanelCollapsed}>
           {!aiPanelCollapsed ? (
             <PptAiEditPanel
-              slide={activeSlide}
-              pageNumber={activeSlideIndex + 1}
-              messages={activeMessages}
-              status={slideEditStatus}
-              onSend={onEditSlide}
+                slide={activeSlide}
+                pageNumber={activeSlideIndex + 1}
+                engineLabel={slideEditEngineLabel}
+                messages={activeMessages}
+                status={slideEditStatus}
+                onSend={onEditSlide}
             />
           ) : null}
         </RightPaneWrap>

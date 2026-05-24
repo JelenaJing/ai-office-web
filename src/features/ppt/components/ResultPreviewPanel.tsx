@@ -35,7 +35,8 @@ import { platformApi } from '../../../platform'
 import { artifactDownloadFilename, artifactHasExport } from '../../../utils/artifactDisplay'
 import { webMigrationLabel } from '../../../platform/webMigration'
 import { buildNearbySlidesContext, mergeDeckIntoLiveSlides, replaceSlideInPreviews } from '../services/webDeckSlides'
-import { editWebPptSlide, exportWebPptDeck } from '../services/pptWebGeneration'
+import { editWebPptSlide, exportWebPptDeck, retemplateWebPptDeck } from '../services/pptWebGeneration'
+import { buildPptTemplateOptions, resolvePptTemplateId, resolvePptTemplateLabel } from '../services/pptTemplates'
 
 const Shell = styled.section`
   flex: 1;
@@ -683,6 +684,9 @@ export default function ResultPreviewPanel() {
   const pptEngine = workbench.sessions.ppt.pptEngine
   const pptFallbackFrom = workbench.sessions.ppt.pptFallbackFrom
   const pptFallbackReason = workbench.sessions.ppt.pptFallbackReason
+  const pptOutputMode = workbench.sessions.ppt.pptOutputMode
+  const pptPreviewUrl = workbench.sessions.ppt.pptPreviewUrl
+  const pptSlidevMarkdown = workbench.sessions.ppt.pptSlidevMarkdown
   const pptSlides = workbench.sessions.ppt.pptSlides
   const pptLiveSlides = workbench.sessions.ppt.pptLiveSlides
   const pptTotalSlides = workbench.sessions.ppt.pptTotalSlides
@@ -698,6 +702,9 @@ export default function ResultPreviewPanel() {
   const pptImportStatus = workbench.sessions.ppt.pptImportStatus
   const pptImportWarnings = workbench.sessions.ppt.pptImportWarnings
   const effectivePptSlides = pptSlides.length > 0 ? pptSlides : pptLiveSlides
+  const pptTemplateOptions = useMemo(() => buildPptTemplateOptions(), [])
+  const activePptTemplateId = resolvePptTemplateId(pptActiveTemplateManifestId)
+  const activePptTemplateLabel = resolvePptTemplateLabel(activePptTemplateId, pptTemplateOptions)
 
   const modeOption = getGenerationModeOption(currentMode)
   // document 结果优先读 formal template session；workbench.resultPath 仅用于兼容旧预览消费者。
@@ -951,7 +958,31 @@ export default function ResultPreviewPanel() {
   }
 
   const handleDownloadPptx = async () => {
-    const pptxPath = pptDownloadUrl || workbench.resultPath
+    const deckId = pptDeckId || pptDeckDocumentId
+    let effectiveExportUrl = pptDownloadUrl || workbench.resultPath
+    let effectiveArtifactId = typeof pptArtifactId === 'string' && pptArtifactId.trim() ? pptArtifactId : null
+    if (isWebShim() && deckId && (pptDirty || !effectiveExportUrl)) {
+      const exported = await exportWebPptDeck({ deckId, engine: pptEngine || undefined })
+      if (!exported.success || !exported.artifact?.id || !exported.exportUrl) {
+        setPreviewMessage(exported.error || '下载前刷新最新 PPT 失败')
+        return
+      }
+      const nextSlides = mergeDeckIntoLiveSlides(exported, effectivePptSlides)
+      effectiveExportUrl = exported.exportUrl
+      effectiveArtifactId = exported.artifact.id
+      workbench.setModeSession('ppt', (session) => ({
+        ...session,
+        pptSlides: nextSlides,
+        pptLiveSlides: nextSlides,
+        pptArtifactId: exported.artifact?.id || session.pptArtifactId,
+        pptDownloadUrl: exported.exportUrl || session.pptDownloadUrl,
+        resultAssetId: exported.artifact?.id || session.resultAssetId,
+        resultPath: exported.exportUrl || session.resultPath,
+        resultTitle: exported.artifact?.title || session.resultTitle,
+        pptDirty: false,
+      }))
+    }
+    const pptxPath = effectiveExportUrl
     if (!pptxPath) {
       setPreviewMessage('请先生成 PPT，再下载结果。')
       return
@@ -961,10 +992,10 @@ export default function ResultPreviewPanel() {
         const artifactId = isWebArtifactId(String(workbench.resultAssetId || ''))
           ? String(workbench.resultAssetId)
           : (isWebArtifactId(pptxPath) ? pptxPath : '')
-        const effectiveArtifactId = (isWebArtifactId(String(pptArtifactId || '')) ? String(pptArtifactId) : '') || artifactId
-        if (effectiveArtifactId) {
+        const resolvedArtifactId = (effectiveArtifactId && isWebArtifactId(String(effectiveArtifactId)) ? String(effectiveArtifactId) : '') || artifactId
+        if (resolvedArtifactId) {
           const artifacts = await platformApi.artifacts.list()
-          const artifact = artifacts.find((a) => a.id === effectiveArtifactId)
+          const artifact = artifacts.find((a) => a.id === resolvedArtifactId)
           const filename = artifact
             ? (artifactDownloadFilename(artifact) || '演示文稿.pptx')
             : '演示文稿.pptx'
@@ -983,8 +1014,8 @@ export default function ResultPreviewPanel() {
           setPreviewMessage(`已下载 ${filename}`)
           return
         }
-        if (pptDeckId) {
-          await downloadProtectedUrl(`/api/ppt/decks/${pptDeckId}/download`, filename)
+        if (deckId) {
+          await downloadProtectedUrl(`/api/ppt/decks/${deckId}/download`, filename)
           setPreviewMessage(`已下载 ${filename}`)
           return
         }
@@ -1271,12 +1302,13 @@ export default function ResultPreviewPanel() {
         slideCount: effectivePptSlides.length,
         nearbySlides: buildNearbySlidesContext(effectivePptSlides, pptActiveSlideIndex),
       },
-      engine: pptEngine || undefined,
+      engine: pptEngine === 'slidev' ? 'slidev' : pptEngine === 'builtin' ? 'builtin' : 'minimax_pptx_generator',
+      allowFallback: pptEngine !== 'slidev',
     })
-    if (!result.success || !result.updatedSlide) {
+    if (!result.success || !result.updatedSlide || !result.artifact?.id || !result.exportUrl) {
       appendPptEditMessage(slideId, {
         id: `assistant-error-${Date.now()}`,
-        role: 'assistant',
+        role: 'system',
         content: result.error || '当前页修改失败',
         createdAt: new Date().toISOString(),
         slideId,
@@ -1289,11 +1321,13 @@ export default function ResultPreviewPanel() {
       setPreviewMessage(result.error || '当前页修改失败')
       return
     }
-    const nextSlides = replaceSlideInPreviews(effectivePptSlides, result.updatedSlide)
+    const nextSlides = result.deck
+      ? mergeDeckIntoLiveSlides(result, effectivePptSlides)
+      : replaceSlideInPreviews(effectivePptSlides, result.updatedSlide)
     appendPptEditMessage(slideId, {
       id: `assistant-${Date.now()}`,
       role: 'assistant',
-      content: result.message || `已修改第 ${pptActiveSlideIndex + 1} 页`,
+      content: result.message || `已使用 MiniMax PPTX Generator 修改第 ${pptActiveSlideIndex + 1} 页。只修改当前页，其他页面未变更。`,
       createdAt: new Date().toISOString(),
       slideId,
       status: 'done',
@@ -1307,17 +1341,20 @@ export default function ResultPreviewPanel() {
       pptDownloadUrl: result.exportUrl || session.pptDownloadUrl,
       resultAssetId: result.artifact?.id || session.resultAssetId,
       resultPath: result.exportUrl || session.resultPath,
-      pptDirty: !Boolean(result.exportUrl),
+      resultTitle: result.artifact?.title || session.resultTitle,
+      pptDirty: false,
       pptSlideEditStatus: 'idle',
       pptEditingSlideId: slideId,
-      pptEngine: result.engine === 'builtin' ? 'builtin' : (result.engine === 'minimax_pptx_generator' ? 'minimax_pptx_generator' : session.pptEngine),
+      pptEngine: result.engine === 'slidev' ? 'slidev' : result.engine === 'builtin' ? 'builtin' : result.engine === 'minimax_pptx_generator' ? 'minimax_pptx_generator' : session.pptEngine,
+      pptPreviewUrl: result.previewUrl || session.pptPreviewUrl,
+      pptSlidevMarkdown: result.slidevMarkdown || session.pptSlidevMarkdown,
       generationStatus: {
         phase: 'completed',
-        message: result.message || `已修改第 ${pptActiveSlideIndex + 1} 页`,
+        message: result.message || `已修改第 ${pptActiveSlideIndex + 1} 页。只修改当前页，其他页面未变更。`,
         updatedAt: new Date().toISOString(),
       },
     }))
-    setPreviewMessage(result.message || `已修改第 ${pptActiveSlideIndex + 1} 页`)
+    setPreviewMessage(result.message || `已修改第 ${pptActiveSlideIndex + 1} 页。只修改当前页，其他页面未变更。`)
   }, [appendPptEditMessage, effectivePptSlides, pptActiveSlideIndex, pptDeckDocumentId, pptDeckId, pptEngine, workbench])
 
   const handleSavePptDeck = useCallback(async () => {
@@ -1335,7 +1372,7 @@ export default function ResultPreviewPanel() {
       setPreviewMessage(result.error || '保存修改失败')
       return
     }
-    const nextSlides = result.deck ? mergeDeckIntoLiveSlides(result.deck, effectivePptSlides) : effectivePptSlides
+    const nextSlides = mergeDeckIntoLiveSlides(result, effectivePptSlides)
     workbench.setModeSession('ppt', (session) => ({
       ...session,
       pptSlides: nextSlides,
@@ -1353,6 +1390,109 @@ export default function ResultPreviewPanel() {
     }))
     setPreviewMessage(result.message || '已保存')
   }, [effectivePptSlides, mergeDeckIntoLiveSlides, pptDeckDocumentId, pptDeckId, pptDirty, pptEngine, workbench])
+
+  const handleRetemplatePptDeck = useCallback(async (templateId: string) => {
+    const deckId = pptDeckId || pptDeckDocumentId
+    const nextTemplateId = resolvePptTemplateId(templateId)
+    const currentTemplateId = resolvePptTemplateId(pptActiveTemplateManifestId)
+    if (!deckId || !nextTemplateId) {
+      setPreviewMessage('请先生成 PPT，再切换模板。')
+      return
+    }
+    if (pptSkillBusy) return
+    if (nextTemplateId === currentTemplateId) {
+      setPreviewMessage(`当前已使用「${resolvePptTemplateLabel(nextTemplateId, pptTemplateOptions)}」模板。`)
+      return
+    }
+
+    const switchingMessage = '模板切换中，不消耗 token'
+    setPptSkillBusy(true)
+    setPptSkillApplyStatus(switchingMessage)
+    workbench.setModeSession('ppt', (session) => ({
+      ...session,
+      pptTaskStatus: 'applying_template',
+      pptDirty: false,
+      generationStatus: {
+        phase: 'running',
+        message: switchingMessage,
+        updatedAt: new Date().toISOString(),
+      },
+    }))
+
+    try {
+      const result = await retemplateWebPptDeck({ deckId, templateId: nextTemplateId })
+      if (!result.success || !result.deck) {
+        const message = result.error || '模板切换失败'
+        setPptSkillApplyStatus(message)
+        setPreviewMessage(message)
+        setStatusMessage(message)
+        workbench.setModeSession('ppt', (session) => ({
+          ...session,
+          pptTaskStatus: 'completed',
+          generationStatus: {
+            phase: 'error',
+            message,
+            updatedAt: new Date().toISOString(),
+          },
+        }))
+        return
+      }
+
+      const nextSlides = mergeDeckIntoLiveSlides(result, effectivePptSlides)
+      const appliedLabel = resolvePptTemplateLabel(nextTemplateId, pptTemplateOptions)
+      const successMessage = '模板已切换，不消耗 token'
+      workbench.setModeSession('ppt', (session) => ({
+        ...session,
+        pptSlides: nextSlides,
+        pptLiveSlides: nextSlides,
+        pptTotalSlides: nextSlides.length,
+        pptActiveSlideIndex: Math.min(session.pptActiveSlideIndex, Math.max(nextSlides.length - 1, 0)),
+        pptDeckId: result.deckId || session.pptDeckId,
+        pptDeckDocumentId: result.deckId || session.pptDeckDocumentId,
+        pptArtifactId: result.artifact?.id || session.pptArtifactId,
+        pptDownloadUrl: result.exportUrl || session.pptDownloadUrl,
+        pptActiveTemplateManifestId: nextTemplateId,
+        resultAssetId: result.artifact?.id || session.resultAssetId,
+        resultPath: result.exportUrl || session.resultPath,
+        resultTitle: result.artifact?.title || session.resultTitle,
+        pptDirty: false,
+        pptTaskStatus: 'completed',
+        generationStatus: {
+          phase: 'completed',
+          message: successMessage,
+          updatedAt: new Date().toISOString(),
+        },
+      }))
+      setPptSkillApplyStatus(`${successMessage} · 当前模板：${appliedLabel}`)
+      setPreviewMessage(successMessage)
+      setStatusMessage(`${successMessage}，预览和下载内容已更新。`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '模板切换失败'
+      setPptSkillApplyStatus(message)
+      setPreviewMessage(message)
+      setStatusMessage(message)
+      workbench.setModeSession('ppt', (session) => ({
+        ...session,
+        pptTaskStatus: 'completed',
+        generationStatus: {
+          phase: 'error',
+          message,
+          updatedAt: new Date().toISOString(),
+        },
+      }))
+    } finally {
+      setPptSkillBusy(false)
+    }
+  }, [
+    effectivePptSlides,
+    pptActiveTemplateManifestId,
+    pptDeckDocumentId,
+    pptDeckId,
+    pptSkillBusy,
+    pptTemplateOptions,
+    setStatusMessage,
+    workbench,
+  ])
 
   const handleRegenerateDeck = useCallback(() => {
     window.dispatchEvent(new CustomEvent('ppt-workbench-regenerate'))
@@ -2100,16 +2240,24 @@ export default function ResultPreviewPanel() {
     && Boolean(activeWorkspacePath && workbench.resultPath && normalizeFileLikePath(workbench.resultPath).startsWith(activeWorkspacePath))
   const pptEngineStatusMessage = useMemo(() => {
     if (pptFallbackFrom) {
-      // MiniMax failed and fell back — show fallback message prominently, not the plain "内置 PptxGenJS"
       const reason = pptFallbackReason ? `（原因：${pptFallbackReason}）` : ''
       return `MiniMax PPTX Generator 失败，已回退内置引擎${reason}`
     }
     return pptEngine === 'minimax_pptx_generator'
       ? '生成引擎：MiniMax PPTX Generator Skill'
-      : pptEngine === 'builtin'
-        ? '生成引擎：内置 PptxGenJS'
-        : ''
+      : pptEngine === 'slidev'
+        ? '生成引擎：Slidev 网页演示'
+        : pptEngine === 'builtin'
+          ? '生成引擎：内置 PptxGenJS'
+          : ''
   }, [pptEngine, pptFallbackFrom, pptFallbackReason])
+  const pptPageEditEngineLabel = useMemo(() => (
+    isWebShim() || pptEngine === 'minimax_pptx_generator'
+      ? '当前页修改引擎：MiniMax PPTX Generator Skill'
+      : pptEngine === 'slidev'
+        ? '当前页修改引擎：Slidev'
+        : '当前页修改引擎：内置 fallback'
+  ), [pptEngine])
 
   // PPT mode: full-screen workbench replaces the default Shell layout
   if (currentMode === 'ppt') {
@@ -2124,11 +2272,20 @@ export default function ResultPreviewPanel() {
           resultPath={workbench.resultPath}
           templateStatusMessage={pptSkillApplyStatus || pptEngineStatusMessage || workbench.generationStatus.message}
           pptEngineLabel={pptEngineStatusMessage || '生成引擎：待生成'}
+          pptEditEngineLabel={pptPageEditEngineLabel}
+          templateLabel={activePptTemplateLabel}
+          templateId={activePptTemplateId}
+          templateOptions={pptTemplateOptions}
           pptDirty={pptDirty}
           pptEditMessages={pptEditMessages}
           pptEditingSlideId={pptEditingSlideId}
           pptSlideEditStatus={pptSlideEditStatus}
+          templateBusy={pptSkillBusy || pptTaskStatus === 'applying_template'}
+          pptOutputMode={pptOutputMode || undefined}
+          pptPreviewUrl={pptPreviewUrl || undefined}
+          pptSlidevMarkdown={pptSlidevMarkdown || undefined}
           onDownloadPpt={() => void handleDownloadPptx()}
+          onTemplateChange={(templateId) => void handleRetemplatePptDeck(templateId)}
           onSelectSlide={handlePptSelectSlide}
           onRegenerateDeck={handleRegenerateDeck}
           onSaveDeck={() => void handleSavePptDeck()}

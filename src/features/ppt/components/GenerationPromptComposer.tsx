@@ -46,7 +46,7 @@ import { startChineseVoskVoiceInput, supportsVoskVoiceInput, type VoskVoiceInput
 import { platformApi } from '../../../platform'
 import { isWebShim } from '../../../platform/detect'
 import { runWebPptxCreate } from '../services/pptWebGeneration'
-import { createMinimalPptLiveSlides, mergeDeckIntoLiveSlides } from '../services/webDeckSlides'
+import { mergeDeckIntoLiveSlides } from '../services/webDeckSlides'
 import { artifactDownloadFilename } from '../../../utils/artifactDisplay'
 import { assembleDeckDocument } from '../ppt/assembleDeckDocument'
 import { validateDeckDocumentOutput } from '../ppt/validateDeckDocumentOutput'
@@ -735,6 +735,7 @@ export default function GenerationPromptComposer() {
   // PPT template selector state
   const [pptTemplates, setPptTemplates] = useState<Array<{ id: string; name: string }>>([])
   const [selectedTemplateId, setSelectedTemplateId] = useState('cuhk_sz_default')
+  const [pptEngineMode, setPptEngineMode] = useState<'minimax_pptx_generator' | 'slidev'>('minimax_pptx_generator')
 
   useEffect(() => {
     if (currentMode !== 'ppt') return
@@ -916,6 +917,9 @@ export default function GenerationPromptComposer() {
         pptEngine: null,
         pptFallbackFrom: null,
         pptFallbackReason: null,
+        pptOutputMode: null,
+        pptPreviewUrl: null,
+        pptSlidevMarkdown: null,
         pptSlides: [],
         pptLiveSlides: [],
         pptPreviewSlides: [],
@@ -954,6 +958,8 @@ export default function GenerationPromptComposer() {
           workspacePath,
           title,
           prompt: rawUserPrompt,
+          engine: pptEngineMode,
+          outputMode: pptEngineMode === 'slidev' ? 'web_deck' : 'editable_pptx',
         })
         if (!result.success || !result.artifact) {
           const err = result.error || 'PPT 生成失败'
@@ -963,27 +969,35 @@ export default function GenerationPromptComposer() {
           return
         }
         const artifact = result.artifact
-        const resultData = (result.data ?? {}) as Record<string, unknown>
-        const deck = resultData.deck
-        const rawSlides = Array.isArray(resultData.slides) ? resultData.slides : []
-        const deckId = typeof resultData.deckId === 'string' ? resultData.deckId : null
-        const engine = resultData.engine === 'minimax_pptx_generator' ? 'minimax_pptx_generator' : 'builtin'
-        const fallbackFrom = resultData.fallbackFrom === 'minimax_pptx_generator' ? 'minimax_pptx_generator' : null
-        const fallbackReason = typeof resultData.fallbackReason === 'string' ? resultData.fallbackReason : null
-        const deckTemplateId = deck && typeof deck === 'object' && 'templateId' in deck && typeof deck.templateId === 'string'
-          ? deck.templateId
-          : null
-        let liveSlides = mergeDeckIntoLiveSlides(deck || { slides: rawSlides }, [])
-        if (liveSlides.length === 0) {
-          liveSlides = createMinimalPptLiveSlides(title, 'PPT 已生成，可下载查看完整文件。')
-        }
-        const downloadUrl = (typeof resultData.exportUrl === 'string' && resultData.exportUrl)
+        const resultData = result.data
+        const deck = resultData?.deck
+        const deckId = resultData?.deckId || null
+        const engineRaw = resultData?.engine
+        const engine = engineRaw === 'minimax_pptx_generator' ? 'minimax_pptx_generator'
+          : engineRaw === 'slidev' ? 'slidev'
+          : 'builtin'
+        const outputMode = resultData?.outputMode || (engine === 'slidev' ? 'web_deck' : 'editable_pptx')
+        const fallbackFrom = resultData?.fallbackFrom === 'minimax_pptx_generator' ? 'minimax_pptx_generator' : null
+        const fallbackReason = resultData?.fallbackReason || null
+        const previewUrl = resultData?.previewUrl || null
+        const slidevMarkdown = resultData?.slidevMarkdown || null
+        const deckTemplateId = deck && typeof deck.templateId === 'string' ? deck.templateId : null
+        const liveSlides = mergeDeckIntoLiveSlides(resultData || deck || null, [])
+        const downloadUrl = resultData?.exportUrl
           || artifact.exports?.[0]?.url
           || (deckId ? `/api/ppt/decks/${deckId}/download` : null)
-        const fn = artifactDownloadFilename(artifact) || `${title}.pptx`
+        if (!downloadUrl) {
+          throw new Error('PPT 任务已完成，但下载链接缺失。')
+        }
+        if (liveSlides.length === 0 && engine !== 'slidev') {
+          throw new Error('PPT 任务已完成，但预览数据解析失败。')
+        }
+        const fn = artifactDownloadFilename(artifact) || `${title}.${engine === 'slidev' ? 'md' : 'pptx'}`
         const engineText = engine === 'minimax_pptx_generator'
           ? '生成引擎：MiniMax PPTX Generator Skill'
-          : '生成引擎：内置 PptxGenJS'
+          : engine === 'slidev'
+            ? '生成引擎：Slidev 网页演示'
+            : '生成引擎：内置 PptxGenJS'
         const fallbackText = fallbackFrom
           ? `MiniMax PPTX Generator 失败，已回退内置引擎${fallbackReason ? `（原因：${fallbackReason}）` : ''}`
           : ''
@@ -997,6 +1011,9 @@ export default function GenerationPromptComposer() {
           pptEngine: engine,
           pptFallbackFrom: fallbackFrom,
           pptFallbackReason: fallbackReason,
+          pptOutputMode: outputMode,
+          pptPreviewUrl: previewUrl,
+          pptSlidevMarkdown: slidevMarkdown,
           resultType: 'pptx',
           resultAssetId: artifact.id,
           resultPath: downloadUrl || artifact.id,
@@ -2528,6 +2545,21 @@ export default function GenerationPromptComposer() {
           </UnifiedComposerStatusPill>
           <UnifiedComposerStatusText>{modeStatus}</UnifiedComposerStatusText>
           <UnifiedComposerStatusText>{voiceListening ? '语音输入中…' : 'Enter 发送，Shift+Enter 换行'}</UnifiedComposerStatusText>
+          {currentMode === 'ppt' && isWebShim() && (
+            <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#627385' }}>
+              演示类型：
+              <select
+                value={pptEngineMode}
+                onChange={(e) => setPptEngineMode(e.target.value as 'minimax_pptx_generator' | 'slidev')}
+                disabled={effectiveBusy}
+                style={{ fontSize: 13, padding: '2px 6px', borderRadius: 4, border: '1px solid #c8d6e5', background: '#fff', color: '#2d3a4a' }}
+                title="选择生成引擎：正式 PPTX（可编辑）或网页演示 Slidev（Markdown/HTML）"
+              >
+                <option value="minimax_pptx_generator">正式 PPTX（推荐）</option>
+                <option value="slidev">网页演示 Slidev</option>
+              </select>
+            </span>
+          )}
           {currentMode === 'ppt' && false && pptTemplates.length > 1 && (
             <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, fontSize: 14, color: '#627385' }}>
               模板：

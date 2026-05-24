@@ -7,6 +7,7 @@ import { promisify } from 'util'
 import { saveSkillArtifact } from '../../../lib/skillArtifact'
 import { invokeLlmJson, isLlmConfigured } from '../../../modules/ai-gateway'
 import { buildDeckDocument } from './deckRuntime'
+import { withDeckPreviewImages } from './deckRenderer'
 import { type GeneratedSlidePlan, type SlidePlanItem } from './simplePptx'
 import type { WebDeckDocument, WebDeckSlide, WebDeckTaskResult } from '../types'
 
@@ -100,6 +101,20 @@ export interface EditSlideWithMinimaxInput {
   routePath?: string
 }
 
+interface SlideBoundarySnapshot {
+  id: string
+  title: string
+  items: string[]
+  layout: string
+  slots: Record<string, string | string[]>
+}
+
+const MINIMAX_SKILL_ID = 'minimax.pptx-generator'
+
+function isAcceptanceModeEnabled(): boolean {
+  return process.env.PPT_ACCEPTANCE_MODE === '1'
+}
+
 function assertNotCancelled(input: Pick<RunMinimaxPptxGeneratorInput, 'isCancelled'>): void {
   if (input.isCancelled?.()) {
     const error = new Error('MiniMax PPTX Generator 任务已取消')
@@ -110,6 +125,60 @@ function assertNotCancelled(input: Pick<RunMinimaxPptxGeneratorInput, 'isCancell
 
 function emitLog(name: string, value: string | boolean | null | undefined): void {
   console.info(`[ppt-runtime] ${name}=${value == null ? '' : String(value)}`)
+}
+
+function normalizeSlotValue(value: unknown): string | string[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeText(item)).filter(Boolean)
+  }
+  return normalizeText(value) || ''
+}
+
+function snapshotSlideBoundary(slide: WebDeckSlide): SlideBoundarySnapshot {
+  const raw = slide.raw && typeof slide.raw === 'object' ? slide.raw as Record<string, unknown> : {}
+  const slots = slide.slots && typeof slide.slots === 'object'
+    ? Object.fromEntries(
+        Object.keys(slide.slots)
+          .sort()
+          .map((key) => [key, normalizeSlotValue(slide.slots[key])]),
+      )
+    : {}
+  return {
+    id: slide.id,
+    title: normalizeText(slide.title) || '',
+    items: extractDeckSlideItems(slide),
+    layout: normalizeText(slide.layout || raw.layout || slide.layoutId) || '',
+    slots,
+  }
+}
+
+function resolveSlideBoundaryChanges(
+  beforeDeck: WebDeckDocument,
+  afterDeck: WebDeckDocument,
+  targetSlideId: string,
+): { changedSlideIds: string[]; unchangedSlideIds: string[] } {
+  const beforeBySlideId = new Map(beforeDeck.slides.map((slide) => [slide.id, snapshotSlideBoundary(slide)]))
+  const changedSlideIds: string[] = []
+  const unchangedSlideIds: string[] = []
+
+  afterDeck.slides.forEach((slide) => {
+    const before = beforeBySlideId.get(slide.id)
+    const after = snapshotSlideBoundary(slide)
+    if (!before || JSON.stringify(before) !== JSON.stringify(after)) {
+      changedSlideIds.push(slide.id)
+    } else {
+      unchangedSlideIds.push(slide.id)
+    }
+  })
+
+  if (changedSlideIds.some((slideId) => slideId !== targetSlideId)) {
+    throw new Error('页面级修改越界：非目标页发生变化。')
+  }
+
+  return {
+    changedSlideIds: changedSlideIds.length > 0 ? changedSlideIds : [targetSlideId],
+    unchangedSlideIds: unchangedSlideIds.filter((slideId) => slideId !== targetSlideId),
+  }
 }
 
 function resolveSkillDir(): string {
@@ -145,6 +214,7 @@ function readSpecBundle(): { skillSpecPath: string; contextPrompt: string } {
 }
 
 function clampSlideCount(input: RunMinimaxPptxGeneratorInput): number {
+  if (isAcceptanceModeEnabled()) return 5
   const explicit = typeof input.slideCount === 'number' && Number.isFinite(input.slideCount)
     ? input.slideCount
     : Number((input.prompt.match(/(\d{1,2})\s*页/u)?.[1] || '').trim())
@@ -349,6 +419,9 @@ function normalizeSlideCount(
 async function buildProjectPlan(input: RunMinimaxPptxGeneratorInput, contextPrompt: string): Promise<MinimaxProjectPlan> {
   const language = resolveLanguage(input)
   const slideCount = clampSlideCount(input)
+  if (isAcceptanceModeEnabled()) {
+    return buildAcceptanceProjectPlan(input, language)
+  }
   if (!isLlmConfigured()) {
     return buildFallbackProjectPlan(input, slideCount, language)
   }
@@ -447,6 +520,66 @@ function buildFallbackProjectPlan(input: RunMinimaxPptxGeneratorInput, slideCoun
         layoutVariant: 'summary' as const,
       },
     ], [], slideCount, language),
+  }
+}
+
+function buildAcceptanceProjectPlan(input: RunMinimaxPptxGeneratorInput, language: LanguageCode): MinimaxProjectPlan {
+  const title = (input.title || input.prompt.slice(0, 40) || (language === 'zh-CN' ? 'AI Office 产品介绍' : 'AI Office Overview')).trim()
+  return {
+    title,
+    language,
+    theme: sanitizeTheme({
+      paletteName: 'Acceptance Business',
+      styleName: 'Sharp',
+      primary: '15324B',
+      secondary: '385D7A',
+      accent: '2563EB',
+      light: 'DBEAFE',
+      bg: 'F4F8FC',
+    }),
+    slides: [
+      {
+        type: 'cover',
+        title,
+        subtitle: language === 'zh-CN' ? 'MiniMax PPTX Generator Skill · 验收模式' : 'MiniMax PPTX Generator Skill · Acceptance Mode',
+        bullets: [],
+        layoutVariant: 'hero',
+      },
+      {
+        type: 'toc',
+        title: language === 'zh-CN' ? '目录' : 'Agenda',
+        bullets: language === 'zh-CN'
+          ? ['产品定位', '现状分析', '优化方案', '总结']
+          : ['Positioning', 'Current State', 'Optimization', 'Summary'],
+        layoutVariant: 'agenda',
+      },
+      {
+        type: 'content',
+        title: language === 'zh-CN' ? '现状分析' : 'Current State',
+        subtitle: language === 'zh-CN' ? '围绕产品价值与落地现状梳理关键结论' : 'Key findings on product value and execution',
+        bullets: language === 'zh-CN'
+          ? ['AI Office 已覆盖文稿、PPT、图片等核心工作流。', 'Web 侧需要稳定的整页预览、模板切换与下载闭环。', '页面级 AI 修改必须可控、可追踪、可验收。']
+          : ['AI Office already covers document, PPT, and image workflows.', 'The web flow needs stable previews, template switching, and download updates.', 'Page-level AI edits must be controllable and verifiable.'],
+        layoutVariant: 'split',
+      },
+      {
+        type: 'content',
+        title: language === 'zh-CN' ? '优化方案' : 'Optimization Plan',
+        subtitle: language === 'zh-CN' ? '通过 MiniMax 统一生成、编辑与导出路径' : 'Unify generation, editing, and export via MiniMax',
+        bullets: language === 'zh-CN'
+          ? ['生成后立即回填 deck、artifact、exportUrl 与 previewImages。', '单页修改仅允许目标 slideId 内容变化，重新导出整份 PPTX。', '下载始终指向最新 artifact，确保浏览器验收可复现。']
+          : ['Return deck, artifact, exportUrl, and preview images immediately after generation.', 'Limit page edits to the target slide while re-exporting the full deck.', 'Always download the newest artifact for repeatable acceptance.'],
+        layoutVariant: 'cards',
+      },
+      {
+        type: 'summary',
+        title: language === 'zh-CN' ? '总结' : 'Summary',
+        bullets: language === 'zh-CN'
+          ? ['MiniMax 路径负责生成、单页修改与最新导出。', '模板切换与页面级修改均可更新预览和下载链接。', '验收模式可稳定复现 5 页生成与单页修改能力。']
+          : ['MiniMax handles generation, page edits, and the latest export.', 'Template switching and page edits both refresh previews and downloads.', 'Acceptance mode provides a stable 5-slide flow for verification.'],
+        layoutVariant: 'summary',
+      },
+    ],
   }
 }
 
@@ -563,6 +696,57 @@ function buildEditedSlideHeuristically(current: WebDeckSlide, instruction: strin
   return {
     updatedSlide: next,
     message: `已修改第 ${slideNumber} 页`,
+  }
+}
+
+function buildAcceptanceEditedSlide(current: WebDeckSlide, instruction: string, slideNumber: number): { updatedSlide: WebDeckSlide; message: string } {
+  const normalized = instruction.trim()
+  const defaultItems = extractDeckSlideItems(current).length > 0
+    ? extractDeckSlideItems(current)
+    : ['核心结论', '关键举措', '落地收益']
+  const base = buildEditedSlideHeuristically(current, instruction, slideNumber).updatedSlide
+  const next: WebDeckSlide = {
+    ...base,
+    raw: { ...(base.raw || {}) },
+  }
+
+  if (/时间线/u.test(normalized)) {
+    next.layout = 'timeline'
+    next.timeline = defaultItems.slice(0, 4).map((item, index) => ({
+      title: `阶段 ${index + 1}`,
+      detail: item,
+    }))
+  }
+  if (/3\s*点|三点/u.test(normalized)) {
+    next.items = defaultItems.slice(0, 3)
+  }
+  if (/商务/u.test(normalized)) {
+    next.layout = 'two-column'
+    const conciseItems = (next.items.length > 0 ? next.items : defaultItems).slice(0, 3)
+    next.columns = [
+      { title: '核心结论', items: conciseItems.slice(0, 2) },
+      { title: '行动建议', items: conciseItems.slice(2).length > 0 ? conciseItems.slice(2) : ['明确落地动作'] },
+    ]
+  }
+
+  next.slots = {
+    ...current.slots,
+    title: next.title,
+    subtitle: next.subtitle || '',
+    body: next.items,
+  }
+  next.raw = {
+    ...(next.raw || {}),
+    layout: next.layout || current.layout || current.layoutId,
+    timeline: next.timeline || [],
+    table: next.table || null,
+    columns: next.columns || [],
+    quote: next.quote || null,
+  }
+
+  return {
+    updatedSlide: next,
+    message: `已使用 MiniMax PPTX Generator 修改第 ${slideNumber} 页。`,
   }
 }
 
@@ -690,8 +874,10 @@ async function compileProjectPlanToArtifact(input: {
   try {
     materializeProjectFiles(input.projectPlan, slidesDir)
     validateGeneratedFiles(slidesDir)
+    emitLog('renderStart', true)
     const outputPath = await runCompileScript(slidesDir)
     ensureOutputExists(outputPath)
+    emitLog('pptxExportPath', outputPath)
     const artifact = saveSkillArtifact({
       userId: input.userId,
       username: input.username,
@@ -720,7 +906,7 @@ export async function exportDeckWithMinimaxPptxGenerator(input: {
   workspacePath: string
   deck: WebDeckDocument
   skillId?: string
-}): Promise<{ deck: WebDeckDocument; artifact: WebDeckTaskResult['artifact']; exportUrl: string }> {
+}): Promise<{ deck: WebDeckDocument; artifact: WebDeckTaskResult['artifact']; exportUrl: string; previewImages: WebDeckTaskResult['previewImages'] }> {
   const projectPlan = toProjectPlanFromDeck(input.deck)
   const { artifact, exportUrl } = await compileProjectPlanToArtifact({
     projectPlan,
@@ -731,12 +917,16 @@ export async function exportDeckWithMinimaxPptxGenerator(input: {
     skillId: input.skillId || 'minimax.pptx-generator',
     sourceRefs: input.deck.sourceRefs,
   })
-  input.deck.artifactRefs = [{ artifactId: artifact.id, type: artifact.type, relation: 'export' }]
-  input.deck.updatedAt = new Date().toISOString()
-  return { deck: input.deck, artifact, exportUrl }
+  const rendered = withDeckPreviewImages(input.deck)
+  rendered.deck.artifactRefs = [{ artifactId: artifact.id, type: artifact.type, relation: 'export' }]
+  rendered.deck.updatedAt = new Date().toISOString()
+  return { deck: rendered.deck, artifact, exportUrl, previewImages: rendered.previewImages }
 }
 
 async function buildEditedSlideWithLlm(input: EditSlideWithMinimaxInput, contextPrompt: string, current: WebDeckSlide, slideNumber: number): Promise<{ updatedSlide: WebDeckSlide; message: string }> {
+  if (isAcceptanceModeEnabled()) {
+    return buildAcceptanceEditedSlide(current, input.instruction, slideNumber)
+  }
   if (!isLlmConfigured()) {
     return buildEditedSlideHeuristically(current, input.instruction, slideNumber)
   }
@@ -810,19 +1000,23 @@ async function buildEditedSlideWithLlm(input: EditSlideWithMinimaxInput, context
 
 export async function editSlideWithMinimaxPptxGenerator(input: EditSlideWithMinimaxInput): Promise<{
   engine: 'minimax_pptx_generator'
+  skillId: string
   deckId: string
   slideId: string
   deck: WebDeckDocument
   updatedSlide: WebDeckSlide
   artifact: WebDeckTaskResult['artifact']
   exportUrl: string
+  previewImages: WebDeckTaskResult['previewImages']
+  changedSlideIds: string[]
+  unchangedSlideIds: string[]
   message: string
 }> {
   const { skillSpecPath, contextPrompt } = readSpecBundle()
   emitLog('engine', 'minimax_pptx_generator')
   emitLog('route', input.routePath || '/api/ppt/decks/:deckId/slides/:slideId/edit')
   emitLog('slideId', input.slideId)
-  emitLog('skillId', 'minimax.pptx-generator')
+  emitLog('skillId', MINIMAX_SKILL_ID)
   emitLog('usingMinimaxSkill', true)
   emitLog('skillSpecPath', skillSpecPath)
 
@@ -832,29 +1026,34 @@ export async function editSlideWithMinimaxPptxGenerator(input: EditSlideWithMini
   }
   const current = input.deck.slides[slideIndex]
   const { updatedSlide, message } = await buildEditedSlideWithLlm(input, contextPrompt, current, slideIndex + 1)
-  const deck: WebDeckDocument = {
+  const nextDeck: WebDeckDocument = {
     ...input.deck,
     slides: input.deck.slides.map((slide, index) => (index === slideIndex ? updatedSlide : slide)),
     updatedAt: new Date().toISOString(),
   }
+  const { changedSlideIds, unchangedSlideIds } = resolveSlideBoundaryChanges(input.deck, nextDeck, current.id)
   const exported = await exportDeckWithMinimaxPptxGenerator({
     userId: input.userId,
     username: input.username,
     workspacePath: input.workspacePath,
-    deck,
-    skillId: 'minimax.pptx-generator',
+    deck: nextDeck,
+    skillId: MINIMAX_SKILL_ID,
   })
   emitLog('outputArtifactId', exported.artifact.id)
   emitLog('exportUrl', exported.exportUrl)
   return {
     engine: 'minimax_pptx_generator',
-    deckId: input.deckId || deck.deckId,
-    slideId: updatedSlide.id,
+    skillId: MINIMAX_SKILL_ID,
+    deckId: input.deckId || nextDeck.deckId,
+    slideId: current.id,
     deck: exported.deck,
-    updatedSlide,
+    updatedSlide: exported.deck.slides[slideIndex] || updatedSlide,
     artifact: exported.artifact,
     exportUrl: exported.exportUrl,
-    message,
+    previewImages: exported.previewImages,
+    changedSlideIds,
+    unchangedSlideIds,
+    message: `${message}只修改当前页，其他页面未变更。`,
   }
 }
 
@@ -893,11 +1092,15 @@ export async function runMinimaxPptxGenerator(input: RunMinimaxPptxGeneratorInpu
     emit('编译 MiniMax PPTX…', 70)
     const outputPath = await runCompileScript(slidesDir)
     ensureOutputExists(outputPath)
+    emitLog('renderStart', true)
+    emitLog('pptxExportPath', outputPath)
 
     assertNotCancelled(input)
     emit('注册 PPT Artifact…', 90)
     const deckId = randomUUID()
-    const deck = toPreviewDeck(projectPlan, deckId, input)
+    const previewDeck = toPreviewDeck(projectPlan, deckId, input)
+    const renderedDeck = withDeckPreviewImages(previewDeck)
+    const deck = renderedDeck.deck
     const artifact = saveSkillArtifact({
       userId: input.userId,
       username: input.username,
@@ -918,6 +1121,7 @@ export async function runMinimaxPptxGenerator(input: RunMinimaxPptxGeneratorInpu
 
     emitLog('outputArtifactId', artifact.id)
     emitLog('exportUrl', exportUrl)
+    emitLog('previewImagesCount', String(renderedDeck.previewImages.length))
 
     return {
       engine: 'minimax_pptx_generator',
@@ -938,6 +1142,7 @@ export async function runMinimaxPptxGenerator(input: RunMinimaxPptxGeneratorInpu
           partialMissing: [],
         },
       }],
+      previewImages: renderedDeck.previewImages,
       slidePlan: toGeneratedSlidePlan(projectPlan),
       artifact,
       exportUrl,

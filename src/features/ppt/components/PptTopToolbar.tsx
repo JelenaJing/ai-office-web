@@ -1,5 +1,7 @@
 import React from 'react'
 import styled from 'styled-components'
+import PptTemplatePicker from './PptTemplatePicker'
+import type { PptTemplateOption } from '../services/pptTemplates'
 
 const Toolbar = styled.div`
   display: flex;
@@ -27,6 +29,12 @@ const Meta = styled.div`
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+`
+
+const StatusText = styled.div`
+  font-size: 12px;
+  line-height: 1.6;
+  color: #475569;
 `
 
 const MetaBadge = styled.span`
@@ -67,11 +75,18 @@ const Button = styled.button<{ $primary?: boolean }>`
 interface PptTopToolbarProps {
   title: string
   engineLabel: string
+  slideEditEngineLabel: string
   pageLabel: string
+  templateLabel: string
+  templateId: string | null
+  templateOptions: PptTemplateOption[]
+  statusMessage?: string | null
   dirty: boolean
   aiPanelCollapsed: boolean
   canSave: boolean
+  templateBusy?: boolean
   onDownload: () => void
+  onTemplateChange: (templateId: string) => void
   onRegenerate: () => void
   onSave: () => void
   onToggleAiPanel: () => void
@@ -80,11 +95,18 @@ interface PptTopToolbarProps {
 export default function PptTopToolbar({
   title,
   engineLabel,
+  slideEditEngineLabel,
   pageLabel,
+  templateLabel,
+  templateId,
+  templateOptions,
+  statusMessage,
   dirty,
   aiPanelCollapsed,
   canSave,
+  templateBusy,
   onDownload,
+  onTemplateChange,
   onRegenerate,
   onSave,
   onToggleAiPanel,
@@ -95,13 +117,20 @@ export default function PptTopToolbar({
         <Title>{title}</Title>
         <Meta>
           <MetaBadge>{engineLabel}</MetaBadge>
+          <MetaBadge>{slideEditEngineLabel}</MetaBadge>
           <MetaBadge>{pageLabel}</MetaBadge>
-          <MetaBadge>模板：TODO</MetaBadge>
+          <MetaBadge>{`模板：${templateLabel}`}</MetaBadge>
           <MetaBadge>{dirty ? '存在未保存修改' : '已保存'}</MetaBadge>
         </Meta>
+        {statusMessage ? <StatusText>{statusMessage}</StatusText> : null}
       </Left>
       <Actions>
-        <Button type="button" disabled>模板切换（TODO）</Button>
+        <PptTemplatePicker
+          value={templateId}
+          options={templateOptions}
+          disabled={templateBusy}
+          onChange={onTemplateChange}
+        />
         <Button type="button" onClick={onToggleAiPanel}>{aiPanelCollapsed ? '展开 AI 面板' : '折叠 AI 面板'}</Button>
         <Button type="button" onClick={onDownload}>下载 PPTX</Button>
         <Button type="button" onClick={onRegenerate}>重新生成整套</Button>
