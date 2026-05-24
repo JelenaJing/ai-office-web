@@ -144,6 +144,8 @@ interface DocumentAiEditPanelProps {
   history: SectionHistoryEntry[]
   busy?: boolean
   disabled?: boolean
+  canUndoLastAiEdit?: boolean
+  onUndoLastAiEdit?: () => void
   onSubmit: (instruction: string, scope: DocumentAiScope) => Promise<void> | void
 }
 
@@ -166,6 +168,8 @@ export function DocumentAiEditPanel({
   history,
   busy,
   disabled,
+  canUndoLastAiEdit,
+  onUndoLastAiEdit,
   onSubmit,
 }: DocumentAiEditPanelProps) {
   const [input, setInput] = useState('')
@@ -185,7 +189,7 @@ export function DocumentAiEditPanel({
   const submitHint = resolvedScope === 'selection'
     ? `已选中 ${selectionLength} 个字，本次默认只修改选中内容。${selectedText ? `\n“${selectedText.slice(0, 36)}${selectedText.length > 36 ? '…' : ''}”` : ''}`
     : selectedSectionId
-      ? `当前正在修改：${selectedSectionLabel}`
+      ? `当前未选中文字，将默认修改当前章节：${selectedSectionLabel}`
       : '请先在中间 A4 页面选中文字或定位章节。'
 
   const handleSubmit = async (scopeOverride?: DocumentAiScope) => {
@@ -204,6 +208,7 @@ export function DocumentAiEditPanel({
         <ScopeBadgeRow>
           <ScopeBadge>{selectedSectionId ? `当前章节：${selectedSectionLabel}` : '当前章节：未绑定'}</ScopeBadge>
           {selectionLength > 0 ? <ScopeBadge $tone="warn">已选中文字：{selectionLength} 字</ScopeBadge> : null}
+          {!selectionLength && selectedSectionId ? <ScopeBadge $tone="warn">未选中文字：发送后将修改当前章节</ScopeBadge> : null}
         </ScopeBadgeRow>
       </Header>
 
@@ -224,6 +229,13 @@ export function DocumentAiEditPanel({
         ))}
         <DangerButton
           type="button"
+          disabled={!canUndoLastAiEdit || busy}
+          onClick={() => onUndoLastAiEdit?.()}
+        >
+          撤回上一次 AI 修改
+        </DangerButton>
+        <DangerButton
+          type="button"
           data-testid="document-ai-rewrite-document"
           disabled={busy || disabled}
           onClick={() => {
@@ -242,7 +254,7 @@ export function DocumentAiEditPanel({
               {item.text}
             </Bubble>
           ))
-          : <div style={{ fontSize: 12, color: '#708395', lineHeight: 1.7 }}>默认优先修改选中文本；未选中文本时会修改当前章节。对话历史会按章节或选中范围记录。</div>}
+          : <div style={{ fontSize: 12, color: '#708395', lineHeight: 1.7 }}>默认优先修改选中文本；未选中文字时会明确改当前章节。每次 AI 修改前都会创建本地快照，可撤回上一次修改。</div>}
       </History>
 
       <Composer>

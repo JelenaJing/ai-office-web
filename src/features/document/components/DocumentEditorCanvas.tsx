@@ -4,6 +4,7 @@ import {
   useEffect,
   useImperativeHandle,
   useRef,
+  type ClipboardEvent,
 } from 'react'
 import styled from 'styled-components'
 import { applyDocumentEditPatch, type ApplyDocumentEditPatchResult } from '../services/documentPatchApplier'
@@ -20,6 +21,39 @@ const CanvasShell = styled.div`
   overflow: auto;
   padding: 28px;
   background: linear-gradient(180deg, #e8eef5 0%, #dfe7ef 100%);
+`
+
+const EditorToolbar = styled.div`
+  width: min(794px, 100%);
+  margin: 0 auto 14px;
+  padding: 10px 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  border: 1px solid rgba(191, 208, 226, 0.9);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 8px 26px rgba(15, 23, 42, 0.08);
+`
+
+const ToolbarButton = styled.button`
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid #d4deea;
+  background: #fff;
+  color: #36506b;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+`
+
+const ToolbarHint = styled.div`
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  color: #688095;
+  font-size: 12px;
 `
 
 const Paper = styled.div`
@@ -73,6 +107,12 @@ const EditableRoot = styled.div`
 
   section[data-section-id][data-modified="true"] {
     border-style: dashed;
+  }
+
+  section[data-section-id][data-ai-highlight="true"] {
+    border-color: #5aa3eb;
+    background: rgba(226, 239, 255, 0.9);
+    box-shadow: 0 0 0 2px rgba(90, 163, 235, 0.12);
   }
 
   h2[data-section-heading="true"],
@@ -146,6 +186,13 @@ const EditableRoot = styled.div`
     background: #edf4fb;
     font-weight: 800;
   }
+
+  mark[data-ai-change="true"] {
+    padding: 0 2px;
+    border-radius: 4px;
+    background: #fff2b3;
+    color: inherit;
+  }
 `
 
 export interface DocumentEditorCanvasHandle {
@@ -157,12 +204,113 @@ export interface DocumentEditorCanvasHandle {
 interface DocumentEditorCanvasProps {
   state: EditableDocumentState
   modifiedSectionIds: string[]
+  recentAiChange?: {
+    token: number
+    scope: 'selection' | 'section' | 'document'
+    sectionId: string | null
+  } | null
   onHtmlChange: (html: string, activeSectionId: string | null) => void
   onSelectionChange: (payload: {
     selectedSectionId: string | null
     selectedText: string
     selectionRange?: DocumentSelectionRange
   }) => void
+}
+
+const ALLOWED_PASTE_TAGS = new Set(['p', 'br', 'strong', 'b', 'u', 'ul', 'ol', 'li', 'blockquote', 'h1', 'h2', 'h3', 'table', 'thead', 'tbody', 'tr', 'th', 'td'])
+
+const TOOLBAR_ACTIONS = [
+  { label: '正文', command: 'formatBlock', value: 'p' },
+  { label: '一级标题', command: 'formatBlock', value: 'h2' },
+  { label: '二级标题', command: 'formatBlock', value: 'h3' },
+  { label: '列表', command: 'insertUnorderedList' },
+  { label: '引用', command: 'formatBlock', value: 'blockquote' },
+  { label: '加粗', command: 'bold' },
+  { label: '下划线', command: 'underline' },
+] as const
+
+function escapeHtml(value: string): string {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
+function unwrapElement(element: HTMLElement) {
+  const parent = element.parentNode
+  if (!parent) return
+  while (element.firstChild) {
+    parent.insertBefore(element.firstChild, element)
+  }
+  parent.removeChild(element)
+}
+
+function clearTransientHighlights(root: HTMLElement) {
+  root.querySelectorAll<HTMLElement>('mark[data-ai-change="true"]').forEach((element) => unwrapElement(element))
+}
+
+function sanitizePastedHtml(input: string): string {
+  if (!input.trim()) return ''
+  const parser = new DOMParser()
+  const doc = parser.parseFromString(input, 'text/html')
+  const serialize = (node: Node): string => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      return escapeHtml(node.textContent || '')
+    }
+    if (!(node instanceof HTMLElement)) return ''
+    const tag = node.tagName.toLowerCase()
+    if (['style', 'script', 'meta', 'link'].includes(tag)) return ''
+    if (tag === 'div') {
+      const content = Array.from(node.childNodes).map(serialize).join('')
+      return content.trim() ? `<p>${content}</p>` : ''
+    }
+    if (['span', 'font', 'section', 'article'].includes(tag)) {
+      return Array.from(node.childNodes).map(serialize).join('')
+    }
+    if (!ALLOWED_PASTE_TAGS.has(tag)) {
+      return Array.from(node.childNodes).map(serialize).join('')
+    }
+    if (tag === 'br') return '<br />'
+    const content = Array.from(node.childNodes).map(serialize).join('')
+    if (!content.trim()) return ''
+    return `<${tag}>${content}</${tag}>`
+  }
+  return Array.from(doc.body.childNodes)
+    .map(serialize)
+    .join('')
+    .replace(/<p>\s*<\/p>/g, '')
+    .trim()
+}
+
+function plainTextToHtml(input: string): string {
+  return String(input || '')
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean)
+    .map((block) => {
+      const lines = block.split('\n').map((line) => line.trim()).filter(Boolean)
+      if (lines.length > 0 && lines.every((line) => /^[-*•]\s+/u.test(line))) {
+        return `<ul>${lines.map((line) => `<li>${escapeHtml(line.replace(/^[-*•]\s+/u, ''))}</li>`).join('')}</ul>`
+      }
+      if (lines.length > 0 && lines.every((line) => /^\d+[.)、]\s+/u.test(line))) {
+        return `<ol>${lines.map((line) => `<li>${escapeHtml(line.replace(/^\d+[.)、]\s+/u, ''))}</li>`).join('')}</ol>`
+      }
+      return `<p>${escapeHtml(lines.join('<br />'))}</p>`.replace(/&lt;br \/&gt;/g, '<br />')
+    })
+    .join('')
+}
+
+function insertHtmlAtSelection(root: HTMLElement, html: string) {
+  root.focus()
+  if (document.queryCommandSupported?.('insertHTML')) {
+    document.execCommand('insertHTML', false, html)
+    return
+  }
+  const selection = window.getSelection()
+  if (!selection || selection.rangeCount === 0) return
+  const range = selection.getRangeAt(0)
+  range.deleteContents()
+  range.insertNode(range.createContextualFragment(html))
 }
 
 function selectionOffsetsInSection(sectionElement: HTMLElement, range: Range) {
@@ -182,6 +330,7 @@ export const DocumentEditorCanvas = forwardRef<DocumentEditorCanvasHandle, Docum
   function DocumentEditorCanvas({
     state,
     modifiedSectionIds,
+    recentAiChange,
     onHtmlChange,
     onSelectionChange,
   }, ref) {
@@ -203,8 +352,22 @@ export const DocumentEditorCanvas = forwardRef<DocumentEditorCanvasHandle, Docum
         const sectionId = section.dataset.sectionId || ''
         section.dataset.active = state.selectedSectionId === sectionId ? 'true' : 'false'
         section.dataset.modified = modifiedSectionIds.includes(sectionId) ? 'true' : 'false'
+        section.dataset.aiHighlight = 'false'
       })
     }, [modifiedSectionIds, state.selectedSectionId, state.html])
+
+    useEffect(() => {
+      const root = rootRef.current
+      if (!root || !recentAiChange) return
+      const targets = recentAiChange.scope === 'document'
+        ? Array.from(root.querySelectorAll<HTMLElement>('section[data-section-id]'))
+        : recentAiChange.sectionId
+          ? [root.querySelector<HTMLElement>(`section[data-section-id="${CSS.escape(recentAiChange.sectionId)}"]`)].filter(Boolean) as HTMLElement[]
+          : []
+      targets.forEach((section) => {
+        section.dataset.aiHighlight = 'true'
+      })
+    }, [recentAiChange, state.html])
 
     const emitSelection = useCallback((target?: EventTarget | null) => {
       const root = rootRef.current
@@ -272,6 +435,7 @@ export const DocumentEditorCanvas = forwardRef<DocumentEditorCanvasHandle, Docum
     const handleInput = useCallback(() => {
       const root = rootRef.current
       if (!root) return
+      clearTransientHighlights(root)
       const currentSelection = window.getSelection()
       const activeSection = currentSelection?.anchorNode instanceof Element
         ? currentSelection.anchorNode.closest<HTMLElement>('section[data-section-id]')
@@ -279,6 +443,26 @@ export const DocumentEditorCanvas = forwardRef<DocumentEditorCanvasHandle, Docum
       onHtmlChange(root.innerHTML, activeSection?.dataset.sectionId || state.selectedSectionId)
       emitSelection()
     }, [emitSelection, onHtmlChange, state.selectedSectionId])
+
+    const runCommand = useCallback((command: string, value?: string) => {
+      const root = rootRef.current
+      if (!root) return
+      root.focus()
+      document.execCommand(command, false, value)
+      handleInput()
+    }, [handleInput])
+
+    const handlePaste = useCallback((event: ClipboardEvent<HTMLDivElement>) => {
+      const root = rootRef.current
+      if (!root) return
+      event.preventDefault()
+      const html = event.clipboardData.getData('text/html')
+      const plainText = event.clipboardData.getData('text/plain')
+      const normalized = sanitizePastedHtml(html) || plainTextToHtml(plainText)
+      if (!normalized) return
+      insertHtmlAtSelection(root, normalized)
+      handleInput()
+    }, [handleInput])
 
     useImperativeHandle(ref, () => ({
       scrollToSection(sectionId: string) {
@@ -328,6 +512,21 @@ export const DocumentEditorCanvas = forwardRef<DocumentEditorCanvasHandle, Docum
 
     return (
       <CanvasShell>
+        <EditorToolbar>
+          {TOOLBAR_ACTIONS.map((action) => (
+            <ToolbarButton
+              key={action.label}
+              type="button"
+              onMouseDown={(event) => {
+                event.preventDefault()
+                runCommand(action.command, 'value' in action ? action.value : undefined)
+              }}
+            >
+              {action.label}
+            </ToolbarButton>
+          ))}
+          <ToolbarHint>标题可直接在页面顶部修改；粘贴外部内容时会自动清洗样式。</ToolbarHint>
+        </EditorToolbar>
         <Paper>
           <EditableRoot
             ref={rootRef}
@@ -335,6 +534,7 @@ export const DocumentEditorCanvas = forwardRef<DocumentEditorCanvasHandle, Docum
             suppressContentEditableWarning
             data-testid="document-editor-canvas"
             onInput={() => handleInput()}
+            onPaste={handlePaste}
             onMouseUp={(event) => emitSelection(event.target)}
             onKeyUp={(event) => emitSelection(event.target)}
             onClick={(event) => emitSelection(event.target)}

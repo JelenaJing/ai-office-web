@@ -9,9 +9,11 @@ export interface ApplyDocumentEditPatchResult {
 function buildFragmentFromPatch(root: HTMLElement, patch: DocumentEditPatch): DocumentFragment {
   const range = root.ownerDocument.createRange()
   if (patch.type === 'replace_selection') {
-    const textNode = root.ownerDocument.createTextNode(patch.replacementText)
     const fragment = root.ownerDocument.createDocumentFragment()
-    fragment.appendChild(textNode)
+    const mark = root.ownerDocument.createElement('mark')
+    mark.dataset.aiChange = 'true'
+    mark.textContent = patch.replacementText
+    fragment.appendChild(mark)
     return fragment
   }
   const html = patch.type === 'replace_document'
@@ -52,7 +54,11 @@ function replaceSelectionByText(root: HTMLElement, patch: Extract<DocumentEditPa
     const content = textNode.nodeValue || ''
     const index = content.indexOf(patch.selectedText)
     if (index < 0) continue
-    textNode.nodeValue = `${content.slice(0, index)}${patch.replacementText}${content.slice(index + patch.selectedText.length)}`
+    const range = root.ownerDocument.createRange()
+    range.setStart(textNode, index)
+    range.setEnd(textNode, index + patch.selectedText.length)
+    range.deleteContents()
+    range.insertNode(buildFragmentFromPatch(root, patch))
     return {
       applied: true,
       html: root.innerHTML,

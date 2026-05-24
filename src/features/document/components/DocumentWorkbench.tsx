@@ -160,6 +160,21 @@ interface PersistedWorkbenchState {
   artifactFilename: string | null
 }
 
+interface AiEditSnapshot {
+  editorState: EditableDocumentState
+  artifactFilename: string | null
+  modifiedSectionIds: string[]
+  activeHistoryKey: string
+  scope: DocumentAiScope
+  sectionId: string | null
+}
+
+interface RecentAiChange {
+  token: number
+  scope: DocumentAiScope
+  sectionId: string | null
+}
+
 function createEmptyEditorState(engine: string): EditableDocumentState {
   return {
     documentId: null,
@@ -213,6 +228,14 @@ function buildDocumentPlainText(result: DocumentTaskResult | EditableDocumentSta
   ].filter(Boolean).join('\n')
 }
 
+function cloneEditorState(state: EditableDocumentState): EditableDocumentState {
+  return JSON.parse(JSON.stringify(state)) as EditableDocumentState
+}
+
+function stripTransientAiMarkup(html: string): string {
+  return String(html || '').replace(/<mark\b[^>]*data-ai-change="true"[^>]*>(.*?)<\/mark>/giu, '$1')
+}
+
 export default function DocumentWorkbench() {
   const { activeWorkspacePath } = useWorkspace()
   const { workspaceKbIds, setWorkspaceKbIds } = useDocumentWorkspaceKnowledge()
@@ -235,6 +258,8 @@ export default function DocumentWorkbench() {
   const [exportError, setExportError] = useState<string | null>(null)
   const [generationPrompt, setGenerationPrompt] = useState('')
   const [hydrated, setHydrated] = useState(false)
+  const [lastAiSnapshot, setLastAiSnapshot] = useState<AiEditSnapshot | null>(null)
+  const [recentAiChange, setRecentAiChange] = useState<RecentAiChange | null>(null)
 
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
   const canvasRef = useRef<DocumentEditorCanvasHandle | null>(null)
@@ -264,6 +289,8 @@ export default function DocumentWorkbench() {
 
   useEffect(() => {
     setHydrated(false)
+    setLastAiSnapshot(null)
+    setRecentAiChange(null)
     const persisted = loadPersistedState(activeWorkspacePath)
     if (persisted) {
       setSelectedTemplateId(persisted.templateId || 'annual_report')
@@ -296,6 +323,19 @@ export default function DocumentWorkbench() {
     }
     window.localStorage.setItem(key, JSON.stringify(payload))
   }, [activeWorkspacePath, attachments, artifactFilename, editorState, generationPrompt, hydrated, modifiedSectionIds, sectionHistory, selectedTemplateId])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!editorState.dirty) return
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+    }
+  }, [editorState.dirty])
 
   const template = useMemo(
     () => templates.find((item) => item.id === selectedTemplateId) || templates[0] || null,
@@ -330,6 +370,38 @@ export default function DocumentWorkbench() {
     setModifiedSectionIds((prev) => prev.includes(sectionId) ? prev : [...prev, sectionId])
   }, [])
 
+  const captureAiSnapshot = useCallback((scope: DocumentAiScope, sectionId: string | null) => {
+    setLastAiSnapshot({
+      editorState: cloneEditorState(editorState),
+      artifactFilename,
+      modifiedSectionIds: [...modifiedSectionIds],
+      activeHistoryKey,
+      scope,
+      sectionId,
+    })
+  }, [activeHistoryKey, artifactFilename, editorState, modifiedSectionIds])
+
+  const handleUndoLastAiEdit = useCallback(() => {
+    if (!lastAiSnapshot) return
+    setEditorState({
+      ...lastAiSnapshot.editorState,
+      dirty: true,
+      saving: false,
+    })
+    setArtifactFilename(lastAiSnapshot.artifactFilename)
+    setModifiedSectionIds(lastAiSnapshot.modifiedSectionIds)
+    setActiveHistoryKey(lastAiSnapshot.activeHistoryKey)
+    setRecentAiChange(null)
+    appendHistory(lastAiSnapshot.scope, lastAiSnapshot.sectionId, {
+      role: 'assistant',
+      text: '已撤回上一次 AI 修改，本地文稿已恢复到修改前状态。',
+    })
+    setStatusMessage('已撤回上一次 AI 修改，请保存以更新最新 DOCX')
+    setStatusTone('ok')
+    setExportError(null)
+    setLastAiSnapshot(null)
+  }, [appendHistory, lastAiSnapshot])
+
   const syncEditorStateFromTaskResult = useCallback((nextResult: DocumentTaskResult, savedAt?: string) => {
     const nextState = createEditableStateFromTaskResult({
       documentId: nextResult.documentId,
@@ -359,28 +431,32 @@ export default function DocumentWorkbench() {
 
   const saveCurrentDocument = useCallback(async (status = '正在保存文稿…') => {
     if (!editorState.documentId || !editorState.documentDraft) return null
+    const latestHtml = stripTransientAiMarkup(canvasRef.current?.getHtml() || editorState.html)
+    const latestState = latestHtml !== editorState.html
+      ? updateEditableStateFromHtml(editorState, latestHtml)
+      : editorState
     setEditorState((prev) => ({ ...prev, saving: true }))
     setStatusMessage(status)
     setStatusTone(undefined)
     setExportError(null)
     try {
       const response = await saveEditableDocument({
-        documentId: editorState.documentId,
-        title: editorState.title,
-        html: editorState.html,
-        documentDraft: editorState.documentDraft,
-        outline: editorState.outline,
+        documentId: latestState.documentId!,
+        title: latestState.title,
+        html: latestState.html,
+        documentDraft: latestState.documentDraft!,
+        outline: latestState.outline,
       })
       const savedAt = response.savedAt || new Date().toISOString()
       setEditorState((prev) => ({
-        ...prev,
+        ...latestState,
         dirty: false,
         saving: false,
         lastSavedAt: savedAt,
         artifactId: response.artifactId || response.artifact?.id || prev.artifactId,
         exportUrl: response.exportUrl || prev.exportUrl,
-        documentDraft: response.document || prev.documentDraft,
-        outline: response.outline || prev.outline,
+        documentDraft: response.document || latestState.documentDraft,
+        outline: response.outline || latestState.outline,
       }))
       if (response.filename) setArtifactFilename(response.filename)
       setStatusMessage('已保存，DOCX 已更新')
@@ -395,6 +471,18 @@ export default function DocumentWorkbench() {
       return null
     }
   }, [editorState.documentDraft, editorState.documentId, editorState.html, editorState.outline, editorState.title])
+
+  useEffect(() => {
+    if (!hydrated || !editorState.dirty || !editorState.documentId || !editorState.documentDraft || busy || editorState.saving) {
+      return
+    }
+    const timer = window.setTimeout(() => {
+      void saveCurrentDocument('正在自动保存文稿…')
+    }, 3500)
+    return () => {
+      window.clearTimeout(timer)
+    }
+  }, [busy, editorState.dirty, editorState.documentDraft, editorState.documentId, editorState.html, editorState.saving, hydrated, saveCurrentDocument])
 
   const handleUploadAttachment = useCallback(() => {
     uploadInputRef.current?.click()
@@ -447,6 +535,8 @@ export default function DocumentWorkbench() {
       })
       syncEditorStateFromTaskResult(nextResult, new Date().toISOString())
       setModifiedSectionIds([])
+      setLastAiSnapshot(null)
+      setRecentAiChange(null)
       setStatusMessage(nextResult.fallbackFrom
         ? `文稿已完成。MiniMax DOCX Skill 失败，已回退内置文稿引擎：${nextResult.fallbackReason || '未提供原因'}`
         : `${engineLabel(nextResult.engine)} 已完成。`)
@@ -549,6 +639,11 @@ export default function DocumentWorkbench() {
         selectedText: '',
         selectionRange: undefined,
       }))
+      setRecentAiChange({
+        token: Date.now(),
+        scope: 'document',
+        sectionId: editorState.selectedSectionId,
+      })
       appendHistory('document', editorState.selectedSectionId, { role: 'assistant', text: output.message || '已重写当前全文。' })
       setStatusMessage(output.message || '已重写当前全文')
       setStatusTone('ok')
@@ -570,6 +665,7 @@ export default function DocumentWorkbench() {
     }
     if (scope === 'document') {
       setActiveHistoryKey('document')
+      captureAiSnapshot('document', editorState.selectedSectionId)
       await handleDocumentRewrite(instruction)
       return
     }
@@ -582,6 +678,7 @@ export default function DocumentWorkbench() {
       }
       appendHistory('selection', editorState.selectedSectionId, { role: 'user', text: instruction })
       setActiveHistoryKey(documentHistoryKey('selection', editorState.selectedSectionId))
+      captureAiSnapshot('selection', editorState.selectedSectionId)
       setBusy(true)
       try {
         const response = await editDocumentSelection({
@@ -610,6 +707,11 @@ export default function DocumentWorkbench() {
           dirty: true,
         }))
         markSectionModified(applied.affectedSectionId || editorState.selectedSectionId)
+        setRecentAiChange({
+          token: Date.now(),
+          scope: 'selection',
+          sectionId: applied.affectedSectionId || editorState.selectedSectionId,
+        })
         appendHistory('selection', editorState.selectedSectionId, { role: 'assistant', text: response.message || '已修改选中内容。' })
         setStatusMessage(response.message || '已修改选中内容')
         setStatusTone('ok')
@@ -632,6 +734,7 @@ export default function DocumentWorkbench() {
 
     appendHistory('section', selectedSection.id, { role: 'user', text: instruction })
     setActiveHistoryKey(documentHistoryKey('section', selectedSection.id))
+    captureAiSnapshot('section', selectedSection.id)
     setBusy(true)
     try {
       const response = await editDocumentSection({
@@ -671,6 +774,11 @@ export default function DocumentWorkbench() {
         selectedSectionId: selectedSection.id,
       }))
       markSectionModified(selectedSection.id)
+      setRecentAiChange({
+        token: Date.now(),
+        scope: 'section',
+        sectionId: selectedSection.id,
+      })
       appendHistory('section', selectedSection.id, { role: 'assistant', text: '已修改该章节，DOCX 已同步更新。' })
       setStatusMessage('已修改该章节，DOCX 已同步更新')
       setStatusTone('ok')
@@ -682,7 +790,7 @@ export default function DocumentWorkbench() {
     } finally {
       setBusy(false)
     }
-  }, [appendHistory, attachments, editorState, handleDocumentRewrite, knowledgeNameMap, markSectionModified, selectedSection, syncEditorStateFromTaskResult, template, workspaceKbIds])
+  }, [appendHistory, attachments, captureAiSnapshot, editorState, handleDocumentRewrite, knowledgeNameMap, markSectionModified, selectedSection, syncEditorStateFromTaskResult, template, workspaceKbIds])
 
   const handleDownloadDocx = useCallback(async () => {
     if (!editorState.documentId) return
@@ -795,6 +903,7 @@ export default function DocumentWorkbench() {
             ref={canvasRef}
             state={editorState}
             modifiedSectionIds={modifiedSectionIds}
+            recentAiChange={recentAiChange}
             onHtmlChange={handleCanvasHtmlChange}
             onSelectionChange={handleCanvasSelectionChange}
           />
@@ -808,6 +917,8 @@ export default function DocumentWorkbench() {
           history={currentHistory}
           busy={busy}
           disabled={!editorState.documentId}
+          canUndoLastAiEdit={Boolean(lastAiSnapshot)}
+          onUndoLastAiEdit={handleUndoLastAiEdit}
           onSubmit={handleAiSubmit}
         />
       </Body>
