@@ -33,6 +33,7 @@ const CONTENT_TYPES: Record<string, string> = {
   png: 'image/png',
   jpg: 'image/jpeg',
   jpeg: 'image/jpeg',
+  svg: 'image/svg+xml; charset=utf-8',
 }
 
 // ── GET /api/artifacts ────────────────────────────────────────────────────────
@@ -115,8 +116,12 @@ router.get('/:artifactId/download', async (req, res) => {
     return res.status(403).json({ message: 'Access denied: artifact belongs to another user' })
   }
 
+  const requestedFilename = typeof req.query.filename === 'string' ? req.query.filename : ''
+  const requestedFormat = typeof req.query.format === 'string' ? req.query.format : ''
   const exportEntry =
-    artifact.exports.find((e) => e.format === 'docx')
+    (requestedFilename ? artifact.exports.find((e) => e.filename === requestedFilename) : undefined)
+    ?? (requestedFormat ? artifact.exports.find((e) => e.format === requestedFormat) : undefined)
+    ?? artifact.exports.find((e) => e.format === 'docx')
     ?? artifact.exports.find((e) => e.format === 'md')
     ?? artifact.exports[0]
 
@@ -160,7 +165,7 @@ router.get('/:artifactId/preview', async (req, res) => {
   }
 
   const ext = path.extname(exportEntry.filename).slice(1).toLowerCase()
-  const previewable = ['md', 'txt', 'json', 'html', 'png', 'jpg', 'jpeg'].includes(ext)
+  const previewable = ['md', 'txt', 'json', 'html', 'png', 'jpg', 'jpeg', 'svg'].includes(ext)
   if (!previewable) {
     return res.json({
       artifact,

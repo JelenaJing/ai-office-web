@@ -278,6 +278,8 @@ export const webPlatformApi: PlatformApi = {
       title?: string
       type?: string
       artifact?: Artifact
+      summary?: string
+      imageUrls?: string[]
     }> {
       let workspacePath = input.workspacePath
       if (!workspacePath) {
@@ -297,7 +299,7 @@ export const webPlatformApi: PlatformApi = {
         throw new Error(start.error ?? '表格分析任务启动失败')
       }
 
-      let result: { artifactId?: string; artifact?: Artifact } | null = null
+      let result: { artifactId?: string; artifact?: Artifact; summary?: string; imageUrls?: string[] } | null = null
       for (let i = 0; i < 120; i++) {
         await new Promise((resolve) => setTimeout(resolve, 1500))
         const task = await apiFetch<{
@@ -305,7 +307,7 @@ export const webPlatformApi: PlatformApi = {
           status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
           message?: string
           error?: string
-          result?: SkillResult & { artifactId?: string }
+          result?: SkillResult & { artifactId?: string; summary?: string; imageUrls?: string[] }
         }>(`/api/data-analysis/jobs/${start.jobId}`)
         if (task.status === 'failed') {
           throw new Error(task.result?.error ?? task.error ?? task.message ?? '表格分析失败')
@@ -317,6 +319,8 @@ export const webPlatformApi: PlatformApi = {
           result = {
             artifactId: task.result.artifactId ?? task.result.artifact?.id,
             artifact: task.result.artifact,
+            summary: task.result.summary,
+            imageUrls: task.result.imageUrls,
           }
           break
         }
@@ -334,6 +338,8 @@ export const webPlatformApi: PlatformApi = {
         title: result.artifact?.title,
         type: result.artifact?.type,
         artifact: result.artifact,
+        summary: result.summary,
+        imageUrls: result.imageUrls,
       }
     },
   },

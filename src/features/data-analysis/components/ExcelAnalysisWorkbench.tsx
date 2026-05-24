@@ -296,6 +296,8 @@ export default function ExcelAnalysisWorkbench() {
   const [spreadsheetFiles, setSpreadsheetFiles] = useState<FileEntry[]>([])
   const [filesLoading, setFilesLoading] = useState(false)
   const [webArtifact, setWebArtifact] = useState<Artifact | null>(null)
+  const [webImageUrls, setWebImageUrls] = useState<string[]>([])
+  const [webSummary, setWebSummary] = useState('')
   const [pickingFile, setPickingFile] = useState(false)
   const [analysisRunning, setAnalysisRunning] = useState(false)
   const [lastError, setLastError] = useState<string | null>(null)
@@ -446,6 +448,8 @@ export default function ExcelAnalysisWorkbench() {
     setLocalOutputImages([])
     setLocalResultTitle('')
     setWebArtifact(null)
+    setWebImageUrls([])
+    setWebSummary('')
     setShowDebug(true)
     workbench.clearCurrentResult()
     workbench.setGenerationStatus('running', webMode ? '正在提交服务器分析…' : '正在启动分析…')
@@ -477,8 +481,11 @@ export default function ExcelAnalysisWorkbench() {
           return
         }
         setWebArtifact(artifact)
+        setWebImageUrls(result.imageUrls || (Array.isArray(artifact.metadata?.imageUrls) ? artifact.metadata.imageUrls.map(String) : []))
+        setWebSummary(result.summary || (typeof artifact.metadata?.summary === 'string' ? artifact.metadata.summary : ''))
         workbench.setGenerationStatus('completed', '分析完成')
         appendEnvLog(`[ok] 已生成报告：${artifact.title}`)
+        if ((result.imageUrls || []).length > 0) appendEnvLog(`[ok] 已生成图表图片：${result.imageUrls!.length} 张`)
         appendEnvLog('[hint] 可在资源中心 › 生成记录查看（类型：表格分析）')
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
@@ -733,6 +740,17 @@ export default function ExcelAnalysisWorkbench() {
             <HintLine style={{ color: '#15803d', fontWeight: 600 }}>
               {webArtifact.title}
             </HintLine>
+            {webSummary ? <HintLine>{webSummary}</HintLine> : null}
+            {webImageUrls.length > 0 ? (
+              <ChartGrid data-testid="data-analysis-image-results">
+                {webImageUrls.map((url, index) => (
+                  <ChartCard key={`${url}-${index}`}>
+                    <ChartTitle>服务器生成图表 {index + 1}</ChartTitle>
+                    <ChartImg src={url} alt={`服务器生成图表 ${index + 1}`} />
+                  </ChartCard>
+                ))}
+              </ChartGrid>
+            ) : null}
             <HintLine>
               可在 <strong>资源中心 › 生成记录</strong> 查看（类型：表格分析）。
             </HintLine>

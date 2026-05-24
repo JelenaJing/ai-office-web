@@ -170,6 +170,8 @@ export default function WebExcelAnalysisPanel() {
   const [error, setError] = useState<string | null>(null)
   const [downloadError, setDownloadError] = useState<string | null>(null)
   const [artifact, setArtifact] = useState<Artifact | null>(null)
+  const [imageUrls, setImageUrls] = useState<string[]>([])
+  const [summary, setSummary] = useState('')
 
   const spreadsheetFiles = files.filter(isSpreadsheetFile)
 
@@ -207,6 +209,8 @@ export default function WebExcelAnalysisPanel() {
     setError(null)
     setDownloadError(null)
     setArtifact(null)
+    setImageUrls([])
+    setSummary('')
     try {
       const result = await platformApi.excel.analyze({
         fileId,
@@ -220,6 +224,8 @@ export default function WebExcelAnalysisPanel() {
           return
         }
         setArtifact(art)
+        setImageUrls(result.imageUrls || (Array.isArray(art.metadata?.imageUrls) ? art.metadata.imageUrls.map(String) : []))
+        setSummary(result.summary || (typeof art.metadata?.summary === 'string' ? art.metadata.summary : ''))
         return
       }
       const list = await platformApi.artifacts.list()
@@ -229,6 +235,8 @@ export default function WebExcelAnalysisPanel() {
         return
       }
       setArtifact(found)
+      setImageUrls(Array.isArray(found.metadata?.imageUrls) ? found.metadata.imageUrls.map(String) : [])
+      setSummary(typeof found.metadata?.summary === 'string' ? found.metadata.summary : '')
     } catch (err) {
       setError(err instanceof Error ? err.message : '分析失败，请重试')
     } finally {
@@ -253,6 +261,8 @@ export default function WebExcelAnalysisPanel() {
 
   const handleReset = () => {
     setArtifact(null)
+    setImageUrls([])
+    setSummary('')
     setError(null)
     setDownloadError(null)
   }
@@ -273,6 +283,23 @@ export default function WebExcelAnalysisPanel() {
               <div style={{ fontSize: 12, color: '#8094a8' }}>
                 可在 <strong>资源中心 › 生成记录</strong> 查看（类型：表格分析）。
               </div>
+              {summary ? (
+                <div style={{ fontSize: 12, color: '#4b647a', lineHeight: 1.6 }}>
+                  {summary}
+                </div>
+              ) : null}
+              {imageUrls.length > 0 ? (
+                <div data-testid="data-analysis-image-results" style={{ display: 'grid', gap: 8, width: '100%' }}>
+                  {imageUrls.map((url, index) => (
+                    <img
+                      key={`${url}-${index}`}
+                      src={url}
+                      alt={`服务器生成图表 ${index + 1}`}
+                      style={{ width: '100%', border: '1px solid #d8e3ef', borderRadius: 12, background: '#f8fafc' }}
+                    />
+                  ))}
+                </div>
+              ) : null}
               {downloadError && <ErrorBox>{downloadError}</ErrorBox>}
               {artifactHasExport(artifact) ? (
                 <PrimaryBtn onClick={() => void handleDownload()}>

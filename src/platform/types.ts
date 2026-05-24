@@ -44,6 +44,8 @@ export interface Artifact {
   title: string
   createdAt: string
   exports: ArtifactExport[]
+  sourceRefs?: Array<{ type: string; id: string; label?: string }>
+  metadata?: Record<string, unknown>
 }
 
 export interface SkillInfo {
@@ -201,6 +203,8 @@ export interface PlatformApi {
       title?: string
       type?: string
       artifact?: Artifact
+      summary?: string
+      imageUrls?: string[]
     }>
   }
 
@@ -248,4 +252,3 @@ export interface PlatformApi {
     getRuntime(): 'electron' | 'web'
   }
 }
-

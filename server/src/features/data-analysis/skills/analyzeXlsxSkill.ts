@@ -12,7 +12,7 @@ import {
   saveArtifactMetadata,
   type Artifact,
 } from '../../../artifacts/ArtifactStore'
-import { analyzeSpreadsheet, isSpreadsheetExt } from '../../../modules/excel'
+import { analyzeSpreadsheetWithChart, isSpreadsheetExt } from '../../../modules/excel'
 
 export interface AnalyzeXlsxInput {
   userId: string
@@ -23,7 +23,7 @@ export interface AnalyzeXlsxInput {
 }
 
 export type AnalyzeXlsxResult =
-  | { success: true; artifactId: string; artifact: Artifact }
+  | { success: true; artifactId: string; artifact: Artifact; summary: string; imageUrls: string[] }
   | { success: false; error: string; status?: number }
 
 export async function runAnalyzeXlsxSkill(
@@ -66,7 +66,7 @@ export async function runAnalyzeXlsxSkill(
   }
 
   try {
-    const markdown = await analyzeSpreadsheet({
+    const analysis = await analyzeSpreadsheetWithChart({
       absolutePath: resolved.absolutePath,
       fileName: resolved.entry.name,
       ext,
@@ -80,14 +80,25 @@ export async function runAnalyzeXlsxSkill(
 
     const dir = createArtifactDir(input.userId, parsed.wsId, artifactId)
     const mdFilename = 'analysis.md'
-    fs.writeFileSync(path.join(dir, mdFilename), markdown, 'utf-8')
+    const chartFilename = 'chart.svg'
+    const resultFilename = 'result.json'
+    fs.writeFileSync(path.join(dir, mdFilename), analysis.markdown, 'utf-8')
+    fs.writeFileSync(path.join(dir, chartFilename), analysis.chartSvg, 'utf-8')
+    const imageUrls = [`/api/artifacts/${artifactId}/download?filename=${encodeURIComponent(chartFilename)}`]
+    fs.writeFileSync(path.join(dir, resultFilename), JSON.stringify({
+      summary: analysis.summary,
+      imageUrls,
+      chartTitle: analysis.chartTitle,
+      sourceFileId: fileId,
+      sourceFileName: resolved.entry.name,
+    }, null, 2), 'utf-8')
 
     const artifact: Artifact = {
       id: artifactId,
       userId: input.userId,
       workspaceId: parsed.wsId,
       workspacePath: input.workspacePath,
-      type: 'excel_analysis',
+      type: 'data_analysis',
       title,
       editable: false,
       createdBySkillId: 'web.xlsx.analyze',
@@ -98,13 +109,30 @@ export async function runAnalyzeXlsxSkill(
           filename: mdFilename,
           url: `/api/artifacts/${artifactId}/download`,
         },
+        {
+          format: 'image/svg+xml',
+          filename: chartFilename,
+          url: imageUrls[0],
+        },
+        {
+          format: 'json',
+          filename: resultFilename,
+          url: `/api/artifacts/${artifactId}/download?filename=${encodeURIComponent(resultFilename)}`,
+        },
       ],
       sourceRefs: [{ type: 'document', id: fileId, label: resolved.entry.name }],
       documentId: fileId,
+      metadata: {
+        summary: analysis.summary,
+        imageUrls,
+        chartTitle: analysis.chartTitle,
+        artifactKind: 'data_analysis',
+        sourceRefs: [{ type: 'spreadsheet', id: fileId, label: resolved.entry.name }],
+      },
     }
 
     saveArtifactMetadata(artifact)
-    return { success: true, artifactId, artifact }
+    return { success: true, artifactId, artifact, summary: analysis.summary, imageUrls }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return { success: false, error: msg, status: 500 }

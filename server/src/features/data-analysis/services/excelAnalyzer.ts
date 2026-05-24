@@ -30,6 +30,13 @@ interface SheetProfile {
   columns: ColumnProfile[]
 }
 
+export interface AnalyzeSpreadsheetResult {
+  markdown: string
+  summary: string
+  chartSvg: string
+  chartTitle: string
+}
+
 function isNumericCell(v: unknown): boolean {
   if (v == null || v === '') return false
   if (typeof v === 'number' && !Number.isNaN(v)) return true
@@ -272,6 +279,75 @@ export interface AnalyzeSpreadsheetInput {
 export async function analyzeSpreadsheet(
   input: AnalyzeSpreadsheetInput,
 ): Promise<string> {
+  return (await analyzeSpreadsheetWithChart(input)).markdown
+}
+
+function buildSummary(sheets: SheetProfile[]): string {
+  const totalRows = sheets.reduce((sum, sheet) => sum + sheet.rowCount, 0)
+  const totalCols = sheets.reduce((sum, sheet) => sum + sheet.colCount, 0)
+  const numericCols = sheets.flatMap((sheet) => sheet.columns.filter((col) => col.kind === 'number').map((col) => `${sheet.name}.${col.name}`))
+  return [
+    `共解析 ${sheets.length} 个工作表、${totalRows} 行数据、${totalCols} 个字段。`,
+    numericCols.length > 0
+      ? `可用于图表展示的数值字段包括：${numericCols.slice(0, 6).join('、')}。`
+      : '未检测到稳定数值字段，已生成字段完整性概览。',
+  ].join('')
+}
+
+function escapeXml(value: string): string {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+function buildChartSvg(fileName: string, sheets: SheetProfile[]): { svg: string; title: string } {
+  const firstSheet = sheets.find((sheet) => sheet.columns.some((col) => col.numeric)) || sheets[0]
+  const numericCols = firstSheet?.columns.filter((col) => col.numeric).slice(0, 8) || []
+  const title = numericCols.length > 0 ? '数值字段均值概览' : '字段缺失率概览'
+  const values = numericCols.length > 0
+    ? numericCols.map((col) => ({ label: col.name, value: Math.max(0, col.numeric?.mean ?? 0), suffix: '' }))
+    : (firstSheet?.columns.slice(0, 8).map((col) => ({ label: col.name, value: col.missingPct, suffix: '%' })) || [])
+  const safeValues = values.length > 0 ? values : [{ label: '暂无数据', value: 0, suffix: '' }]
+  const max = Math.max(...safeValues.map((item) => item.value), 1)
+  const width = 960
+  const height = 540
+  const left = 110
+  const bottom = 92
+  const top = 72
+  const plotWidth = width - left - 48
+  const plotHeight = height - top - bottom
+  const barGap = 16
+  const barWidth = Math.max(28, (plotWidth - barGap * (safeValues.length - 1)) / safeValues.length)
+  const bars = safeValues.map((item, index) => {
+    const x = left + index * (barWidth + barGap)
+    const h = Math.round((item.value / max) * (plotHeight - 12))
+    const y = top + plotHeight - h
+    const label = item.label.length > 10 ? `${item.label.slice(0, 10)}…` : item.label
+    return [
+      `<rect x="${x}" y="${y}" width="${barWidth}" height="${h}" rx="8" fill="#4b8fd7" />`,
+      `<text x="${x + barWidth / 2}" y="${y - 8}" text-anchor="middle" font-size="16" fill="#1f3448">${escapeXml(String(item.value))}${escapeXml(item.suffix)}</text>`,
+      `<text x="${x + barWidth / 2}" y="${height - 48}" text-anchor="middle" font-size="15" fill="#516679">${escapeXml(label)}</text>`,
+    ].join('')
+  }).join('\n')
+
+  const svg = [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`,
+    '<rect width="100%" height="100%" fill="#f8fbff" />',
+    `<text x="${left}" y="38" font-size="24" font-weight="700" fill="#173f69">${escapeXml(title)}</text>`,
+    `<text x="${left}" y="62" font-size="14" fill="#6b7f92">${escapeXml(fileName)} · ${escapeXml(firstSheet?.name || 'Sheet1')}</text>`,
+    `<line x1="${left}" y1="${top + plotHeight}" x2="${width - 36}" y2="${top + plotHeight}" stroke="#bfd0e2" stroke-width="2" />`,
+    `<line x1="${left}" y1="${top}" x2="${left}" y2="${top + plotHeight}" stroke="#bfd0e2" stroke-width="2" />`,
+    bars,
+    '</svg>',
+  ].join('\n')
+  return { svg, title }
+}
+
+export async function analyzeSpreadsheetWithChart(
+  input: AnalyzeSpreadsheetInput,
+): Promise<AnalyzeSpreadsheetResult> {
   const ext = input.ext.toLowerCase()
   if (!isSpreadsheetExt(ext)) {
     throw new Error(`仅支持 xlsx / csv，当前为 .${ext}`)
@@ -299,5 +375,11 @@ export async function analyzeSpreadsheet(
     profiles,
   )
 
-  return `${structural}\n${suggestions}`
+  const chart = buildChartSvg(input.fileName, profiles)
+  return {
+    markdown: `${structural}\n${suggestions}`,
+    summary: buildSummary(profiles),
+    chartSvg: chart.svg,
+    chartTitle: chart.title,
+  }
 }
