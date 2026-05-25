@@ -1,10 +1,16 @@
 /**
- * userFiles.ts — Resolve uploaded files for the authenticated user (default workspace).
+ * userFiles.ts — Resolve uploaded files for the authenticated user.
  */
 
 import fs from 'fs'
 import path from 'path'
-import { getOrCreateDefaultWorkspace, workspaceDir } from './workspaceStore'
+import {
+  clientPath,
+  parseClientPath,
+  readIndex,
+  workspaceDir,
+} from './workspaceStore'
+import { assertWorkspaceAccess, bootstrapWorkspaceForUser } from './workspaceAccess'
 
 export interface UserFileEntry {
   id: string
@@ -42,26 +48,108 @@ export interface ResolvedUserFile {
   absolutePath: string
 }
 
-/** Returns file metadata + disk path if owned by userId in default workspace. */
-export function resolveUserFile(
+function resolveWorkspaceCandidates(
+  userId: string,
+  requestedWorkspacePath?: string | null,
+): Array<{ workspaceId: string; workspacePath: string }> {
+  const requested = String(requestedWorkspacePath || '').trim()
+  if (requested) {
+    const access = assertWorkspaceAccess(userId, requested, 'member')
+    return [{
+      workspaceId: access.workspaceId,
+      workspacePath: access.workspacePath,
+    }]
+  }
+
+  const candidates: Array<{ workspaceId: string; workspacePath: string }> = []
+
+  const bootstrapped = bootstrapWorkspaceForUser(userId)
+  const index = readIndex(userId)
+  for (const workspace of index.workspaces) {
+    const parsed = parseClientPath(workspace.path)
+    if (!parsed || parsed.userId !== userId || !fs.existsSync(workspaceDir(userId, workspace.id))) continue
+    candidates.push({
+      workspaceId: workspace.id,
+      workspacePath: clientPath(userId, workspace.id),
+    })
+  }
+  if (!candidates.some((candidate) => candidate.workspaceId === bootstrapped.currentWorkspaceId)) {
+    candidates.push({
+      workspaceId: bootstrapped.currentWorkspaceId,
+      workspacePath: bootstrapped.currentWorkspacePath,
+    })
+  }
+  return candidates
+}
+
+function resolveUserFileFromWorkspace(
   userId: string,
   fileId: string,
+  workspaceId: string,
+  workspacePath: string,
 ): ResolvedUserFile | null {
-  const trimmed = String(fileId || '').trim()
-  if (!trimmed) return null
-
-  const ws = getOrCreateDefaultWorkspace(userId)
-  const index = readFilesIndex(userId, ws.id)
-  const entry = index.files.find((f) => f.id === trimmed)
+  const index = readFilesIndex(userId, workspaceId)
+  const entry = index.files.find((item) => item.id === fileId)
   if (!entry) return null
-
-  const absolutePath = path.join(filesDir(userId, ws.id), entry.id, 'original')
+  const absolutePath = path.join(filesDir(userId, workspaceId), entry.id, 'original')
   if (!fs.existsSync(absolutePath)) return null
 
   return {
     entry,
-    workspaceId: ws.id,
-    workspacePath: ws.path,
+    workspaceId,
+    workspacePath,
     absolutePath,
   }
+}
+
+export function resolveUserFileInWorkspace(
+  userId: string,
+  fileId: string,
+  requestedWorkspacePath?: string | null,
+): ResolvedUserFile | null {
+  const trimmed = String(fileId || '').trim()
+  if (!trimmed) return null
+  for (const candidate of resolveWorkspaceCandidates(userId, requestedWorkspacePath)) {
+    const resolved = resolveUserFileFromWorkspace(
+      userId,
+      trimmed,
+      candidate.workspaceId,
+      candidate.workspacePath,
+    )
+    if (resolved) return resolved
+  }
+  return null
+}
+
+export function listUserFilesInWorkspace(
+  userId: string,
+  requestedWorkspacePath?: string | null,
+): ResolvedUserFile[] {
+  const files: ResolvedUserFile[] = []
+  const seen = new Set<string>()
+  for (const candidate of resolveWorkspaceCandidates(userId, requestedWorkspacePath)) {
+    const index = readFilesIndex(userId, candidate.workspaceId)
+    for (const entry of index.files) {
+      if (seen.has(entry.id)) continue
+      const absolutePath = path.join(filesDir(userId, candidate.workspaceId), entry.id, 'original')
+      if (!fs.existsSync(absolutePath)) continue
+      files.push({
+        entry,
+        workspaceId: candidate.workspaceId,
+        workspacePath: candidate.workspacePath,
+        absolutePath,
+      })
+      seen.add(entry.id)
+    }
+  }
+  return files
+}
+
+/** Returns file metadata + disk path if owned by userId in the user's accessible workspaces. */
+export function resolveUserFile(
+  userId: string,
+  fileId: string,
+  requestedWorkspacePath?: string | null,
+): ResolvedUserFile | null {
+  return resolveUserFileInWorkspace(userId, fileId, requestedWorkspacePath)
 }

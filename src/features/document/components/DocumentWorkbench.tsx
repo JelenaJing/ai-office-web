@@ -1431,26 +1431,28 @@ export default function DocumentWorkbench() {
         ? {
             id: `ref-${knowledgeRefs[0].kind}-${knowledgeRefs[0].id}`,
             label: knowledgeRefs[0].label || '知识库引用',
-            kind: 'knowledge_base' as const,
+            kind: knowledgeRefs[0].kind,
             sourceId: knowledgeRefs[0].sourceId || knowledgeRefs[0].id || 'kb-unknown',
             sourceType: knowledgeRefs[0].sourceType || knowledgeRefs[0].kind,
             chunkId: knowledgeRefs[0].chunkId,
             trustLevel: knowledgeRefs[0].trustLevel || knowledgeRefs[0].citationStatus,
           }
         : null)
+      const retrievalSourceIds = [...workspaceKbIds, ...attachments.map((item) => item.id)]
 
-      if (workspaceKbIds.length > 0) {
+      if (retrievalSourceIds.length > 0) {
         try {
           const retrieval = await queryKnowledgeCitationChunks({
             query: `${instruction}\n${'text' in targetBlock ? targetBlock.text : ''}`.trim(),
             workspaceId: activeWorkspacePath,
-            selectedSourceIds: workspaceKbIds,
+            selectedSourceIds: retrievalSourceIds,
             topK: 1,
           })
           const chunk = retrieval.chunks[0]
           if (chunk) {
+            const sourceKind = attachments.some((item) => item.id === chunk.sourceId) ? 'file' : 'knowledge_base'
             citationKnowledgeRef = {
-              kind: 'knowledge_base',
+              kind: sourceKind,
               id: chunk.sourceId,
               label: chunk.title,
               excerpt: chunk.excerpt,
@@ -1461,9 +1463,9 @@ export default function DocumentWorkbench() {
               citationStatus: chunk.trustLevel === 'verified' ? 'verified' : chunk.trustLevel === 'unverified' ? 'unverified' : 'partial',
             }
             refSource = {
-              id: `ref-knowledge_base-${chunk.sourceId}`,
+              id: `ref-${sourceKind}-${chunk.sourceId}`,
               label: chunk.title,
-              kind: 'knowledge_base' as const,
+              kind: sourceKind,
               sourceId: chunk.sourceId,
               sourceType: chunk.sourceType,
               chunkId: chunk.chunkId,
