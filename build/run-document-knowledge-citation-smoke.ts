@@ -1,10 +1,22 @@
 import { runAcademicWritingWorkflow } from '../server/src/features/document/services/academicWritingService'
+import { searchKnowledgeCitationChunks } from '../server/src/features/knowledge/services/knowledgeSearchService'
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message)
 }
 
 async function main() {
+  const chunks = await searchKnowledgeCitationChunks({
+    query: '给第一段找知识库依据',
+    workspaceId: 'web-workspace:knowledge-citation-smoke:default',
+    selectedSourceIds: ['kb-city-policy'],
+    topK: 1,
+  })
+  assert(chunks.length === 1, 'knowledge search API should return a citation chunk or fallback chunk')
+  assert(chunks[0].sourceId === 'kb-city-policy', 'knowledge chunk should expose sourceId')
+  assert(Boolean(chunks[0].chunkId), 'knowledge chunk should expose chunkId')
+  assert(Boolean(chunks[0].trustLevel), 'knowledge chunk should expose trustLevel')
+
   const userId = `knowledge-citation-smoke-${Date.now()}`
   const workspacePath = `web-workspace:${userId}:knowledge-citation-smoke`
   const result = await runAcademicWritingWorkflow({

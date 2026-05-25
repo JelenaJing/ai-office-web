@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import styled from 'styled-components'
-import { AlertCircle, ChevronDown, Clock3, Download, FileDown, List, MoreHorizontal, RotateCcw, Save, Upload } from 'lucide-react'
+import { ChevronDown, Clock3, Download, FileDown, List, MoreHorizontal, RotateCcw, Save, Upload } from 'lucide-react'
 
 const Toolbar = styled.div`
   display: flex;
@@ -15,30 +15,7 @@ const Toolbar = styled.div`
   overflow: hidden;
 `
 
-const TBDivider = styled.div`
-  width: 1px;
-  height: 22px;
-  background: #d8e3ef;
-  flex-shrink: 0;
-  margin: 0 2px;
-`
-
 const Spacer = styled.div`flex: 1; min-width: 4px;`
-
-const EngineChip = styled.div<{ $tone?: 'warn' }>`
-  padding: 3px 9px;
-  border-radius: 999px;
-  background: ${({ $tone }) => ($tone === 'warn' ? '#fff6eb' : '#f0f7ff')};
-  border: 1px solid ${({ $tone }) => ($tone === 'warn' ? '#f2c48d' : '#c3d8f0')};
-  font-size: 11px;
-  color: ${({ $tone }) => ($tone === 'warn' ? '#8a4b08' : '#1e4d80')};
-  font-weight: 700;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  white-space: nowrap;
-  flex-shrink: 0;
-`
 
 const StatusChip = styled.div<{ $tone?: 'warn' | 'ok' }>`
   padding: 3px 9px;
@@ -97,6 +74,8 @@ const MoreMenuWrapper = styled.div`
   flex-shrink: 0;
 `
 
+const ExportMenuWrapper = styled(MoreMenuWrapper)``
+
 const MoreMenu = styled.div`
   position: absolute;
   top: calc(100% + 6px);
@@ -149,6 +128,7 @@ export interface DocumentTopToolbarProps {
   onOpenOutline: () => void
   onOpenTemplate: () => void
   onOpenKnowledge: () => void
+  onOpenAcademicWriting?: () => void
   onDownloadDocx: () => void
   onImportDocx?: () => void
   onExportPdf: () => void
@@ -162,10 +142,10 @@ export interface DocumentTopToolbarProps {
 }
 
 export function DocumentTopToolbar({
-  engineLabel,
+  engineLabel: _engineLabel,
   templateLabel,
   knowledgeCount,
-  fallbackReason,
+  fallbackReason: _fallbackReason,
   dirty,
   saving,
   lastSavedAt,
@@ -173,6 +153,7 @@ export function DocumentTopToolbar({
   onOpenOutline,
   onOpenTemplate,
   onOpenKnowledge,
+  onOpenAcademicWriting,
   onDownloadDocx,
   onImportDocx,
   onExportPdf,
@@ -185,43 +166,53 @@ export function DocumentTopToolbar({
   regenerateDisabled,
 }: DocumentTopToolbarProps) {
   const [moreOpen, setMoreOpen] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
 
   return (
     <Toolbar>
-      <EngineChip>生成引擎：{engineLabel}</EngineChip>
-      {fallbackReason ? (
-        <EngineChip $tone="warn">
-          <AlertCircle size={11} />
-          回退：{fallbackReason.slice(0, 20)}
-        </EngineChip>
-      ) : null}
-      <TBDivider />
-      <ToolButton type="button" data-testid="document-toolbar-outline" onClick={onOpenOutline}>
-        <List size={14} />
-        目录
+      <ToolButton type="button" data-testid="document-save" onClick={onSave} disabled={busy}>
+        <Save size={14} />
+        保存
       </ToolButton>
-      <ToolButton type="button" data-testid="document-toolbar-template" onClick={onOpenTemplate}>
-        {templateLabel}
-        <ChevronDown size={12} />
-      </ToolButton>
-      <ToolButton type="button" data-testid="document-toolbar-knowledge" onClick={onOpenKnowledge}>
-        知识库{knowledgeCount > 0 ? ` ${knowledgeCount}` : ''}
-        <ChevronDown size={12} />
-      </ToolButton>
+      <ExportMenuWrapper>
+        <PrimaryButton
+          type="button"
+          data-testid="document-export-menu"
+          onClick={() => setExportOpen((v) => !v)}
+          disabled={busy}
+        >
+          <Download size={14} />
+          导出
+          <ChevronDown size={12} />
+        </PrimaryButton>
+        {exportOpen && (
+          <MoreMenu>
+            <MoreMenuItem
+              type="button"
+              data-testid="document-download-docx"
+              onClick={() => { onDownloadDocx(); setExportOpen(false) }}
+              disabled={busy || docxDisabled}
+            >
+              <Download size={14} />
+              导出 DOCX
+            </MoreMenuItem>
+            <MoreMenuItem
+              type="button"
+              data-testid="document-export-pdf"
+              onClick={() => { onExportPdf(); setExportOpen(false) }}
+              disabled={pdfDisabled}
+            >
+              <FileDown size={14} />
+              {pdfDisabled ? '导出 PDF（即将支持）' : '导出 PDF'}
+            </MoreMenuItem>
+          </MoreMenu>
+        )}
+      </ExportMenuWrapper>
       <Spacer />
       {saving ? <StatusChip><Clock3 size={11} />保存中</StatusChip> : null}
       {!saving && dirty ? <StatusChip $tone="warn">未保存修改</StatusChip> : null}
       {!dirty && !saving && lastSavedAt ? <StatusChip $tone="ok">已保存</StatusChip> : null}
       {exportError ? <StatusChip $tone="warn">导出失败</StatusChip> : null}
-      <TBDivider />
-      <ToolButton type="button" data-testid="document-save" onClick={onSave} disabled={busy}>
-        <Save size={14} />
-        保存
-      </ToolButton>
-      <PrimaryButton type="button" data-testid="document-download-docx" onClick={onDownloadDocx} disabled={busy || docxDisabled}>
-        <Download size={14} />
-        下载 DOCX
-      </PrimaryButton>
       <MoreMenuWrapper>
         <ToolButton
           type="button"
@@ -232,6 +223,38 @@ export function DocumentTopToolbar({
         </ToolButton>
         {moreOpen && (
           <MoreMenu>
+            <MoreMenuItem
+              type="button"
+              data-testid="document-toolbar-outline"
+              onClick={() => { onOpenOutline(); setMoreOpen(false) }}
+            >
+              <List size={14} />
+              目录
+            </MoreMenuItem>
+            <MoreMenuItem
+              type="button"
+              data-testid="document-toolbar-template"
+              onClick={() => { onOpenTemplate(); setMoreOpen(false) }}
+            >
+              <ChevronDown size={14} />
+              模板：{templateLabel}
+            </MoreMenuItem>
+            <MoreMenuItem
+              type="button"
+              data-testid="document-toolbar-academic"
+              onClick={() => { onOpenAcademicWriting?.(); setMoreOpen(false) }}
+            >
+              <ChevronDown size={14} />
+              学术写作
+            </MoreMenuItem>
+            <MoreMenuItem
+              type="button"
+              data-testid="document-toolbar-knowledge"
+              onClick={() => { onOpenKnowledge(); setMoreOpen(false) }}
+            >
+              <ChevronDown size={14} />
+              知识库{knowledgeCount > 0 ? ` ${knowledgeCount}` : ''}
+            </MoreMenuItem>
             <MoreMenuItem
               type="button"
               data-testid="document-import-docx"

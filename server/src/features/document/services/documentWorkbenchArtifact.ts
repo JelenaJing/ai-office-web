@@ -111,6 +111,37 @@ function deriveCitations(input: {
   })
 }
 
+function supplementReferencesFromInlineCitations(html: string, references: DocumentReference[]): DocumentReference[] {
+  const parsed = parseDocument(html || '')
+  const rootNodes = parsed.children || []
+  const known = new Set(references.map((ref) => ref.id))
+  const next = [...references]
+  collectElements(rootNodes, (node) => getName(node) === 'span' && String(getAttributeValue(node, 'class') || '').split(/\s+/).includes('doc-citation'))
+    .forEach((node, index) => {
+      const refId = getAttributeValue(node, 'data-ref-id')
+      if (!refId || known.has(refId)) return
+      const sourceType = getAttributeValue(node, 'data-source-type') || 'manual_note'
+      const label = getAttributeValue(node, 'data-ref-label') || normalizeText(getText(node)) || `引用 ${index + 1}`
+      next.push({
+        id: refId,
+        label,
+        kind: sourceType === 'file'
+          ? 'file'
+          : sourceType === 'knowledge_base' || sourceType === 'policy' || sourceType === 'literature'
+            ? 'knowledge_base'
+            : 'manual_note',
+        sourceId: getAttributeValue(node, 'data-source-id') || refId,
+        sourceLabel: label,
+        sourceType: sourceType as DocumentReference['sourceType'],
+        chunkId: getAttributeValue(node, 'data-chunk-id') || undefined,
+        trustLevel: (getAttributeValue(node, 'data-trust-level') as DocumentReference['trustLevel']) || 'partial',
+        citationStatus: 'partial',
+      })
+      known.add(refId)
+    })
+  return next
+}
+
 function parseTable(node: Element, fallbackId: string): Extract<DocumentCanonicalBlock, { type: 'table' }> {
   const tableRoot = getName(node) === 'table'
     ? node
@@ -431,7 +462,7 @@ export function buildCanonicalDataFromHtml(input: {
     })
   })
 
-  const references = deriveReferences(input.knowledgeRefs)
+  const references = supplementReferencesFromInlineCitations(input.html, deriveReferences(input.knowledgeRefs))
   const citations = deriveCitations({ html: input.html, references }).map((citation) => ({
     ...citation,
     sectionId: blocks.find((block) => block.id === citation.blockId)?.sectionId || null,
@@ -476,13 +507,20 @@ export function buildWorkbenchDocumentArtifact(input: {
     knowledgeRefs: input.knowledgeRefs,
   })
   const timestamp = input.updatedAt || new Date().toISOString()
+  const sourceRefs = input.sourceRefs || canonicalData.references
+    .filter((ref) => ref.sourceId)
+    .map((ref) => ({
+      type: ref.sourceType || ref.kind,
+      id: ref.sourceId,
+      label: ref.sourceLabel || ref.label,
+    }))
   return {
     id: input.artifactId || input.documentId,
     type: 'document',
     title: input.draft.title,
     html,
     canonicalData,
-    sourceRefs: input.sourceRefs || [],
+    sourceRefs,
     knowledgeRefs: input.knowledgeRefs,
     references: canonicalData.references,
     citations: canonicalData.citations,

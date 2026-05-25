@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type RefObject } from 'react'
 import styled from 'styled-components'
 import { useWorkspace } from '../../../contexts/WorkspaceContext'
 import { useDocumentWorkspaceKnowledge } from '../../../contexts/DocumentWorkspaceContext'
@@ -34,11 +34,13 @@ import {
   importDocumentDocx,
   loadDocumentWorkbenchConfig,
   previewFormalTemplate,
+  queryKnowledgeCitationChunks,
   routeDocumentTask,
   saveEditableDocument,
   startDocumentTask,
   waitForDocumentTask,
   type DocumentDraft,
+  type DocumentKnowledgeRef,
   type DocumentReference,
   type DocumentTaskResult,
   type DocumentTemplateOption,
@@ -80,7 +82,7 @@ const Body = styled.div`
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr) 360px;
+  grid-template-columns: 260px minmax(0, 1fr) 300px;
   overflow: hidden;
   position: relative;
 `
@@ -123,6 +125,32 @@ const SidebarHeader = styled.div`
   font-weight: 700;
   color: #516679;
   letter-spacing: 0.02em;
+`
+
+const SidebarToggle = styled.button`
+  width: 100%;
+  height: 42px;
+  padding: 0 16px;
+  border: 0;
+  background: transparent;
+  color: #2c4b67;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+
+  &:hover {
+    background: #f1f6fb;
+  }
+`
+
+const SidebarCollapsedHint = styled.div`
+  padding: 0 16px 14px;
+  color: #7a8fa0;
+  font-size: 12px;
+  line-height: 1.6;
 `
 
 const StatusBar = styled.div<{ $tone?: 'ok' | 'err' }>`
@@ -244,6 +272,8 @@ interface RecentAiChange {
   scope: DocumentAiScope
   sectionId: string | null
 }
+
+type SidebarPanelKey = 'template' | 'academic' | 'knowledge'
 
 function createLocalDocumentDraft(engine: string, title = ''): DocumentDraft {
   return {
@@ -487,6 +517,11 @@ export default function DocumentWorkbench() {
   const [commandUndoStack, setCommandUndoStack] = useState<DocumentPatchOperation[]>([])
   // Last command operation result — shown in the AI panel
   const [lastCommandOp, setLastCommandOp] = useState<DocumentPatchOperation | null>(null)
+  const [sidebarOpen, setSidebarOpen] = useState<Record<SidebarPanelKey, boolean>>({
+    template: false,
+    academic: false,
+    knowledge: false,
+  })
 
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
   const importDocxInputRef = useRef<HTMLInputElement | null>(null)
@@ -494,6 +529,7 @@ export default function DocumentWorkbench() {
   const outlinePanelRef = useRef<HTMLElement | null>(null)
   const templatePanelRef = useRef<HTMLElement | null>(null)
   const knowledgePanelRef = useRef<HTMLElement | null>(null)
+  const academicPanelRef = useRef<HTMLElement | null>(null)
 
   useEffect(() => {
     let disposed = false
@@ -1387,10 +1423,11 @@ export default function DocumentWorkbench() {
         return true
       }
 
-      // Use first available knowledge ref, or create a placeholder
+      // Prefer server-side knowledge retrieval; fall back to already-bound refs or a manual placeholder.
       const availableRefs = editorState.documentArtifact?.references || []
       const knowledgeRefs = editorState.documentArtifact?.knowledgeRefs || []
-      const refSource = availableRefs[0] || (knowledgeRefs[0]
+      let citationKnowledgeRef: DocumentKnowledgeRef | null = null
+      let refSource = availableRefs[0] || (knowledgeRefs[0]
         ? {
             id: `ref-${knowledgeRefs[0].kind}-${knowledgeRefs[0].id}`,
             label: knowledgeRefs[0].label || '知识库引用',
@@ -1400,14 +1437,56 @@ export default function DocumentWorkbench() {
             chunkId: knowledgeRefs[0].chunkId,
             trustLevel: knowledgeRefs[0].trustLevel || knowledgeRefs[0].citationStatus,
           }
-        : {
-            id: `ref-placeholder-${Date.now()}`,
-            label: '待补充依据',
-            kind: 'manual_note' as const,
-            sourceId: 'manual',
-            sourceType: 'manual_note',
-            trustLevel: 'unverified',
+        : null)
+
+      if (workspaceKbIds.length > 0) {
+        try {
+          const retrieval = await queryKnowledgeCitationChunks({
+            query: `${instruction}\n${'text' in targetBlock ? targetBlock.text : ''}`.trim(),
+            workspaceId: activeWorkspacePath,
+            selectedSourceIds: workspaceKbIds,
+            topK: 1,
           })
+          const chunk = retrieval.chunks[0]
+          if (chunk) {
+            citationKnowledgeRef = {
+              kind: 'knowledge_base',
+              id: chunk.sourceId,
+              label: chunk.title,
+              excerpt: chunk.excerpt,
+              sourceType: chunk.sourceType,
+              sourceId: chunk.sourceId,
+              chunkId: chunk.chunkId,
+              trustLevel: chunk.trustLevel,
+              citationStatus: chunk.trustLevel === 'verified' ? 'verified' : chunk.trustLevel === 'unverified' ? 'unverified' : 'partial',
+            }
+            refSource = {
+              id: `ref-knowledge_base-${chunk.sourceId}`,
+              label: chunk.title,
+              kind: 'knowledge_base' as const,
+              sourceId: chunk.sourceId,
+              sourceType: chunk.sourceType,
+              chunkId: chunk.chunkId,
+              trustLevel: chunk.trustLevel,
+              excerpt: chunk.excerpt,
+            }
+          }
+        } catch (error) {
+          setStatusMessage(error instanceof Error ? `知识库检索失败，已使用已有来源：${error.message}` : '知识库检索失败，已使用已有来源')
+          setStatusTone('err')
+        }
+      }
+
+      if (!refSource) {
+        refSource = {
+          id: `ref-placeholder-${Date.now()}`,
+          label: '待补充依据',
+          kind: 'manual_note' as const,
+          sourceId: 'manual',
+          sourceType: 'manual_note',
+          trustLevel: 'unverified',
+        }
+      }
 
       const citationId = `citation-cmd-${Date.now()}`
       const result = canvasRef.current?.appendCitationToBlock({
@@ -1440,11 +1519,26 @@ export default function DocumentWorkbench() {
       })
       setCommandUndoStack((prev) => [op, ...prev.slice(0, 19)])
       setLastCommandOp(op)
-      setEditorState((prev) => ({
-        ...updateEditableStateFromHtml(prev, result.html),
-        selectedSectionId: result.affectedSectionId || prev.selectedSectionId,
-        dirty: true,
-      }))
+      setEditorState((prev) => {
+        const nextDraft = citationKnowledgeRef && prev.documentDraft
+          ? {
+              ...prev.documentDraft,
+              metadata: {
+                ...prev.documentDraft.metadata,
+                knowledgeRefs: [
+                  ...(prev.documentDraft.metadata.knowledgeRefs || []).filter((ref) => ref.chunkId !== citationKnowledgeRef?.chunkId),
+                  citationKnowledgeRef,
+                ],
+              },
+            }
+          : prev.documentDraft
+        const next = updateEditableStateFromHtml({ ...prev, documentDraft: nextDraft }, result.html)
+        return {
+          ...next,
+          selectedSectionId: result.affectedSectionId || prev.selectedSectionId,
+          dirty: true,
+        }
+      })
       appendHistory(
         parsed.target.kind.startsWith('section') ? 'section' : 'document',
         editorState.selectedSectionId,
@@ -1936,6 +2030,15 @@ export default function DocumentWorkbench() {
     setGenerationPrompt('')
   }, [commandUndoStack.length, editorState.documentId, editorState.selectedSectionId, editorState.selectedText, generationPrompt, handleAiSubmit, handleCommandSubmit, handleGenerate, handleUndoLastCommand, hasActiveDocument])
 
+  const toggleSidebarPanel = useCallback((key: SidebarPanelKey) => {
+    setSidebarOpen((prev) => ({ ...prev, [key]: !prev[key] }))
+  }, [])
+
+  const openSidebarPanel = useCallback((key: SidebarPanelKey, ref: RefObject<HTMLElement | null>) => {
+    setSidebarOpen((prev) => ({ ...prev, [key]: true }))
+    window.setTimeout(() => ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0)
+  }, [])
+
   return (
     <Shell data-testid="document-workbench">
       <DocumentTopToolbar
@@ -1948,8 +2051,9 @@ export default function DocumentWorkbench() {
         lastSavedAt={editorState.lastSavedAt || null}
         exportError={exportError}
         onOpenOutline={() => outlinePanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-        onOpenTemplate={() => templatePanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-        onOpenKnowledge={() => knowledgePanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+        onOpenTemplate={() => openSidebarPanel('template', templatePanelRef)}
+        onOpenAcademicWriting={() => openSidebarPanel('academic', academicPanelRef)}
+        onOpenKnowledge={() => openSidebarPanel('knowledge', knowledgePanelRef)}
         onImportDocx={handleImportDocx}
         onDownloadDocx={() => void handleDownloadDocx()}
         onExportPdf={handleExportPdf}
@@ -1979,50 +2083,67 @@ export default function DocumentWorkbench() {
 
           <SidebarCard>
             <SidebarSection ref={templatePanelRef}>
-              <SidebarHeader>模板</SidebarHeader>
-              <DocumentTemplatePanel
-                templates={templates}
-                selectedTemplateId={selectedTemplateId}
-                onSelectTemplate={(id) => {
-                  setSelectedTemplateId(id)
-                }}
-              />
+              <SidebarToggle type="button" onClick={() => toggleSidebarPanel('template')} aria-expanded={sidebarOpen.template}>
+                <span>模板</span>
+                <span>{sidebarOpen.template ? '收起' : activeTemplateLabel}</span>
+              </SidebarToggle>
+              {sidebarOpen.template ? (
+                <DocumentTemplatePanel
+                  templates={templates}
+                  selectedTemplateId={selectedTemplateId}
+                  onSelectTemplate={(id) => {
+                    setSelectedTemplateId(id)
+                  }}
+                />
+              ) : <SidebarCollapsedHint>从“更多”或此处展开后切换模板。</SidebarCollapsedHint>}
             </SidebarSection>
           </SidebarCard>
 
           <SidebarCard>
-            <SidebarSection>
-              <SidebarHeader>学术写作</SidebarHeader>
-              <div style={{ padding: '0 16px 16px' }}>
-                <AcademicWritingPanel
-                  disabled={busy}
-                  selectedKnowledgeIds={workspaceKbIds}
-                  attachments={attachments}
-                  onGenerate={handleAcademicWritingGenerate}
-                />
-              </div>
+            <SidebarSection ref={academicPanelRef}>
+              <SidebarToggle type="button" onClick={() => toggleSidebarPanel('academic')} aria-expanded={sidebarOpen.academic}>
+                <span>学术写作</span>
+                <span>{sidebarOpen.academic ? '收起' : '论文 / 研究报告'}</span>
+              </SidebarToggle>
+              {sidebarOpen.academic ? (
+                <div style={{ padding: '0 16px 16px' }}>
+                  <AcademicWritingPanel
+                    disabled={busy}
+                    selectedKnowledgeIds={workspaceKbIds}
+                    attachments={attachments}
+                    onGenerate={handleAcademicWritingGenerate}
+                  />
+                </div>
+              ) : <SidebarCollapsedHint>入口已收口到折叠项，不默认占用写作区。</SidebarCollapsedHint>}
             </SidebarSection>
           </SidebarCard>
 
           <SidebarCard>
             <SidebarSection ref={knowledgePanelRef}>
-              <SidebarHeader>知识库与附件</SidebarHeader>
-              <DocumentKnowledgePanel
-                departments={departments}
-                selectedKnowledgeIds={workspaceKbIds}
-                onOpenKnowledgePicker={() => {
-                  setKbPickerOpen(true)
-                }}
-              />
-              <div style={{ padding: '0 16px 16px' }}>
-                <DocumentAttachmentPanel
-                  attachments={attachments}
-                  onAddAttachment={() => {
-                    handleUploadAttachment()
-                  }}
-                  onRemoveAttachment={(fileId) => setAttachments((prev) => prev.filter((item) => item.id !== fileId))}
-                />
-              </div>
+              <SidebarToggle type="button" onClick={() => toggleSidebarPanel('knowledge')} aria-expanded={sidebarOpen.knowledge}>
+                <span>知识库与附件</span>
+                <span>{sidebarOpen.knowledge ? '收起' : `${workspaceKbIds.length + attachments.length} 个来源`}</span>
+              </SidebarToggle>
+              {sidebarOpen.knowledge ? (
+                <>
+                  <DocumentKnowledgePanel
+                    departments={departments}
+                    selectedKnowledgeIds={workspaceKbIds}
+                    onOpenKnowledgePicker={() => {
+                      setKbPickerOpen(true)
+                    }}
+                  />
+                  <div style={{ padding: '0 16px 16px' }}>
+                    <DocumentAttachmentPanel
+                      attachments={attachments}
+                      onAddAttachment={() => {
+                        handleUploadAttachment()
+                      }}
+                      onRemoveAttachment={(fileId) => setAttachments((prev) => prev.filter((item) => item.id !== fileId))}
+                    />
+                  </div>
+                </>
+              ) : <SidebarCollapsedHint>选择知识库或上传材料后，可通过底部指令“给第一段找知识库依据”。</SidebarCollapsedHint>}
             </SidebarSection>
           </SidebarCard>
         </LeftPane>

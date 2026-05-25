@@ -340,13 +340,20 @@ function buildDocumentArtifactFromHtml(input: {
     knownRefIds.add(refId)
   })
   const timestamp = new Date().toISOString()
+  const sourceRefs = references
+    .filter((ref) => ref.sourceId)
+    .map((ref) => ({
+      type: ref.sourceType || ref.kind,
+      id: ref.sourceId,
+      label: ref.sourceLabel || ref.label,
+    }))
 
   return {
     id: input.documentId,
     type: 'document',
     title,
     html: input.html,
-    sourceRefs: [],
+    sourceRefs,
     knowledgeRefs,
     references,
     citations,

@@ -9,6 +9,7 @@ import {
   listFiles,
   resolveRemoteKnowledgePartitionId,
 } from '../modules/knowledge'
+import { searchKnowledgeCitationChunks } from '../features/knowledge/services/knowledgeSearchService'
 
 const router = Router()
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } })
@@ -68,6 +69,36 @@ router.get('/:departmentId/parity-status', async (req, res) => {
     const msg = err instanceof Error ? err.message : String(err)
     res.status(502).json({ message: `知识库状态检测失败：${msg}` })
   }
+})
+
+/** POST /api/knowledge/search — minimal server-side citation retrieval contract. */
+router.post('/search', async (req, res) => {
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+
+  const query = String(req.body?.query || '').trim()
+  const workspaceId = String(req.body?.workspaceId || '').trim()
+  const selectedSourceIds = Array.isArray(req.body?.selectedSourceIds)
+    ? req.body.selectedSourceIds.map((id: unknown) => String(id || '').trim()).filter(Boolean)
+    : []
+  const topK = Math.max(1, Math.min(Number(req.body?.topK) || 5, 10))
+
+  if (selectedSourceIds.length === 0) {
+    res.json({ success: true, query, workspaceId, chunks: [], mockable: true })
+    return
+  }
+
+  const chunks = await searchKnowledgeCitationChunks({ query, workspaceId, selectedSourceIds, topK })
+
+  res.json({
+    success: true,
+    query,
+    workspaceId,
+    selectedSourceIds,
+    topK,
+    chunks: chunks.slice(0, topK),
+    mockable: true,
+  })
 })
 
 /** GET /api/knowledge/:departmentId/documents */

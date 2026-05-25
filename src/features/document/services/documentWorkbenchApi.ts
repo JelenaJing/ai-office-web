@@ -79,6 +79,15 @@ export interface DocumentCitation {
   trustLevel?: string
 }
 
+export interface KnowledgeCitationChunk {
+  sourceId: string
+  chunkId: string
+  title: string
+  excerpt: string
+  sourceType: 'knowledge_base' | 'file' | 'policy' | 'literature' | 'manual_note'
+  trustLevel: 'verified' | 'partial' | 'unverified' | 'unknown'
+}
+
 export interface DocumentExportPaths {
   pdf?: string
   docx?: string
@@ -615,6 +624,19 @@ export async function generateAcademicWritingDocument(input: {
   knowledgeRefs?: DocumentKnowledgeRefInput[]
 }): Promise<AcademicWritingGenerateResponse> {
   return requestJson('/api/document/academic-writing/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+}
+
+export async function queryKnowledgeCitationChunks(input: {
+  query: string
+  workspaceId?: string | null
+  selectedSourceIds?: string[]
+  topK?: number
+}): Promise<{ success: boolean; chunks: KnowledgeCitationChunk[]; mockable: boolean }> {
+  return requestJson('/api/knowledge/search', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
