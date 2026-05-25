@@ -1012,6 +1012,7 @@ function WriterWorkspaceRuntime({
               {mode !== 'free'
                 && generationMode !== 'email'
                 && generationMode !== 'document'
+                && generationMode !== 'ppt'
                 && generationMode !== 'ai-class'
                 && generationMode !== 'ai-forum'
                 && generationMode !== 'data'

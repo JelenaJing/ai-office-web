@@ -1,5 +1,5 @@
 import styled from 'styled-components'
-import { Globe, PenLine, Palette, BookHeart, Sparkles, Coffee, Microscope } from 'lucide-react'
+import { Globe, PenLine, Palette, Microscope } from 'lucide-react'
 import { useWorkspaceMode } from '../contexts/WorkspaceModeContext'
 import { SceneFeatureRow } from '../components/scene/SceneFeatureRow'
 import { runWebFeatureAction, sceneStatusForWebFeature } from '../platform/useWebFeatureAction'
@@ -63,7 +63,7 @@ export default function LifeWorkspace({ onGoToWorkspace }: LifeWorkspaceProps) {
     <Page>
       <PageHeader>
         <PageTitle>生活场景</PageTitle>
-        <PageSubtitle>兴趣创作、个人记录与轻量社区</PageSubtitle>
+        <PageSubtitle>AI 论坛、轻量写作、图片创作与科学资讯</PageSubtitle>
       </PageHeader>
 
       <FeatureList>
@@ -103,29 +103,7 @@ export default function LifeWorkspace({ onGoToWorkspace }: LifeWorkspaceProps) {
           actionLabel="科学资讯"
           onClick={() => runWebFeatureAction('knowledge', () => go(enterDailyFeedMode), block)}
         />
-        <SceneFeatureRow
-          icon={<BookHeart size={24} />}
-          title="生活记录"
-          description="记录日常想法、计划和备忘，管理个人日志"
-          accent="orange"
-          status="comingSoon"
-        />
-        <SceneFeatureRow
-          icon={<Sparkles size={24} />}
-          title="兴趣创作"
-          description="围绕兴趣主题进行创意生成和内容探索"
-          accent="orange"
-          status="comingSoon"
-        />
-        <SceneFeatureRow
-          icon={<Coffee size={24} />}
-          title="放松助手"
-          description="提供轻量陪伴和放松内容，调节工作节奏"
-          accent="orange"
-          status="comingSoon"
-        />
       </FeatureList>
     </Page>
   )
 }
-

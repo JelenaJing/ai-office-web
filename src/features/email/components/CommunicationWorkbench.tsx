@@ -15,7 +15,7 @@ import { useDepartment } from '../../knowledge'
 import { logActivity } from '../../../services/workActivityLog'
 import { fetchMatrixMediaBlob } from '../../../services/matrixClient'
 import type { MailAttachmentOpenResult } from '../../../types/mailAttachment'
-import type { AiEmailActionPlan, AiMailTriageResult, EmailActionType, EmailAnalysisBatchSummary, EmailContentTopicSummary } from '../../../types/mailTriage'
+import type { AiEmailActionPlan, AiMailTriageResult, EmailActionType, EmailAnalysisBatchSummary, EmailAnalysisErrorCode, EmailContentTopicSummary } from '../../../types/mailTriage'
 import type {
   CommunicationAttachment,
   CommunicationMessage,
@@ -44,6 +44,7 @@ import { detectMatterScenario, buildEmailMatter, serializeMatterToSummary } from
 import { handleCampusCardReplacementMatter, type AgentWorkflowResult } from '../services/cuhkszAgentWorkflow'
 import { emailRuntimeTestConnection } from '../services/emailRuntime'
 import { createMatterFromEmail } from '../../aios'
+import { sanitizeHtmlForDisplay } from '../utils/emailHtmlDisplay'
 
 type ImportedDeckSlide = {
   index?: number
@@ -1491,7 +1492,11 @@ function stripHtmlForForward(html: string): string {
 }
 
 function buildForwardBody(thread: CommunicationThread, message: CommunicationMessage): string {
-  const originalBody = (message.body || (message.htmlBody ? stripHtmlForForward(message.htmlBody) : '')).trim()
+  const originalBody = (
+    message.bodyText
+    || message.body
+    || (message.bodyHtml || message.htmlBody ? stripHtmlForForward(message.bodyHtml || message.htmlBody || '') : '')
+  ).trim()
   return [
     '',
     '',
@@ -1715,8 +1720,12 @@ function buildMailItemFromMessage(thread: CommunicationThread, message: Communic
     to: message.to || '',
     toName: message.toName || '',
     subject: thread.subject,
-    body: message.body,
-    htmlBody: message.htmlBody,
+    body: message.bodyText || message.body,
+    bodyText: message.bodyText || message.body,
+    bodyPreview: message.bodyPreview || message.body,
+    bodyFormat: message.bodyFormat,
+    bodyHtml: message.bodyHtml || message.htmlBody,
+    htmlBody: message.bodyHtml || message.htmlBody,
     timestamp: message.timestamp,
     unread: thread.unread,
     replied: thread.replied,
@@ -2118,30 +2127,31 @@ function IncomingAttachments({
 /* ================================================================== */
 
 function EmailBodyView({ message }: { message: CommunicationMessage }) {
-  const [mode, setMode] = useState<'html' | 'text'>(message.htmlBody ? 'html' : 'text')
+  const htmlBody = message.bodyHtml || message.htmlBody || ''
+  const plainBody = message.bodyText || message.body || '（无正文）'
+  const [mode, setMode] = useState<'html' | 'text'>(htmlBody ? 'html' : 'text')
   const [showExternal, setShowExternal] = useState(false)
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const [iframeHeight, setIframeHeight] = useState(320)
 
   useEffect(() => {
-    setMode(message.htmlBody ? 'html' : 'text')
+    setMode(htmlBody ? 'html' : 'text')
     setShowExternal(false)
     setIframeHeight(320)
-  }, [message.id, message.htmlBody])
+  }, [message.id, htmlBody])
 
-  const srcDoc = useMemo(() => {
-    if (!message.htmlBody) return ''
-    if (showExternal) return message.htmlBody
-    return message.htmlBody.replace(/src="(https?:\/\/[^"]+)"/gi, 'src="" data-external-src="$1"')
-  }, [message.htmlBody, showExternal])
+  const sanitizedHtml = useMemo(
+    () => (htmlBody ? sanitizeHtmlForDisplay(htmlBody, { allowRemoteImages: showExternal }) : null),
+    [htmlBody, showExternal],
+  )
 
   const handleIframeLoad = useCallback(() => {
     const doc = iframeRef.current?.contentDocument
     if (doc?.body) setIframeHeight(Math.max(200, doc.body.scrollHeight + 32))
   }, [])
 
-  const hasHtml = Boolean(message.htmlBody)
-  const hasExternalImages = hasHtml && /data-external-src=/.test(srcDoc)
+  const hasHtml = Boolean(htmlBody)
+  const hasExternalImages = Boolean(sanitizedHtml?.blockedRemoteImages)
 
   return (
     <>
@@ -2160,14 +2170,14 @@ function EmailBodyView({ message }: { message: CommunicationMessage }) {
       {mode === 'html' && hasHtml ? (
         <HtmlIframe
           ref={iframeRef}
-          srcDoc={srcDoc}
+          srcDoc={sanitizedHtml?.html || ''}
           sandbox="allow-same-origin"
           style={{ height: iframeHeight }}
           onLoad={handleIframeLoad}
           title="邮件正文"
         />
       ) : (
-        <PlainBody>{message.body}</PlainBody>
+        <PlainBody>{plainBody}</PlainBody>
       )}
     </>
   )
@@ -2710,13 +2720,33 @@ function EmailAnalysisSummaryPanel({
   onCollapsedChange,
   onMailClick,
   onTopicClick,
+  onRetryMail,
+  onRetryFailed,
 }: {
   summary: EmailAnalysisBatchSummary
   collapsed: boolean
   onCollapsedChange: (collapsed: boolean) => void
   onMailClick: (messageId: string) => void
   onTopicClick: (topic: EmailContentTopicSummary) => void
+  onRetryMail: (messageId: string) => void
+  onRetryFailed: () => void
 }) {
+  const failureLabel = (code?: EmailAnalysisErrorCode, fallback?: string) => {
+    const labels: Record<string, string> = {
+      BODY_INCOMPLETE: '正文获取失败',
+      FETCH_BODY_FAILED: '正文获取失败',
+      BODY_EMPTY: '正文为空',
+      HTML_CLEAN_FAILED: 'HTML 清洗失败',
+      BODY_TOO_LONG: '正文过长',
+      LLM_TIMEOUT: '模型超时',
+      MODEL_UNAVAILABLE: '模型服务不可用',
+      LLM_REQUEST_FAILED: '模型请求失败',
+      LLM_NON_JSON: '模型返回非 JSON',
+      JSON_PARSE_FAILED: 'JSON 解析失败',
+      SAVE_FAILED: '保存失败',
+    }
+    return (code && labels[code]) || fallback || '分析失败'
+  }
   return (
     <SummaryPanel $collapsed={collapsed}>
       <SummaryPanelHeader type="button" onClick={() => onCollapsedChange(!collapsed)}>
@@ -2728,35 +2758,81 @@ function EmailAnalysisSummaryPanel({
           <SummaryStatGrid>
             <SummaryStatCard>
               <SummaryStatValue>{summary.totalEmails}</SummaryStatValue>
-              <SummaryStatLabel>本次分析</SummaryStatLabel>
+              <SummaryStatLabel>总数</SummaryStatLabel>
             </SummaryStatCard>
             <SummaryStatCard>
-              <SummaryStatValue>{summary.importantCount}</SummaryStatValue>
-              <SummaryStatLabel>重要邮件</SummaryStatLabel>
+              <SummaryStatValue>{summary.doneCount}</SummaryStatValue>
+              <SummaryStatLabel>已完成</SummaryStatLabel>
             </SummaryStatCard>
             <SummaryStatCard>
-              <SummaryStatValue>{summary.normalCount}</SummaryStatValue>
-              <SummaryStatLabel>普通邮件</SummaryStatLabel>
+              <SummaryStatValue>{summary.failedCount}</SummaryStatValue>
+              <SummaryStatLabel>失败</SummaryStatLabel>
             </SummaryStatCard>
             <SummaryStatCard>
-              <SummaryStatValue>{summary.lowCount}</SummaryStatValue>
-              <SummaryStatLabel>低优先级</SummaryStatLabel>
+              <SummaryStatValue>{summary.skippedCount}</SummaryStatValue>
+              <SummaryStatLabel>跳过</SummaryStatLabel>
             </SummaryStatCard>
             <SummaryStatCard>
-              <SummaryStatValue>{summary.needReplyCount}</SummaryStatValue>
-              <SummaryStatLabel>需要回复</SummaryStatLabel>
+              <SummaryStatValue>{summary.runningCount}</SummaryStatValue>
+              <SummaryStatLabel>进行中</SummaryStatLabel>
             </SummaryStatCard>
             <SummaryStatCard>
               <SummaryStatValue>{summary.draftReplyCount}</SummaryStatValue>
               <SummaryStatLabel>已生成草稿</SummaryStatLabel>
             </SummaryStatCard>
-            {summary.failedCount > 0 && (
-              <SummaryStatCard>
-                <SummaryStatValue>{summary.failedCount}</SummaryStatValue>
-                <SummaryStatLabel>分析失败</SummaryStatLabel>
-              </SummaryStatCard>
-            )}
           </SummaryStatGrid>
+
+          {summary.failureReasons.length > 0 && (
+            <SummarySection>
+              <SummarySectionTitle style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>失败原因分类</span>
+                <Btn $variant="muted" onClick={onRetryFailed}>只重试失败项</Btn>
+              </SummarySectionTitle>
+              <SummaryList>
+                {summary.failureReasons.map((reason) => (
+                  <SummaryListItem key={reason.key} type="button">
+                    <strong>{reason.label}</strong>：{reason.count} 封
+                  </SummaryListItem>
+                ))}
+              </SummaryList>
+            </SummarySection>
+          )}
+
+          {summary.failedItems.length > 0 && (
+            <SummarySection>
+              <SummarySectionTitle>失败邮件明细</SummarySectionTitle>
+              <SummaryList>
+                {summary.failedItems.map((item) => (
+                  <SummaryListItem
+                    key={`failed-${item.messageId}`}
+                    type="button"
+                    $clickable
+                    onClick={() => onMailClick(item.messageId)}
+                    title="点击定位到邮件详情"
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, width: '100%' }}>
+                      <div style={{ minWidth: 0 }}>
+                        <strong>{item.subject || '无主题邮件'}</strong>
+                        <div style={{ color: '#718096', marginTop: 2 }}>
+                          {item.fromName || item.fromEmail || '未知发件人'} · {failureLabel(item.errorCode, item.error)}
+                          {item.retryCount ? ` · 已重试 ${item.retryCount} 次` : ''}
+                        </div>
+                      </div>
+                      <Btn
+                        $variant="muted"
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          onRetryMail(item.messageId)
+                        }}
+                      >
+                        重试分析
+                      </Btn>
+                    </div>
+                  </SummaryListItem>
+                ))}
+              </SummaryList>
+            </SummarySection>
+          )}
 
           <SummarySection>
             <SummarySectionTitle>主要发件人排行</SummarySectionTitle>
@@ -3022,6 +3098,7 @@ function CommunicationWorkbenchInner() {
     isAnalyzingEmails,
     isWorkerRunning,
     enqueueMail,
+    retryFailedAnalysis,
     regenerateDraft: triageRegenerateDraft,
     discardDraft: triageDiscardDraft,
   } = useMailTriage()
@@ -3702,7 +3779,7 @@ function CommunicationWorkbenchInner() {
         handleCampusCardReplacementMatter({
           matter,
           senderEmail,
-          emailBody: thread?.messages?.map((m) => m.text ?? '').join(' ') ?? '',
+          emailBody: thread?.messages?.map((m) => m.body ?? '').join(' ') ?? '',
           attachmentNames: [],
         })
           .then((agentResult) => {
@@ -3906,7 +3983,7 @@ function CommunicationWorkbenchInner() {
   }, [handleLoadWorkflowTasks])
 
   const emailAnalysisSummaryExpanded = Boolean(currentBatchSummary && !emailAnalysisSummaryCollapsed)
-  const completedAnalysisCount = analysisProgress.done + analysisProgress.cached + analysisProgress.failed
+  const completedAnalysisCount = analysisProgress.done + analysisProgress.failed + analysisProgress.skipped
   const analysisCompleteByProgress = analysisProgress.total > 0 && completedAnalysisCount >= analysisProgress.total && analysisProgress.running === 0
   const analysisCompletedWhileBusy = analysisCompleteByProgress && (isAnalyzingEmails || isWorkerRunning || analysisStatus === 'running')
   const analysisButtonBusy = (isAnalyzingEmails || isWorkerRunning) && !analysisCompleteByProgress
@@ -3951,7 +4028,7 @@ function CommunicationWorkbenchInner() {
               disabled={analysisButtonBusy}
             >
               {analysisButtonBusy
-                ? `🤖 正在分析 ${completedAnalysisCount}/${analysisProgress.total}`
+                ? `🤖 分析中 ${completedAnalysisCount}/${analysisProgress.total}`
                 : analysisStatus === 'done'
                   || analysisCompletedWhileBusy
                 ? '✅ 分析完成'
@@ -3991,12 +4068,12 @@ function CommunicationWorkbenchInner() {
         {isAnalyzingEmails && (
           <AnalysisBanner>
             <AnalysisSpinner>🤖</AnalysisSpinner>
-            正在分析 {analysisProgress.done + analysisProgress.cached + analysisProgress.failed}/{analysisProgress.total}
+            总数 {analysisProgress.total} · 完成 {analysisProgress.done} · 失败 {analysisProgress.failed} · 跳过 {analysisProgress.skipped} · 进行中 {analysisProgress.running}
           </AnalysisBanner>
         )}
         {analysisStatus === 'failed' && analysisProgress.failed > 0 && (
           <AnalysisBanner style={{ background: '#fff5f5', color: '#c53030', borderColor: '#feb2b2' }}>
-            ⚠ 邮件分析部分失败（{analysisProgress.failed} 封），已完成 {analysisProgress.done + analysisProgress.cached} 封
+            ⚠ 分析失败 {analysisProgress.failed} 封，已完成 {analysisProgress.done} 封，已跳过 {analysisProgress.skipped} 封
           </AnalysisBanner>
         )}
 
@@ -4006,7 +4083,7 @@ function CommunicationWorkbenchInner() {
           )}
           {displayedThreads.length === 0 ? (
             <EmptyThreadList>
-              {activeFilter === 'trash' ? '回收站为空' : activeFilter === 'sent' ? '暂无已发送邮件' : '暂无邮件'}
+              {activeFilter === 'trash' ? '回收站为空' : activeFilter === 'sent' ? (isRealEmailMode ? '服务器已发送文件夹为空（如刚发送，请点刷新）' : '暂无已发送邮件') : '暂无邮件'}
             </EmptyThreadList>
           ) : (
             displayedThreads.map((thread) => {
@@ -4034,11 +4111,17 @@ function CommunicationWorkbenchInner() {
                     <span>{thread.participantNames[0] || thread.participants[0]}</span>
                     <span style={{ marginLeft: 'auto' }}>{thread.lastMessage ? formatTime(thread.lastMessage.timestamp) : ''}</span>
                   </ThreadMeta>
-                  <ThreadSnippet>{thread.lastMessage?.body.slice(0, 72).replace(/\n/g, ' ')}</ThreadSnippet>
+                  <ThreadSnippet>{(thread.lastMessage?.bodyPreview || thread.lastMessage?.body || '').slice(0, 72).replace(/\n/g, ' ')}</ThreadSnippet>
                   <AiTriageRow>
                     {thread.folder === 'trash' && <WorkTagBadge $variant="trash">可恢复</WorkTagBadge>}
                     {triage?.status === 'skipped' ? (
-                      <WorkTagBadge $variant="attach">📎 附件</WorkTagBadge>
+                      <WorkTagBadge $variant="attach">
+                        {triage.skipReason === 'system_delivery_notice'
+                          ? '系统通知'
+                          : triage.skipReason === 'empty_mail'
+                            ? '正文为空'
+                            : '已跳过'}
+                      </WorkTagBadge>
                     ) : triage?.status === 'success' ? (
                       <>
                         <AiCategoryTag $cat={actionPlan?.intentType || triage.emailCategory || triage.category}>
@@ -4051,7 +4134,15 @@ function CommunicationWorkbenchInner() {
                         {calendarTag && <WorkTagBadge $variant={calendarTag.variant}>{calendarTag.label}</WorkTagBadge>}
                       </>
                     ) : (
-                      <AiStatusBadge $status={triage?.status || 'none'}>{triage?.status === 'running' ? '分析中' : '未分析'}</AiStatusBadge>
+                      <AiStatusBadge $status={triage?.status || 'none'}>
+                        {triage?.status === 'running'
+                          ? '分析中'
+                          : triage?.status === 'pending'
+                            ? '排队中'
+                            : triage?.status === 'failed'
+                              ? '分析失败'
+                              : '未分析'}
+                      </AiStatusBadge>
                     )}
                   </AiTriageRow>
                 </ThreadCard>
@@ -4070,6 +4161,8 @@ function CommunicationWorkbenchInner() {
             onCollapsedChange={setEmailAnalysisSummaryCollapsed}
             onMailClick={handleSummaryMailClick}
             onTopicClick={handleSummaryTopicClick}
+            onRetryMail={enqueueMail}
+            onRetryFailed={retryFailedAnalysis}
           />
         )}
         {!emailAnalysisSummaryExpanded && (selectedThread && targetMessage && isSelectedThreadValid ? (
@@ -4163,6 +4256,29 @@ function CommunicationWorkbenchInner() {
                   }
                 }}
               />
+
+              {selectedTriage?.status === 'failed' && selectedMailId && (
+                <div style={{
+                  margin: '12px 0',
+                  padding: '10px 14px',
+                  borderRadius: 10,
+                  background: '#fff5f5',
+                  border: '1px solid #feb2b2',
+                  color: '#c53030',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: 12,
+                }}>
+                  <div>
+                    <strong>分析失败</strong>
+                    <div style={{ fontSize: 13, marginTop: 2 }}>
+                      {selectedTriage.errorMessage || '当前邮件分析未完成，可单独重试。'}
+                    </div>
+                  </div>
+                  <Btn $variant="muted" onClick={() => enqueueMail(selectedMailId)}>重试分析</Btn>
+                </div>
+              )}
 
               {selectedTriage?.status === 'success' && (() => {
                 const actionPlan = resolveActionPlan(selectedTriage)

@@ -266,8 +266,8 @@ interface EmailContextValue {
   sentRecords: SentMailRecord[]
   sentMails: MailItem[]
   trashMails: MailItem[]
-  fetchSentMails: () => void
-  fetchTrashMails: () => void
+  fetchSentMails: (force?: boolean) => void
+  fetchTrashMails: (force?: boolean) => void
   deleteMail: (id: string, folder: 'inbox' | 'sent' | 'trash') => Promise<void>
   restoreMail: (id: string) => Promise<void>
   sendBlank: (payload: ComposePayload) => Promise<void>
@@ -344,18 +344,11 @@ export function EmailProvider({ children }: { children: ReactNode }) {
   /* ---- User isolation: reload email config after internal account applies email config ---- */
   const emailAutoStatus = accountState.phase === 'logged_in' ? accountState.session.emailAutoStatus : undefined
   const currentUserId = accountState.phase === 'logged_in' ? accountState.session.user?.id : undefined
-  const currentUserEmail = accountState.phase === 'logged_in' ? accountState.session.user?.email : undefined
 
   useEffect(() => {
     if (emailAutoStatus !== 'applied') return
     void emailRuntimeGetAccount().then((config) => {
       if (!config) return
-      // Validate config belongs to the current user
-      const configEmail = config.email || config.user || ''
-      if (currentUserEmail && configEmail && configEmail !== currentUserEmail) {
-        console.debug('[Email] Config email mismatch — skipping stale config:', configEmail, '≠', currentUserEmail)
-        return
-      }
       if (config.ownerUserId && currentUserId && config.ownerUserId !== currentUserId) {
         console.debug('[Email] Config ownerUserId mismatch — skipping stale config:', config.ownerUserId, '≠', currentUserId)
         return
@@ -374,12 +367,11 @@ export function EmailProvider({ children }: { children: ReactNode }) {
   const isRealMode = Boolean(accountConfig)
 
   /* ---- fetch real mails ---- */
-  const fetchRealMails = useCallback(async (config: EmailAccountConfig) => {
+  const fetchRealMails = useCallback(async (_config: EmailAccountConfig, force = false) => {
     setIsFetchingMails(true)
     setFetchError(null)
     try {
-      const baseMails = await emailRuntimeFetchInbox()
-
+      const baseMails = await emailRuntimeFetchInbox({ force, limit: 50 })
       setMails(baseMails)
     } catch (err) {
       setFetchError(err instanceof Error ? err.message : String(err))
@@ -390,7 +382,7 @@ export function EmailProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const refreshMails = useCallback(() => {
-    if (accountConfig) fetchRealMails(accountConfig)
+    if (accountConfig) fetchRealMails(accountConfig, true)
   }, [accountConfig, fetchRealMails])
 
   /* ---- debounce-persist user reply edits to localStorage ---- */
@@ -425,17 +417,20 @@ export function EmailProvider({ children }: { children: ReactNode }) {
   }, [drafts, selectedMailId, mails, accountConfig])
 
   /* ---- fetch sent mails ---- */
-  const fetchSentMails = useCallback(async () => {
+  const fetchSentMails = useCallback(async (force = false) => {
     try {
-      setSentMails(await emailRuntimeFetchSent())
-    } catch {
+      const mails = await emailRuntimeFetchSent({ force, limit: 50 })
+      setSentMails(mails)
+    } catch (err) {
+      console.warn('[EmailContext] fetchSentMails failed:', err instanceof Error ? err.message : err)
       setSentMails([])
     }
   }, [])
 
-  const fetchTrashMails = useCallback(async () => {
+  const fetchTrashMails = useCallback(async (force = false) => {
     try {
-      setTrashMails(await emailRuntimeFetchTrash())
+      const mails = await emailRuntimeFetchTrash({ force, limit: 30 })
+      setTrashMails(mails)
     } catch {
       setTrashMails([])
     }
@@ -523,10 +518,13 @@ export function EmailProvider({ children }: { children: ReactNode }) {
 
   /* ---- save / clear account ---- */
   const saveAccount = useCallback(async (config: EmailAccountConfig) => {
-    await emailRuntimeSaveAccount(config)
-    setAccountConfig(config)
-    fetchRealMails(config)
-  }, [fetchRealMails])
+    const normalized = currentUserId
+      ? { ...config, ownerUserId: config.ownerUserId || currentUserId }
+      : config
+    await emailRuntimeSaveAccount(normalized)
+    setAccountConfig(normalized)
+    fetchRealMails(normalized)
+  }, [currentUserId, fetchRealMails])
 
   const clearAccount = useCallback(async () => {
     await emailRuntimeClearAccount()

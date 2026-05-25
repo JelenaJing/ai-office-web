@@ -36,7 +36,9 @@ import { isForcePasswordChangeRequired } from '../config'
 import {
   bootstrapWorkspaceForUser,
   clearCurrentWorkspaceState,
+  type WorkspaceBootstrapPayload,
 } from '../services/workspaceBootstrapClient'
+import { isWebShim } from '../platform/detect'
 
 /* ---- web token persistence keys ---- */
 const PRIMARY_TOKEN_KEY = 'aios_auth_token'
@@ -86,6 +88,13 @@ function toPlatformUser(user: InternalAccountUser): { id: string; email: string;
     email: user.email,
     name: user.displayName || user.username || user.email,
   }
+}
+
+function hasBoundMailbox(session: Pick<InternalAccountSession, 'connectedMailbox' | 'autoBoundMailbox'>): boolean {
+  return Boolean(
+    (session.connectedMailbox?.email && session.connectedMailbox.verified !== false)
+    || session.autoBoundMailbox?.email,
+  )
 }
 
 function persistWebAuthSession(token: string, user?: InternalAccountUser): void {
@@ -268,6 +277,20 @@ export function InternalAccountProvider({ children }: { children: ReactNode }) {
     return mailboxPasswordRef.current
   }, [])
 
+  const enrichSessionWithWorkspace = useCallback((
+    session: InternalAccountSession,
+    bootstrap: WorkspaceBootstrapPayload | null,
+  ): InternalAccountSession => {
+    if (!bootstrap) return session
+    return {
+      ...session,
+      currentTenantId: bootstrap.currentTenantId,
+      currentWorkspaceId: bootstrap.currentWorkspaceId,
+      currentWorkspacePath: bootstrap.currentWorkspacePath,
+      currentWorkspaceRole: bootstrap.role,
+    }
+  }, [])
+
   /* ---- 启动时恢复 token ---- */
   useEffect(() => {
     readStoredToken().then((token) => {
@@ -281,10 +304,13 @@ export function InternalAccountProvider({ children }: { children: ReactNode }) {
         .me(token)
         .then(async (user) => {
           persistWebAuthSession(token, user)
-          await bootstrapWorkspaceForUser(user.id).catch(() => null)
+          const bootstrap = await bootstrapWorkspaceForUser(user.id).catch(() => null)
           clearForcePasswordChangeStorage()
           // Mark bindings as loading immediately so UI shows spinner, not infinite "loading"
-          setState({ phase: 'logged_in', session: { token, user, bindingsPhase: 'loading' } })
+          setState({
+            phase: 'logged_in',
+            session: enrichSessionWithWorkspace({ token, user, bindingsPhase: 'loading' }, bootstrap),
+          })
           return client.getBindings(token, user.id).then(
             (bindings) => {
               setState((prev) =>
@@ -310,7 +336,7 @@ export function InternalAccountProvider({ children }: { children: ReactNode }) {
     }).catch(() => {
       setState({ phase: 'idle' })
     })
-  }, [])
+  }, [enrichSessionWithWorkspace])
 
   /* ---- 会话过期监听 (401 from any authenticated request) ---- */
   useEffect(() => {
@@ -335,13 +361,19 @@ export function InternalAccountProvider({ children }: { children: ReactNode }) {
       throw new Error('该内部账号已被禁用，请联系管理员')
     }
     await storeToken(token, user)
-    await bootstrapWorkspaceForUser(user.id).catch(() => null)
+    const bootstrap = await bootstrapWorkspaceForUser(user.id).catch(() => null)
     clearForcePasswordChangeStorage()
     if (isForcePasswordChangeRequired(user)) {
-      setState({ phase: 'must_change_password', session: { token, user, bindingsPhase: 'loading' } })
+      setState({
+        phase: 'must_change_password',
+        session: enrichSessionWithWorkspace({ token, user, bindingsPhase: 'loading' }, bootstrap),
+      })
       return
     }
-    setState({ phase: 'logged_in', session: { token, user, bindingsPhase: 'loading' } })
+    setState({
+      phase: 'logged_in',
+      session: enrichSessionWithWorkspace({ token, user, bindingsPhase: 'loading' }, bootstrap),
+    })
     void client.getBindings(token, user.id).then(
       (bindings) => {
         setState((prev) =>
@@ -359,7 +391,7 @@ export function InternalAccountProvider({ children }: { children: ReactNode }) {
         )
       },
     )
-  }, [])
+  }, [enrichSessionWithWorkspace])
 
   /* ---- login ---- */
   const login = useCallback(async (username: string, password: string) => {
@@ -372,7 +404,14 @@ export function InternalAccountProvider({ children }: { children: ReactNode }) {
     console.log(`[InternalAccount] login start requestId=${requestId} user=${username}`)
     setState({ phase: 'loading' })
     try {
-      const { token, authMethod, autoBoundMailbox, message } = await client.login(username, password)
+      const {
+        token,
+        authMethod,
+        loginMethod,
+        connectedMailbox,
+        autoBoundMailbox,
+        message,
+      } = await client.login(username, password)
       const user = await client.me(token)
 
       if (user.status === 'disabled') {
@@ -382,51 +421,39 @@ export function InternalAccountProvider({ children }: { children: ReactNode }) {
 
       // Store password in memory only — not logged, not persisted
       passwordRef.current = password
-      // Mailcow SMTP/IMAP uses the login password as initial credential.
-      // NOT updated on AccountCenter password change — mailcow has separate credentials.
       mailboxPasswordRef.current = password
 
       await storeToken(token, user)
-      await bootstrapWorkspaceForUser(user.id).catch(() => null)
+      const bootstrap = await bootstrapWorkspaceForUser(user.id).catch(() => null)
 
       clearForcePasswordChangeStorage()
 
+      const hasServerMailbox = hasBoundMailbox({ connectedMailbox, autoBoundMailbox })
+      const shouldApplyLocalEmailConfig = !isWebShim() && authMethod !== 'email_fallback' && !hasServerMailbox
+      const sessionBase = enrichSessionWithWorkspace({
+        token,
+        user,
+        authMethod,
+        loginMethod,
+        connectedMailbox,
+        autoBoundMailbox,
+        loginMessage: message || (connectedMailbox?.email || autoBoundMailbox?.email
+          ? `已自动绑定邮箱 ${connectedMailbox?.email || autoBoundMailbox?.email}。`
+          : undefined),
+        bindingsPhase: 'loading',
+        emailAutoStatus: hasServerMailbox ? 'applied' : (shouldApplyLocalEmailConfig ? 'applying' : undefined),
+      }, bootstrap)
+
       // If force password change is enabled and required, gate the user in the force-change phase
       if (isForcePasswordChangeRequired(user)) {
-        setState({ phase: 'must_change_password', session: { token, user, bindingsPhase: 'loading' } })
+        setState({ phase: 'must_change_password', session: sessionBase })
         return
       }
 
-      if (authMethod === 'email_fallback') {
-        setState({
-          phase: 'logged_in',
-          session: {
-            token,
-            user,
-            authMethod,
-            autoBoundMailbox,
-            loginMessage: message || (autoBoundMailbox ? `已通过邮箱验证登录，并自动绑定 ${autoBoundMailbox.email}。` : undefined),
-            bindingsPhase: 'loading',
-            emailAutoStatus: 'applied',
-          },
-        })
-      } else {
-        setState({
-          phase: 'logged_in',
-          session: {
-            token,
-            user,
-            authMethod,
-            autoBoundMailbox,
-            loginMessage: autoBoundMailbox ? `已自动绑定邮箱 ${autoBoundMailbox.email}。` : undefined,
-            bindingsPhase: 'loading',
-            emailAutoStatus: 'applying',
-          },
-        })
-      }
+      setState({ phase: 'logged_in', session: sessionBase })
 
       // Auto-apply email config in background (non-blocking)
-      if (authMethod !== 'email_fallback') {
+      if (shouldApplyLocalEmailConfig) {
         ;(async () => {
           try {
             await applyEmailConfigToSystem(user, password)
@@ -469,7 +496,7 @@ export function InternalAccountProvider({ children }: { children: ReactNode }) {
     } finally {
       loginInProgressRef.current = false
     }
-  }, [])
+  }, [enrichSessionWithWorkspace])
 
   /* ---- logout ---- */
   const logout = useCallback(() => {
@@ -536,12 +563,13 @@ export function InternalAccountProvider({ children }: { children: ReactNode }) {
   const completeForcePasswordChange = useCallback(() => {
     setState((prev) => {
       if (prev.phase !== 'must_change_password') return prev
+      const shouldApplyLocalEmailConfig = !isWebShim() && !hasBoundMailbox(prev.session)
       return {
         phase: 'logged_in',
         session: {
           ...prev.session,
           user: { ...prev.session.user, mustChangePassword: false },
-          emailAutoStatus: 'applying' as const,
+          emailAutoStatus: shouldApplyLocalEmailConfig ? 'applying' as const : prev.session.emailAutoStatus,
         },
       }
     })
@@ -553,6 +581,9 @@ export function InternalAccountProvider({ children }: { children: ReactNode }) {
       if (!pw) return
       setState((prev) => {
         if (prev.phase !== 'logged_in') return prev
+        if (isWebShim() || hasBoundMailbox(prev.session)) {
+          return prev
+        }
         void applyEmailConfigToSystem(prev.session.user, pw).then(
           () => setState((p) => p.phase === 'logged_in' ? { ...p, session: { ...p.session, emailAutoStatus: 'applied' } } : p),
           () => setState((p) => p.phase === 'logged_in' ? { ...p, session: { ...p.session, emailAutoStatus: 'error' } } : p),
@@ -568,6 +599,14 @@ export function InternalAccountProvider({ children }: { children: ReactNode }) {
   // TODO(phase6+): migrate to Electron safeStorage so password isn't written to disk.
   const applyEmailConfig = useCallback(async () => {
     if (state.phase !== 'logged_in') throw new Error('未登录')
+    if (hasBoundMailbox(state.session)) {
+      setState((prev) =>
+        prev.phase === 'logged_in'
+          ? { phase: 'logged_in', session: { ...prev.session, emailAutoStatus: 'applied', emailAutoError: undefined } }
+          : prev,
+      )
+      return
+    }
     // Uses mailboxPasswordRef (initial mailcow SMTP/IMAP password), not the AccountCenter
     // session password. On restart mailboxPasswordRef is null; user must re-login to re-apply.
     const pw = mailboxPasswordRef.current

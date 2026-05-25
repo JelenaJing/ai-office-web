@@ -15,21 +15,34 @@
 
 import { Router } from 'express'
 import type { Request, Response } from 'express'
-import {
-  accountCenterLoginCandidates,
-  runEmailLoginFallback,
-} from '../features/auth/services/emailLoginFallback'
 import { verifyWebAuthToken } from '../features/auth/services/webAuthToken'
 import { deriveCandidateMailboxes } from '../features/email/services/emailProviderPresets'
-import { accountFromCandidate, autoBindMailboxForUser } from '../features/email/services/mailboxAutoBinder'
+import {
+  accountFromCandidate,
+  autoBindConnectedMailboxForUser,
+  autoBindMailboxForUser,
+} from '../features/email/services/mailboxAutoBinder'
 import { testMailboxCredential } from '../features/email/services/emailMvp'
 import {
   ACCOUNT_CENTER_UNREACHABLE_MESSAGE,
   buildAccountCenterUrl,
+  getAccountCenterBaseUrl,
+  logAccountCenterIssue,
 } from '../lib/accountCenter'
 import { fetchCanonicalAccountUserByToken, resolveCanonicalAccountUser } from '../lib/accountCenterIdentity'
+import { repairLegacyUserState } from '../lib/canonicalUserMigration'
 
 const router = Router()
+
+interface AccountCenterConnectedMailbox {
+  email: string
+  provider?: string
+  status?: string
+  verified?: boolean
+  lastVerifiedAt?: string
+  displayName?: string
+  label?: string
+}
 
 interface AccountCenterLoginResponse {
   token?: string
@@ -41,14 +54,13 @@ interface AccountCenterLoginResponse {
     roles: string[]
     status: string
     mustChangePassword: boolean
+    loginMethod?: string
+    connectedMailbox?: AccountCenterConnectedMailbox | string
   }
+  loginMethod?: string
+  connectedMailbox?: AccountCenterConnectedMailbox | string
+  connectedMailboxEmail?: string
   message?: string
-}
-
-interface AccountCenterAttemptError {
-  login: string
-  status?: number
-  message: string
 }
 
 async function requestAccountCenterLogin(username: string, password: string): Promise<{
@@ -85,6 +97,33 @@ async function tryAutoBindAccountCenterMailbox(
   return undefined
 }
 
+function normalizeString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function normalizeConnectedMailbox(raw: unknown): AccountCenterConnectedMailbox | undefined {
+  if (!raw) return undefined
+  if (typeof raw === 'string') {
+    const email = raw.trim().toLowerCase()
+    return email ? { email } : undefined
+  }
+  if (typeof raw !== 'object') return undefined
+  const record = raw as Record<string, unknown>
+  const email = normalizeString(record.email ?? record.address).toLowerCase()
+  if (!email) return undefined
+  return {
+    email,
+    provider: normalizeString(record.provider ?? record.providerType) || undefined,
+    status: normalizeString(record.status) || undefined,
+    verified: typeof record.verified === 'boolean'
+      ? record.verified
+      : (typeof record.isVerified === 'boolean' ? record.isVerified : undefined),
+    lastVerifiedAt: normalizeString(record.lastVerifiedAt ?? record.last_verified_at) || undefined,
+    displayName: normalizeString(record.displayName ?? record.name) || undefined,
+    label: normalizeString(record.label) || undefined,
+  }
+}
+
 /**
  * Forward a request to AccountCenter and pipe the response back.
  * Passes Authorization header through if present.
@@ -97,6 +136,7 @@ async function proxyAC(
   body?: unknown,
 ): Promise<void> {
   const url = buildAccountCenterUrl(path)
+  const baseUrl = getAccountCenterBaseUrl()
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
 
   const auth = req.headers['authorization']
@@ -118,17 +158,34 @@ async function proxyAC(
       data = { message: await upstream.text() }
     }
 
+    if (upstream.status >= 500) {
+      logAccountCenterIssue({
+        scope: 'auth-proxy',
+        method,
+        path,
+        baseUrl,
+        status: upstream.status,
+      })
+    }
+
     res.status(upstream.status).json(data)
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    console.error(`[auth-proxy] ${method} ${path} →`, msg)
+    logAccountCenterIssue({
+      scope: 'auth-proxy',
+      method,
+      path,
+      baseUrl,
+      error: err,
+    })
     res.status(502).json({ message: ACCOUNT_CENTER_UNREACHABLE_MESSAGE })
   }
 }
 
 // POST /api/auth/login
-// Accept both { username, password } and { email, password } from the frontend.
-// AccountCenter expects { username, password }.
+// Delegates entirely to AccountCenter. Accept both { username, password } and
+// { email, password } from the frontend — AccountCenter handles both AccountCenter
+// passwords and external-mailbox (IMAP/SMTP) passwords internally.
+// Web does NOT attempt IMAP/SMTP verification or multi-candidate username expansion.
 router.post('/login', async (req, res) => {
   const body = req.body as { username?: string; email?: string; password?: string }
   const username = (body.username ?? body.email ?? '').trim()
@@ -138,67 +195,93 @@ router.post('/login', async (req, res) => {
     return res.status(400).json({ message: '请填写用户名和密码' })
   }
 
-  const accountCenterErrors: AccountCenterAttemptError[] = []
-  for (const login of accountCenterLoginCandidates(username)) {
-    try {
-      const ac = await requestAccountCenterLogin(login, password)
-      if (ac.ok && ac.data?.token && ac.data?.user) {
-        const canonicalUser = await fetchCanonicalAccountUserByToken(ac.data.token)
-        if (!canonicalUser) {
-          return res.status(502).json({
-            message: '账号中心登录成功，但无法解析 canonical userId。',
-          })
-        }
-        let autoBoundMailbox
-        try {
-          autoBoundMailbox = await tryAutoBindAccountCenterMailbox(canonicalUser.id, username, password)
-        } catch (err) {
-          accountCenterErrors.push({
-            login,
-            message: `AccountCenter 登录成功，但邮箱自动绑定失败：${err instanceof Error ? err.message : String(err)}`,
-          })
-        }
-        return res.json({
-          ...ac.data,
-          user: canonicalUser,
-          authMethod: 'account_center',
-          autoBoundMailbox,
-          diagnostics: { accountCenterErrors },
-        })
-      }
-      accountCenterErrors.push({
-        login,
-        status: ac.status,
-        message: ac.data?.message || `AccountCenter 登录失败（HTTP ${ac.status}）`,
-      })
-    } catch (err) {
-      accountCenterErrors.push({
-        login,
-        message: ACCOUNT_CENTER_UNREACHABLE_MESSAGE,
-      })
-    }
+  let ac: { ok: boolean; status: number; data: AccountCenterLoginResponse }
+  try {
+    ac = await requestAccountCenterLogin(username, password)
+  } catch (err) {
+    logAccountCenterIssue({
+      scope: 'auth-login',
+      method: 'POST',
+      path: '/api/auth/login',
+      baseUrl: getAccountCenterBaseUrl(),
+      error: err,
+    })
+    return res.status(502).json({ message: ACCOUNT_CENTER_UNREACHABLE_MESSAGE })
   }
 
-  const fallback = await runEmailLoginFallback({
-    inputLogin: username,
-    password,
-    accountCenterErrors,
-  })
-  if (fallback.success) {
-    return res.json({
-      token: fallback.token,
-      user: fallback.user,
-      authMethod: 'email_fallback',
-      autoBoundMailbox: fallback.autoBoundMailbox,
-      diagnostics: fallback.diagnostics,
-      message: `已通过邮箱验证登录，并自动绑定 ${fallback.autoBoundMailbox?.email || fallback.candidate?.email}。`,
+  if (!ac.ok || !ac.data?.token || !ac.data?.user) {
+    if (ac.status >= 500) {
+      logAccountCenterIssue({
+        scope: 'auth-login',
+        method: 'POST',
+        path: '/api/auth/login',
+        baseUrl: getAccountCenterBaseUrl(),
+        status: ac.status,
+      })
+    }
+    return res.status(ac.status || 401).json({
+      message: ac.data?.message || '用户名或密码错误',
     })
   }
 
-  return res.status(401).json({
-    message: fallback.error || 'AI Office 登录失败，且未能通过候选邮箱完成 IMAP/SMTP 验证。',
-    accountCenterErrors,
-    mailboxFallback: fallback.diagnostics,
+  const canonicalUser = await fetchCanonicalAccountUserByToken(ac.data.token)
+  if (!canonicalUser) {
+    return res.status(502).json({
+      message: '账号中心登录成功，但无法解析 canonical userId。',
+    })
+  }
+
+  const loginMethod = normalizeString(ac.data.loginMethod || ac.data.user.loginMethod)
+  const connectedMailbox = normalizeConnectedMailbox(
+    ac.data.connectedMailbox || ac.data.user.connectedMailbox || ac.data.connectedMailboxEmail,
+  )
+
+  repairLegacyUserState({
+    canonicalUserId: canonicalUser.id,
+    canonicalUsername: canonicalUser.username,
+    canonicalEmail: canonicalUser.email,
+    login: username,
+    connectedMailboxEmail: connectedMailbox?.email,
+  })
+
+  let autoBoundMailbox
+  try {
+    if (loginMethod === 'external_mailbox_password' && connectedMailbox?.email) {
+      autoBoundMailbox = autoBindConnectedMailboxForUser(
+        canonicalUser.id,
+        {
+          ...connectedMailbox,
+          provider: connectedMailbox.provider || 'imap/smtp/custom',
+          status: connectedMailbox.status || 'connected',
+          verified: connectedMailbox.verified ?? true,
+          lastVerifiedAt: connectedMailbox.lastVerifiedAt || new Date().toISOString(),
+        },
+        password,
+        canonicalUser,
+      )
+    } else {
+      autoBoundMailbox = await tryAutoBindAccountCenterMailbox(canonicalUser.id, username, password)
+    }
+  } catch (err) {
+    console.warn('[auth] mailbox auto-bind failed:', err instanceof Error ? err.message : String(err))
+  }
+
+  return res.json({
+    ...ac.data,
+    user: canonicalUser,
+    authMethod: 'account_center',
+    loginMethod,
+    connectedMailbox: connectedMailbox
+      ? {
+          ...connectedMailbox,
+          provider: connectedMailbox.provider || autoBoundMailbox?.provider || 'imap/smtp/custom',
+          status: connectedMailbox.status || autoBoundMailbox?.status || 'connected',
+          verified: connectedMailbox.verified ?? autoBoundMailbox?.verified ?? (loginMethod === 'external_mailbox_password'),
+          lastVerifiedAt: connectedMailbox.lastVerifiedAt || autoBoundMailbox?.lastVerifiedAt || new Date().toISOString(),
+        }
+      : undefined,
+    autoBoundMailbox,
+    message: autoBoundMailbox ? `已自动绑定邮箱 ${autoBoundMailbox.email}。` : undefined,
   })
 })
 

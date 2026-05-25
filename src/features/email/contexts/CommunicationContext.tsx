@@ -218,8 +218,17 @@ export function CommunicationProvider({
   const abortRef = useRef<AbortController | null>(null)
   const generatingForRef = useRef<string | null>(null)
 
-  /** Current user's email address — used for sent-mail isolation */
-  const currentUserEmail = accountState.phase === 'logged_in' ? (accountState.session.user.email ?? null) : null
+  /** Current mailbox address — prefer the verified connected mailbox over the AccountCenter profile email. */
+  const currentUserEmail = accountState.phase === 'logged_in'
+    ? (
+        emailCtx.accountConfig?.email
+        || emailCtx.accountConfig?.user
+        || (accountState.session.connectedMailbox?.verified !== false ? accountState.session.connectedMailbox?.email : undefined)
+        || accountState.session.autoBoundMailbox?.email
+        || accountState.session.user.email
+        || null
+      )
+    : null
 
   /* ---- User isolation: reset selection/filter when account logs out or switches ---- */
   useEffect(() => {
@@ -679,8 +688,8 @@ export function CommunicationProvider({
       sendBlank: emailCtx.sendBlank,
       deleteMail: emailCtx.deleteMail,
       restoreMail: emailCtx.restoreMail,
-      refreshSent: emailCtx.fetchSentMails,
-      refreshTrash: emailCtx.fetchTrashMails,
+      refreshSent: () => emailCtx.fetchSentMails(true),
+      refreshTrash: () => emailCtx.fetchTrashMails(true),
       matrixPhase: matrixCtx.phase,
       createMatrixDirect,
     }),

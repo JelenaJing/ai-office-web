@@ -158,11 +158,13 @@ interface PptAiEditPanelProps {
 
 const QUICK_ACTIONS = [
   '精简内容',
-  '增强商务感',
+  '增加视觉图',
+  '改成图文页',
+  '改成卡片页',
   '改成时间线',
   '改成对比表',
+  '给这一页加图片',
   '增加讲稿备注',
-  '重新设计本页',
 ]
 
 export default function PptAiEditPanel({ slide, pageNumber, engineLabel, messages, status, onSend }: PptAiEditPanelProps) {
@@ -216,7 +218,7 @@ export default function PptAiEditPanel({ slide, pageNumber, engineLabel, message
         <Textarea
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
-          placeholder="告诉 AI 如何修改当前页，例如：把这一页改成三点式总结"
+          placeholder="告诉 AI 如何修改当前页，例如：给这一页加一个视觉图，改成图文排版"
           disabled={!slide || busy}
         />
         <ComposerFooter>

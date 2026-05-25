@@ -11,15 +11,17 @@ import {
   ACCOUNT_CENTER_UNREACHABLE_MESSAGE,
   buildAccountCenterUrl,
   getAccountCenterBaseUrl,
+  logAccountCenterIssue,
 } from './accountCenter'
 import { resolveCanonicalAccountUser } from './accountCenterIdentity'
 
 export const ACCOUNT_CENTER_URL = getAccountCenterBaseUrl()
 
-/** Fallback used only in dev when no token is present or AC is unreachable. */
+/** Fallback used only in dev when no token is present. */
 export const DEV_FALLBACK_USER = 'web-demo-user'
 
 const IS_PRODUCTION = process.env.NODE_ENV === 'production'
+const ACCOUNT_IDENTITY_RETRY_DELAY_MS = 150
 
 export interface AccountIdentity {
   id: string
@@ -90,7 +92,7 @@ function identityFromPayload(data: {
   }
 }
 
-/** Resolve user identity from AccountCenter; dev may fall back to DEV_FALLBACK_USER. */
+/** Resolve user identity from AccountCenter; dev may fall back to DEV_FALLBACK_USER when no token is present. */
 export async function resolveAccountIdentity(req: Request): Promise<AccountIdentity> {
   const token = bearerToken(req)
   if (!token) return fallbackIdentity()
@@ -101,6 +103,15 @@ export async function resolveAccountIdentity(req: Request): Promise<AccountIdent
       headers: { Authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(5000),
     })
+    if (resp.status >= 500) {
+      logAccountCenterIssue({
+        scope: 'auth-user-resolve',
+        method: 'GET',
+        path: '/api/auth/me',
+        baseUrl: getAccountCenterBaseUrl(),
+        status: resp.status,
+      })
+    }
     if (!resp.ok) return fallbackIdentity()
     const data = (await resp.json()) as {
       id?: string
@@ -111,12 +122,19 @@ export async function resolveAccountIdentity(req: Request): Promise<AccountIdent
       user?: { id?: string; username?: string; email?: string; displayName?: string }
     }
     return identityFromPayload(data) ?? fallbackIdentity()
-  } catch {
+  } catch (error) {
+    logAccountCenterIssue({
+      scope: 'auth-user-resolve',
+      method: 'GET',
+      path: '/api/auth/me',
+      baseUrl: getAccountCenterBaseUrl(),
+      error,
+    })
     return fallbackIdentity()
   }
 }
 
-/** Resolve user id from AccountCenter; dev may fall back to DEV_FALLBACK_USER. */
+/** Resolve user id from AccountCenter; dev may fall back to DEV_FALLBACK_USER when no token is present. */
 export async function resolveUserId(req: Request): Promise<string> {
   return (await resolveAccountIdentity(req)).id
 }
@@ -141,46 +159,67 @@ export async function requireAccountIdentity(
     return localUser
   }
 
-  try {
-    const resp = await fetch(buildAccountCenterUrl('/api/auth/me'), {
-      headers: { Authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(5000),
-    })
-    if (!resp.ok) {
-      if (!IS_PRODUCTION) {
-        next?.()
-        return fallbackIdentity()
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const resp = await fetch(buildAccountCenterUrl('/api/auth/me'), {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(5000),
+      })
+      if (resp.status >= 500) {
+        logAccountCenterIssue({
+          scope: 'auth-user-require',
+          method: 'GET',
+          path: '/api/auth/me',
+          baseUrl: getAccountCenterBaseUrl(),
+          status: resp.status,
+        })
       }
-      res.status(401).json({ message: 'token 无效或已过期' })
+      if (!resp.ok) {
+        if (attempt === 0) {
+          await new Promise((resolve) => setTimeout(resolve, ACCOUNT_IDENTITY_RETRY_DELAY_MS))
+          continue
+        }
+        res.status(401).json({ message: 'token 无效或已过期' })
+        return null
+      }
+      const data = (await resp.json()) as {
+        id?: string
+        userId?: string
+        username?: string
+        email?: string
+        displayName?: string
+        user?: { id?: string; username?: string; email?: string; displayName?: string }
+      }
+      const identity = identityFromPayload(data)
+      if (identity) {
+        next?.()
+        return identity
+      }
+      if (attempt === 0) {
+        await new Promise((resolve) => setTimeout(resolve, ACCOUNT_IDENTITY_RETRY_DELAY_MS))
+        continue
+      }
+      res.status(502).json({ message: '无法解析用户信息' })
+      return null
+    } catch (error) {
+      logAccountCenterIssue({
+        scope: 'auth-user-require',
+        method: 'GET',
+        path: '/api/auth/me',
+        baseUrl: getAccountCenterBaseUrl(),
+        error,
+      })
+      if (attempt === 0) {
+        await new Promise((resolve) => setTimeout(resolve, ACCOUNT_IDENTITY_RETRY_DELAY_MS))
+        continue
+      }
+      res.status(502).json({ message: ACCOUNT_CENTER_UNREACHABLE_MESSAGE })
       return null
     }
-    const data = (await resp.json()) as {
-      id?: string
-      userId?: string
-      username?: string
-      email?: string
-      displayName?: string
-      user?: { id?: string; username?: string; email?: string; displayName?: string }
-    }
-    const identity = identityFromPayload(data)
-    if (identity) {
-      next?.()
-      return identity
-    }
-    if (!IS_PRODUCTION) {
-      next?.()
-      return fallbackIdentity()
-    }
-    res.status(401).json({ message: '无法解析用户信息' })
-    return null
-  } catch {
-    if (!IS_PRODUCTION) {
-      next?.()
-      return fallbackIdentity()
-    }
-    res.status(502).json({ message: ACCOUNT_CENTER_UNREACHABLE_MESSAGE })
-    return null
   }
+
+  res.status(502).json({ message: ACCOUNT_CENTER_UNREACHABLE_MESSAGE })
+  return null
 }
 
 /**

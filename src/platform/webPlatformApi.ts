@@ -491,19 +491,27 @@ export const webPlatformApi: PlatformApi = {
     async testConnection(): Promise<{ ok: boolean; message: string }> {
       return apiPost<{ ok: boolean; message: string }>('/api/email/test', {})
     },
-    async listMessages(folder = 'inbox'): Promise<EmailMessageSummary[]> {
-      const data = await apiFetch<{ messages: EmailMessageSummary[] }>(
-        `/api/email/messages?folder=${encodeURIComponent(folder)}`,
+    async listMessages(folder = 'inbox', options?: { force?: boolean; limit?: number }): Promise<EmailMessageSummary[]> {
+      const params = new URLSearchParams({ folder })
+      if (options?.force) params.set('force', 'true')
+      if (options?.limit) params.set('limit', String(options.limit))
+      const data = await apiFetch<{ messages: EmailMessageSummary[]; info?: string; folderPath?: string }>(
+        `/api/email/messages?${params.toString()}`,
       )
       return data.messages ?? []
     },
+    async discoverFolders(force = false): Promise<{ ok: boolean; folders: unknown[] }> {
+      const params = force ? '?force=true' : ''
+      return apiFetch<{ ok: boolean; folders: unknown[] }>(`/api/email/folders${params}`)
+    },
     async getMessage(id: string): Promise<EmailMessageDetail> {
-      return apiFetch<EmailMessageDetail>(
+      const payload = await apiFetch<EmailMessageDetail | { message: EmailMessageDetail }>(
         `/api/email/messages/${encodeURIComponent(id)}`,
       )
+      return 'message' in payload ? payload.message : payload
     },
-    async sendMessage(input: EmailSendInput): Promise<{ ok: boolean; message?: string }> {
-      return apiPost<{ ok: boolean; message?: string }>('/api/email/send', input)
+    async sendMessage(input: EmailSendInput): Promise<{ ok: boolean; message?: string; appendWarning?: string }> {
+      return apiPost<{ ok: boolean; message?: string; appendWarning?: string }>('/api/email/send', input)
     },
   },
 

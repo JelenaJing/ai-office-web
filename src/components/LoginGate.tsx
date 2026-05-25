@@ -1,63 +1,79 @@
-/**
- * LoginGate — 全屏登录页
- *
- * 应用启动时，如果未登录或 session 过期则显示此页。
- * 登录成功后由 App.tsx 根据 state.phase 自动切换到主工作区。
- * 浅色办公风格，居中卡片，与 AI Office 主界面一致。
- */
-
 import React, { useState, useCallback, useEffect, useRef } from 'react'
-import styled, { keyframes } from 'styled-components'
+import styled from 'styled-components'
 import { useInternalAccount } from '../contexts/InternalAccountContext'
-
-/* ================================================================== */
-/*  Styled components                                                  */
-/* ================================================================== */
+import illustrationBg from '../assets/login/illustration.png'
+import logoImage from '../assets/login/logo.png'
+import userIcon from '../assets/login/User7.png'
 
 const Screen = styled.div`
   position: fixed;
   inset: 0;
-  background: linear-gradient(135deg, #eef2f8 0%, #f5f8fc 60%, #e8eef7 100%);
+  width: 100vw;
+  min-height: 100vh;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', sans-serif;
-  overflow: hidden;
-`
-
-const fadeIn = keyframes`
-  from { opacity: 0; transform: translateY(12px); }
-  to   { opacity: 1; transform: translateY(0); }
+  padding: 32px 16px;
+  box-sizing: border-box;
+  overflow-y: auto;
+  font-family: 'Times New Roman', 'Songti SC', 'SimSun', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background-image: linear-gradient(rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.12)), url(${illustrationBg});
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
 `
 
 const Card = styled.div`
-  background: #ffffff;
-  border: 1px solid #dde3ec;
-  border-radius: 18px;
-  box-shadow: 0 6px 32px rgba(30, 50, 90, 0.10), 0 1px 4px rgba(30, 50, 90, 0.06);
-  padding: 44px 44px 36px;
-  width: 400px;
-  max-width: calc(100vw - 40px);
-  animation: ${fadeIn} 0.25s ease;
+  width: 420px;
+  max-width: 440px;
+  padding: 34px 36px 30px;
+  box-sizing: border-box;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(94, 67, 122, 0.18);
+  border-radius: 12px;
+  box-shadow: 0 10px 26px rgba(25, 31, 48, 0.16);
+
+  @media (max-width: 640px) {
+    width: 90vw;
+    max-width: 90vw;
+    padding: 28px 22px 24px;
+  }
 `
 
-const Brand = styled.div`
+const Logo = styled.img`
+  display: block;
+  width: min(250px, 100%);
+  height: auto;
+  margin: 0 auto 20px;
+`
+
+const Title = styled.div`
   text-align: center;
-  margin-bottom: 28px;
+  color: #3d2d53;
 `
 
-const BrandTitle = styled.div`
-  font-size: 26px;
-  font-weight: 800;
-  color: #1a3150;
-  letter-spacing: -0.5px;
-  margin-bottom: 6px;
+const TitlePrimary = styled.div`
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: 0.02em;
 `
 
-const BrandSubtitle = styled.div`
-  font-size: var(--font-size-sm);
-  color: #627385;
+const TitleSecondary = styled.div`
+  margin-top: 6px;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+`
+
+const StaffHint = styled.div`
+  margin: 22px 0 20px;
+  padding: 12px 14px;
+  border-left: 4px solid #6b4b8f;
+  background: rgba(107, 75, 143, 0.08);
+  color: #4d4260;
+  font-size: 14px;
+  line-height: 1.7;
 `
 
 const Field = styled.div`
@@ -66,33 +82,66 @@ const Field = styled.div`
 
 const Label = styled.label`
   display: block;
-  font-size: var(--font-size-xs);
+  margin-bottom: 7px;
+  color: #4f405f;
+  font-size: 14px;
   font-weight: 600;
-  color: #4a5f73;
-  margin-bottom: 6px;
 `
 
-const Input = styled.input<{ $error?: boolean }>`
+const InputFrame = styled.div<{ $error?: boolean }>`
+  display: flex;
+  align-items: center;
+  width: 100%;
+  box-sizing: border-box;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid ${p => (p.$error ? '#c96565' : '#c9c7d3')};
+  border-radius: 7px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+
+  &:focus-within {
+    border-color: ${p => (p.$error ? '#c96565' : '#6b4b8f')};
+    box-shadow: 0 0 0 3px ${p => (p.$error ? 'rgba(201, 101, 101, 0.14)' : 'rgba(107, 75, 143, 0.14)')};
+  }
+`
+
+const InputIcon = styled.img`
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin-left: 12px;
+  opacity: 0.72;
+`
+
+const Input = styled.input`
   width: 100%;
   padding: 11px 13px;
-  border: 1.5px solid ${p => p.$error ? '#e07070' : '#d6e0ea'};
-  border-radius: 10px;
-  font-size: 14px;
+  border: none;
   outline: none;
-  color: #1f3142;
-  background: #ffffff;
   box-sizing: border-box;
-  transition: border-color 0.15s;
+  background: transparent;
+  color: #2f2a35;
+  font-size: 14px;
 
-  &:focus {
-    border-color: ${p => p.$error ? '#e07070' : '#4a90d9'};
-    box-shadow: 0 0 0 3px ${p => p.$error ? 'rgba(224,112,112,0.12)' : 'rgba(74,144,217,0.12)'};
+  &::placeholder {
+    color: #8f8898;
   }
 
   &:disabled {
-    background: #f7f9fc;
-    color: #9eafbf;
+    color: #9b95a3;
+    cursor: not-allowed;
   }
+`
+
+const MessageBox = styled.div<{ $warn?: boolean }>`
+  margin-top: 14px;
+  padding: 11px 13px;
+  border-radius: 7px;
+  border: 1px solid ${p => (p.$warn ? '#d8c17a' : '#dca6a6')};
+  background: ${p => (p.$warn ? 'rgba(252, 247, 226, 0.96)' : 'rgba(255, 245, 245, 0.96)')};
+  color: ${p => (p.$warn ? '#6d5922' : '#983f3f')};
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-line;
 `
 
 const LoginBtn = styled.button`
@@ -100,46 +149,23 @@ const LoginBtn = styled.button`
   margin-top: 22px;
   padding: 12px 14px;
   border: none;
-  border-radius: 10px;
-  background: linear-gradient(135deg, #1a6fd4, #1558b8);
+  border-radius: 7px;
+  background: #5f3b84;
   color: #ffffff;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 700;
+  letter-spacing: 0.02em;
   cursor: pointer;
-  letter-spacing: 0.3px;
-  transition: opacity 0.15s, transform 0.1s;
+  transition: background 0.15s ease, opacity 0.15s ease;
 
   &:hover:not(:disabled) {
-    opacity: 0.92;
-  }
-
-  &:active:not(:disabled) {
-    transform: scale(0.99);
+    background: #533375;
   }
 
   &:disabled {
-    opacity: 0.55;
+    opacity: 0.6;
     cursor: not-allowed;
   }
-`
-
-const ErrorBox = styled.div<{ $warn?: boolean }>`
-  margin-top: 14px;
-  padding: 11px 13px;
-  border-radius: 10px;
-  border: 1px solid ${p => p.$warn ? '#f5c94a' : '#f1c5c5'};
-  background: ${p => p.$warn ? '#fffdf0' : '#fff6f6'};
-  color: ${p => p.$warn ? '#7a5a10' : '#b33838'};
-  font-size: var(--font-size-xs);
-  line-height: 1.6;
-  white-space: pre-line;
-`
-
-const Footer = styled.div`
-  margin-top: 20px;
-  text-align: center;
-  font-size: var(--font-size-xs);
-  color: #9eafbf;
 `
 
 const Spinner = styled.span`
@@ -147,24 +173,22 @@ const Spinner = styled.span`
   width: 14px;
   height: 14px;
   margin-right: 8px;
-  border: 2px solid rgba(255,255,255,0.5);
-  border-top-color: #fff;
+  vertical-align: -2px;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  border-top-color: #ffffff;
   border-radius: 50%;
-  vertical-align: middle;
   animation: spin 0.7s linear infinite;
 
   @keyframes spin {
-    to { transform: rotate(360deg); }
+    to {
+      transform: rotate(360deg);
+    }
   }
 `
 
-/* ================================================================== */
-/*  Component                                                          */
-/* ================================================================== */
-
 export default function LoginGate() {
   const { state, login } = useInternalAccount()
-  const [username, setUsername] = useState('')
+  const [staffEmailPrefix, setStaffEmailPrefix] = useState('')
   const [password, setPassword] = useState('')
   const usernameRef = useRef<HTMLInputElement>(null)
 
@@ -173,86 +197,88 @@ export default function LoginGate() {
   const isExpiredMsg = !!errorMsg?.includes('登录已过期')
   const isRateLimitMsg = !!errorMsg?.includes('过于频繁')
 
-  // Auto-focus username field when shown
   useEffect(() => {
-    const t = setTimeout(() => usernameRef.current?.focus(), 100)
-    return () => clearTimeout(t)
+    const timer = setTimeout(() => usernameRef.current?.focus(), 100)
+    return () => clearTimeout(timer)
   }, [])
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault()
-      if (!username.trim() || !password || submitting) return
+      const username = staffEmailPrefix.trim()
+      if (!username || !password || submitting) return
       const requestId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
-      console.log(`[LoginGate] submit requestId=${requestId} user=${username.trim()}`)
-      await login(username.trim(), password)
+      console.log(`[LoginGate] submit requestId=${requestId} user=${username}`)
+      await login(username, password)
     },
-    [login, username, password, submitting],
+    [login, password, staffEmailPrefix, submitting],
   )
 
   return (
     <Screen>
       <Card>
-        <Brand>
-          <BrandTitle>AI Office</BrandTitle>
-          <BrandSubtitle>支持用户名或邮箱登录，用户名会自动尝试学校邮箱</BrandSubtitle>
-        </Brand>
+        <Logo src={logoImage} alt="CUHK-Shenzhen logo" />
 
-        {isExpiredMsg && (
-          <ErrorBox $warn style={{ marginTop: 0, marginBottom: 4 }}>
-            ⏱ {errorMsg}
-          </ErrorBox>
-        )}
+        <Title>
+          <TitlePrimary>CUHK-Shenzhen</TitlePrimary>
+          <TitleSecondary>LOGIN-AI</TitleSecondary>
+        </Title>
+
+        <StaffHint>
+          <div>教职工：邮箱前缀</div>
+          <div>Staff: Email Prefix</div>
+        </StaffHint>
+
+        {isExpiredMsg && <MessageBox $warn>{errorMsg}</MessageBox>}
 
         <form onSubmit={handleSubmit} autoComplete="on">
           <Field>
-            <Label htmlFor="lg-username">用户名或邮箱</Label>
-            <Input
-              id="lg-username"
-              ref={usernameRef}
-              type="text"
-              autoComplete="username"
-              value={username}
-              onChange={e => setUsername(e.target.value)}
-              placeholder="请输入用户名或完整邮箱"
-              disabled={submitting}
-              $error={!!errorMsg && !isExpiredMsg}
-            />
+            <Label htmlFor="lg-staff-email-prefix">邮箱前缀 / Email Prefix</Label>
+            <InputFrame $error={!!errorMsg && !isExpiredMsg}>
+              <InputIcon src={userIcon} alt="" aria-hidden="true" />
+              <Input
+                id="lg-staff-email-prefix"
+                ref={usernameRef}
+                type="text"
+                autoComplete="username"
+                value={staffEmailPrefix}
+                onChange={e => setStaffEmailPrefix(e.target.value)}
+                placeholder="请输入教职工邮箱前缀"
+                disabled={submitting}
+              />
+            </InputFrame>
           </Field>
+
           <Field>
-            <Label htmlFor="lg-password">密码</Label>
-            <Input
-              id="lg-password"
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              placeholder="输入密码"
-              disabled={submitting}
-              $error={!!errorMsg && !isExpiredMsg}
-            />
+            <Label htmlFor="lg-password">密码 / Password</Label>
+            <InputFrame $error={!!errorMsg && !isExpiredMsg}>
+              <Input
+                id="lg-password"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                placeholder="请输入密码"
+                disabled={submitting}
+              />
+            </InputFrame>
           </Field>
 
-          {errorMsg && !isExpiredMsg && !isRateLimitMsg && (
-            <ErrorBox>{errorMsg}</ErrorBox>
+          {errorMsg && !isExpiredMsg && (
+            <MessageBox $warn={isRateLimitMsg}>{errorMsg}</MessageBox>
           )}
 
-          {isRateLimitMsg && (
-            <ErrorBox $warn>
-              ⏱ 登录请求过于频繁，请稍后再试。
-              <br />
-              开发环境可在 server/.env.local 中设置 <code style={{ fontSize: '0.9em' }}>RATE_LIMIT_AUTH_SKIP_LOCALHOST=true</code> 或 <code style={{ fontSize: '0.9em' }}>RATE_LIMIT_AUTH_DISABLED=true</code>。
-            </ErrorBox>
-          )}
-
-          <LoginBtn type="submit" disabled={submitting || !username.trim() || !password}>
+          <LoginBtn type="submit" disabled={submitting || !staffEmailPrefix.trim() || !password}>
             {submitting ? (
-              <><Spinner />验证中...</>
-            ) : '登录'}
+              <>
+                <Spinner />
+                登录中...
+              </>
+            ) : (
+              '登录 Login'
+            )}
           </LoginBtn>
         </form>
-
-        <Footer>AI Office 3.0 · AccountCenter · Web Proxy 登录</Footer>
       </Card>
     </Screen>
   )

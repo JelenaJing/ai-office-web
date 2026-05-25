@@ -855,9 +855,19 @@ export interface ComposeModalProps {
   onClose: () => void
   /** Pre-populate To field with these recipients */
   initialTo?: RecipientEntry[]
+  initialSubject?: string
+  initialBody?: string
+  initialAttachments?: AttachmentEntry[]
+  variant?: 'compose' | 'forward'
 }
 
-export default function ComposeModal({ onClose, initialTo }: ComposeModalProps) {
+export default function ComposeModal({
+  onClose,
+  initialTo,
+  initialSubject,
+  initialBody,
+  initialAttachments,
+}: ComposeModalProps) {
   const { sendBlank, accountConfig } = useEmail()
   const { state } = useInternalAccount()
 
@@ -898,13 +908,13 @@ export default function ComposeModal({ onClose, initialTo }: ComposeModalProps) 
   const [selectedDepartment, setSelectedDepartment] = useState('')
 
   // Subject / body
-  const [subject, setSubject] = useState('')
-  const [body, setBody] = useState('')
+  const [subject, setSubject] = useState(initialSubject ?? '')
+  const [body, setBody] = useState(initialBody ?? '')
   const [bulkGoal, setBulkGoal] = useState('')
   const [bulkDrafts, setBulkDrafts] = useState<BulkEmailDraft[]>([])
 
   // Attachments
-  const [attachments, setAttachments] = useState<AttachmentEntry[]>([])
+  const [attachments, setAttachments] = useState<AttachmentEntry[]>(initialAttachments ?? [])
 
   // Sending state
   const [sending, setSending] = useState(false)

@@ -18,6 +18,14 @@ function escapeTableCell(value: unknown): string {
   return escapeMarkdown(value).replace(/\|/g, '\\|').replace(/\n/g, '<br>')
 }
 
+function escapeHtml(value: unknown): string {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
 function normalizeString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
@@ -105,6 +113,86 @@ function appendTable(lines: string[], table: NonNullable<WebDeckSlide['table']>)
   }
 }
 
+function sanitizeInlineSvg(svg: string): string {
+  return String(svg || '')
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/\son[a-z]+\s*=\s*(['"]).*?\1/gi, '')
+    .replace(/javascript:/gi, '')
+}
+
+function buildCardItems(items: string[]): string {
+  return items
+    .map((item, index) => `<div class="slidev-card-item"><span class="slidev-card-index">${index + 1}</span><span>${escapeHtml(item)}</span></div>`)
+    .join('')
+}
+
+function buildVisualBlock(slide: WebDeckSlide): string {
+  const visual = slide.visual
+  const fallbackTitle = escapeHtml(slide.title || '视觉元素')
+  const fallbackDescription = escapeHtml(slide.subtitle || slide.items?.[0] || '')
+
+  if (visual?.imageUrl) {
+    const alt = escapeMarkdown(visual.alt || visual.title || slide.title || 'slide image')
+    return `![${alt}](${visual.imageUrl})`
+  }
+
+  if (slide.type === 'toc') {
+    const items = (slide.items || []).filter(Boolean)
+    return `<div class="slidev-visual slidev-visual-cards" data-slidev-visual="cards">${buildCardItems(items)}</div>`
+  }
+
+  if (slide.layout === 'cards' || slide.type === 'summary') {
+    return `<div class="slidev-visual slidev-visual-cards" data-slidev-visual="cards">${buildCardItems((slide.items || []).slice(0, 4))}</div>`
+  }
+
+  if (slide.layout === 'timeline' && slide.timeline?.length) {
+    return `<div class="slidev-visual slidev-visual-diagram" data-slidev-visual="diagram">${slide.timeline.map((item, index) => `
+      <div class="slidev-timeline-node">
+        <span class="slidev-timeline-order">${index + 1}</span>
+        <div>
+          <strong>${escapeHtml(item.title || `阶段 ${index + 1}`)}</strong>
+          ${item.detail ? `<span>${escapeHtml(item.detail)}</span>` : ''}
+        </div>
+      </div>
+    `).join('')}</div>`
+  }
+
+  if ((slide.layout === 'comparison' || slide.layout === 'table') && slide.table) {
+    const headers = slide.table.headers
+    const rows = slide.table.rows
+    return `<div class="slidev-visual slidev-visual-chart" data-slidev-visual="chart">
+      <table>
+        <thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join('')}</tr></thead>
+        <tbody>${rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>`).join('')}</tbody>
+      </table>
+    </div>`
+  }
+
+  if (slide.quote?.text) {
+    return `<div class="slidev-visual slidev-visual-quote" data-slidev-visual="placeholder">
+      <div class="slidev-quote-mark">“</div>
+      <div class="slidev-quote-text">${escapeHtml(slide.quote.text)}</div>
+      ${slide.quote.author ? `<div class="slidev-quote-author">— ${escapeHtml(slide.quote.author)}</div>` : ''}
+    </div>`
+  }
+
+  if (visual?.svg) {
+    return `<div class="slidev-visual slidev-visual-svg" data-slidev-visual="${escapeHtml(visual.type || 'svg')}">
+${sanitizeInlineSvg(visual.svg)}
+</div>`
+  }
+
+  return `<div class="slidev-visual slidev-visual-placeholder" data-slidev-visual="${escapeHtml(visual?.type || 'placeholder')}">
+    <strong>${escapeHtml(visual?.title || fallbackTitle)}</strong>
+    <span>${escapeHtml(visual?.description || fallbackDescription)}</span>
+  </div>`
+}
+
+function appendVisual(lines: string[], slide: WebDeckSlide): void {
+  lines.push('')
+  lines.push(buildVisualBlock(slide))
+}
+
 function buildSlideMarkdown(slide: WebDeckSlide): string {
   const lines: string[] = []
   const title = escapeMarkdown(slide.title || '未命名页面').trim() || '未命名页面'
@@ -118,6 +206,7 @@ function buildSlideMarkdown(slide: WebDeckSlide): string {
 
   if (slide.type === 'toc') {
     lines.push('')
+    lines.push('## 本页结构')
     appendBullets(lines, slide.items || [])
   } else if (slide.table) {
     lines.push('')
@@ -147,6 +236,7 @@ function buildSlideMarkdown(slide: WebDeckSlide): string {
     appendBullets(lines, slide.items || [])
   }
 
+  appendVisual(lines, slide)
   appendCodeBlocks(lines, slide)
   appendSpeakerNotes(lines, slide)
   return lines.join('\n').trim()

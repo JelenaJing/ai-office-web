@@ -58,6 +58,15 @@ export interface PptSlidePreview {
   table?: { headers: string[]; rows: string[][] }
   columns?: Array<{ title: string; items: string[] }>
   quote?: { text: string; author?: string }
+  visual?: {
+    type: 'svg' | 'image' | 'diagram' | 'chart' | 'cards' | 'placeholder'
+    title?: string
+    description?: string
+    imageUrl?: string
+    imagePrompt?: string
+    svg?: string
+    alt?: string
+  }
   layout?: string
   previewImageUrl?: string | null
   raw?: Record<string, unknown>
@@ -142,6 +151,7 @@ export interface GenerationModeSession {
   pptContentPackageId: string | null
   pptActiveSkillId: string | null
   pptTaskStatus: PptTaskStatus
+  pptGenerationProgress: number
   pptDeckId: string | null
   pptArtifactId: string | null
   pptDownloadUrl: string | null
@@ -274,6 +284,7 @@ function createEmptySession(): GenerationModeSession {
     pptContentPackageId: null,
     pptActiveSkillId: null,
     pptTaskStatus: 'idle' as PptTaskStatus,
+    pptGenerationProgress: 0,
     pptDeckId: null,
     pptArtifactId: null,
     pptDownloadUrl: null,

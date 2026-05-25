@@ -7,7 +7,7 @@
  */
 
 import { getAccountCenterBaseUrl } from '../accountCenterConfig'
-import type { InternalAccountUser, ServiceBinding } from '../types/internalAccount'
+import type { ConnectedMailboxInfo, InternalAccountUser, ServiceBinding } from '../types/internalAccount'
 import type {
   PersonProfile,
   PersonDetail,
@@ -26,6 +26,59 @@ import type {
 const ACCOUNT_CENTER_LOGIN_PATH = '/api/auth/login'
 const WEB_BACKEND_UNREACHABLE_MESSAGE = '无法连接 AI Office Web 后端'
 const ACCOUNT_CENTER_UNREACHABLE_MESSAGE = '无法连接内部账号中心，请检查 13100 服务'
+
+type AccountCenterClientErrorType =
+  | 'ECONNREFUSED'
+  | 'ETIMEDOUT'
+  | 'ENOTFOUND'
+  | '5xx'
+  | 'CORS'
+  | 'UNKNOWN'
+
+function classifyClientError(
+  error: unknown,
+  usesSameOriginProxy: boolean,
+  status?: number,
+): AccountCenterClientErrorType {
+  if (typeof status === 'number' && status >= 500) return '5xx'
+  const record = error && typeof error === 'object' ? error as Record<string, unknown> : null
+  const code = typeof record?.code === 'string'
+    ? record.code.toUpperCase()
+    : ''
+  if (code === 'ECONNREFUSED' || code === 'ETIMEDOUT' || code === 'ENOTFOUND') return code
+  if (code === 'ABORT_ERR') return 'ETIMEDOUT'
+
+  const message = (error instanceof Error ? error.message : String(error ?? '')).toUpperCase()
+  if (message.includes('ECONNREFUSED')) return 'ECONNREFUSED'
+  if (message.includes('ETIMEDOUT') || message.includes('TIMEOUT') || message.includes('ABORT')) return 'ETIMEDOUT'
+  if (message.includes('ENOTFOUND') || message.includes('EAI_AGAIN') || message.includes('DNS')) return 'ENOTFOUND'
+  if (!usesSameOriginProxy && (message.includes('FAILED TO FETCH') || message.includes('CORS'))) return 'CORS'
+  return 'UNKNOWN'
+}
+
+function logAccountCenterClientIssue(input: {
+  path: string
+  baseUrl: string
+  usesSameOriginProxy: boolean
+  error?: unknown
+  status?: number
+  message?: string
+}): void {
+  const errorType = classifyClientError(
+    input.error ?? input.message ?? '',
+    input.usesSameOriginProxy,
+    input.status,
+  )
+  const baseUrl = input.baseUrl || '(same-origin)'
+  const message = (input.message || (input.error instanceof Error ? input.error.message : String(input.error ?? '')))
+    .replace(/\s+/g, ' ')
+    .trim()
+  const statusPart = typeof input.status === 'number' ? ` status=${input.status}` : ''
+  const messagePart = message ? ` message=${message}` : ''
+  console.error(
+    `[account-center-client] baseUrl=${baseUrl} path=${input.path} errorType=${errorType}${statusPart}${messagePart}`,
+  )
+}
 
 /** fetch + AbortController timeout wrapper */
 async function fetchWithTimeout(
@@ -77,6 +130,12 @@ async function request<T>(
       usesSameOriginProxy,
     )
   } catch (err) {
+    logAccountCenterClientIssue({
+      path,
+      baseUrl,
+      usesSameOriginProxy,
+      error: err,
+    })
     throw err
   }
 
@@ -94,6 +153,19 @@ async function request<T>(
       // ignore parse failure
     }
     const msg = errorBody.message || errorBody.error || response.statusText
+    if (
+      response.status >= 500
+      || errorBody.code === 'ACCOUNT_CENTER_UNREACHABLE'
+      || msg.includes('账号中心服务不可达')
+    ) {
+      logAccountCenterClientIssue({
+        path,
+        baseUrl,
+        usesSameOriginProxy,
+        status: response.status,
+        message: msg,
+      })
+    }
     if (errorBody.code === 'ACCOUNT_CENTER_UNREACHABLE' || response.status === 502 || msg.includes('账号中心服务不可达')) {
       throw new Error(ACCOUNT_CENTER_UNREACHABLE_MESSAGE)
     }
@@ -131,10 +203,13 @@ export interface LoginResult {
   token: string
   user: InternalAccountUser
   authMethod?: 'account_center' | 'email_fallback'
+  loginMethod?: string
+  connectedMailbox?: ConnectedMailboxInfo
   autoBoundMailbox?: {
     email: string
     provider: string
     mailboxId: string
+    verified?: boolean
   }
   diagnostics?: unknown
   message?: string

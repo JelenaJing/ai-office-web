@@ -1,9 +1,9 @@
 /**
  * AI Mail Triage — type definitions.
  *
- * All AI classification of emails happens on the client side using the
- * existing LLM infrastructure. The mail server (mailcow / IMAP / SMTP)
- * is never involved in LLM calls.
+ * Web mail analysis is orchestrated by the server as per-email jobs.
+ * The client mainly starts tasks, polls status, caches successful results,
+ * and renders progress / failure diagnostics.
  */
 
 export type AiMailTriageCategory =
@@ -233,6 +233,7 @@ export type EmailActionType =
 export interface EmailAnalysisResult {
   messageId: string
   threadId?: string
+  status?: 'pending' | 'running' | 'done' | 'failed' | 'skipped'
 
   fromName?: string
   fromEmail?: string
@@ -258,6 +259,12 @@ export interface EmailAnalysisResult {
   relatedDepartment?: string
 
   batchId?: string
+  stage?: EmailAnalysisFailureStage
+  errorCode?: EmailAnalysisErrorCode
+  retryCount?: number
+  bodyLength?: number
+  truncated?: boolean
+  cacheHit?: boolean
   error?: string
 }
 
@@ -276,6 +283,10 @@ export interface EmailAnalysisBatchSummary {
 
   totalEmails: number
   analyzedCount: number
+  doneCount: number
+  runningCount: number
+  skippedCount: number
+  cachedCount: number
   failedCount: number
 
   importantCount: number
@@ -351,14 +362,114 @@ export interface EmailAnalysisBatchSummary {
     timeIntent?: EmailTimeIntent
   }>
 
+  failureReasons: Array<{
+    key: string
+    label: string
+    count: number
+  }>
+
+  failedItems: Array<{
+    messageId: string
+    subject: string
+    fromName?: string
+    fromEmail?: string
+    error: string
+    stage?: EmailAnalysisFailureStage
+    errorCode?: EmailAnalysisErrorCode
+    retryCount?: number
+  }>
+
   reportText: string
   contentOverviewText: string
+}
+
+export type EmailAnalysisTaskStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
+export type EmailAnalysisJobStatus = 'pending' | 'running' | 'done' | 'failed' | 'skipped'
+export type EmailAnalysisFailureStage =
+  | 'fetch_body'
+  | 'normalize'
+  | 'llm_request'
+  | 'llm_response'
+  | 'json_parse'
+  | 'save_result'
+export type EmailAnalysisErrorCode =
+  | 'BODY_INCOMPLETE'
+  | 'FETCH_BODY_FAILED'
+  | 'BODY_EMPTY'
+  | 'HTML_CLEAN_FAILED'
+  | 'BODY_TOO_LONG'
+  | 'LLM_TIMEOUT'
+  | 'MODEL_UNAVAILABLE'
+  | 'LLM_REQUEST_FAILED'
+  | 'LLM_NON_JSON'
+  | 'JSON_PARSE_FAILED'
+  | 'SAVE_FAILED'
+  | 'ALREADY_ANALYZED'
+  | 'ATTACHMENT_ONLY'
+  | 'SYSTEM_DELIVERY_NOTICE'
+
+export interface EmailAnalysisTaskReasonCount {
+  key: string
+  label: string
+  count: number
+}
+
+export interface EmailAnalysisJobSnapshot {
+  jobId: string
+  accountId: string
+  folder: string
+  messageId: string
+  messageUid: string
+  status: EmailAnalysisJobStatus
+  subject?: string
+  subjectHash?: string
+  cacheKey?: string
+  cacheHit?: boolean
+  bodyHash?: string
+  bodyLength?: number
+  truncated?: boolean
+  retryCount: number
+  stage?: EmailAnalysisFailureStage
+  errorCode?: EmailAnalysisErrorCode
+  error?: string
+  rawOutputPreview?: string
+  durationMs?: number
+  startedAt?: string
+  finishedAt?: string
+  result?: AiMailTriageResult
+  createdAt: string
+  updatedAt: string
+}
+
+export interface EmailAnalysisTaskSnapshot {
+  taskId: string
+  status: EmailAnalysisTaskStatus
+  progress: number
+  message: string
+  jobs: EmailAnalysisJobSnapshot[]
+  summary: {
+    total: number
+    pending: number
+    running: number
+    done: number
+    failed: number
+    skipped: number
+    cached: number
+    failureReasons: EmailAnalysisTaskReasonCount[]
+  }
+  unreadOnly: boolean
+  sourceMessageCount: number
+  promptVersion?: string
+  modelUnavailable: boolean
+  error?: string
 }
 
 export type AiMailTriageResult = {
   messageId: string
   threadId?: string
   accountId: string
+  folder?: string
+  promptVersion?: string
   /** SHA-like hash of the email body text; used to detect body changes */
   bodyHash: string
   category: AiMailTriageCategory
@@ -405,8 +516,14 @@ export type AiMailTriageResult = {
   /** Set when status === 'skipped' to explain why LLM analysis was bypassed */
   skipReason?: AiMailSkipReason
   errorMessage?: string
+  analysisStage?: EmailAnalysisFailureStage
+  errorCode?: EmailAnalysisErrorCode
+  retryCount?: number
+  durationMs?: number
   /** Model used for this classification */
   modelName?: string
+  bodyLength?: number
+  truncated?: boolean
   createdAt: string
   updatedAt: string
 }
@@ -433,6 +550,8 @@ export type MailAnalysisProgress = {
   enqueued: number
   /** Mails currently being classified */
   running: number
+  /** Mails skipped in this run (cache hit / system notice / empty body / attachment-only) */
+  skipped: number
   /** Mails successfully classified */
   done: number
   /** Mails for which an AI pre-reply draft was generated */

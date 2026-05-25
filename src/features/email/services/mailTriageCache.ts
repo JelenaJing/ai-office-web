@@ -15,6 +15,7 @@ import type { AiMailTriageResult } from '../../../types/mailTriage'
 const CACHE_KEY = 'ai:mail-triage:v1'
 /** Prune to this many entries when storage grows large */
 const MAX_CACHE_ENTRIES = 600
+export const MAIL_ANALYSIS_PROMPT_VERSION = 'email-analysis-v2'
 
 type CacheStore = Record<string, AiMailTriageResult>
 
@@ -60,8 +61,14 @@ function saveStore(store: CacheStore): void {
   }
 }
 
-function makeCacheKey(accountId: string, messageId: string): string {
-  return `${accountId}:${messageId}`
+function makeCacheKey(
+  accountId: string,
+  folder: string,
+  messageId: string,
+  bodyHash: string,
+  promptVersion: string,
+): string {
+  return `${accountId}:${folder}:${messageId}:${bodyHash}:${promptVersion}`
 }
 
 /**
@@ -72,9 +79,11 @@ export function getCachedTriage(
   accountId: string,
   messageId: string,
   bodyHash: string,
+  folder = 'INBOX',
+  promptVersion = MAIL_ANALYSIS_PROMPT_VERSION,
 ): AiMailTriageResult | null {
   const store = loadStore()
-  const entry = store[makeCacheKey(accountId, messageId)]
+  const entry = store[makeCacheKey(accountId, folder, messageId, bodyHash, promptVersion)]
   if (!entry) return null
   if (entry.status !== 'success') return null
   if (entry.bodyHash !== bodyHash) return null
@@ -84,7 +93,9 @@ export function getCachedTriage(
 /** Persist a triage result to cache. */
 export function setCachedTriage(result: AiMailTriageResult): void {
   const store = loadStore()
-  store[makeCacheKey(result.accountId, result.messageId)] = result
+  const folder = result.folder || 'INBOX'
+  const promptVersion = result.promptVersion || MAIL_ANALYSIS_PROMPT_VERSION
+  store[makeCacheKey(result.accountId, folder, result.messageId, result.bodyHash, promptVersion)] = result
   saveStore(store)
 }
 
@@ -100,7 +111,10 @@ export function getAllCachedTriagesForAccount(
   const result: Record<string, AiMailTriageResult> = {}
   for (const [key, value] of Object.entries(store)) {
     if (key.startsWith(prefix)) {
-      result[value.messageId] = value
+      const existing = result[value.messageId]
+      if (!existing || existing.updatedAt.localeCompare(value.updatedAt) < 0) {
+        result[value.messageId] = value
+      }
     }
   }
   return result
@@ -109,6 +123,10 @@ export function getAllCachedTriagesForAccount(
 /** Remove a single entry from cache. */
 export function evictCachedTriage(accountId: string, messageId: string): void {
   const store = loadStore()
-  delete store[makeCacheKey(accountId, messageId)]
+  for (const key of Object.keys(store)) {
+    if (key.startsWith(`${accountId}:`) && key.includes(`:${messageId}:`)) {
+      delete store[key]
+    }
+  }
   saveStore(store)
 }

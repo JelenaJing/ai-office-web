@@ -212,7 +212,7 @@ function LoginForm() {
         />
       </Field>
       <div style={{ fontSize: 14, color: '#8a9db5', marginTop: 8 }}>
-        登录后将自动配置内部邮箱和内部通讯。
+        登录后将自动配置默认邮箱和内部通讯。
       </div>
       <Btn $primary type="submit" disabled={loading || !username || !password}>
         {loading ? '登录中...' : '登录内部账号'}
@@ -301,7 +301,10 @@ function InternalMailSection() {
   const [smtpResult, setSmtpResult] = useState<{ ok: boolean; message: string } | null>(null)
 
   if (state.phase !== 'logged_in') return null
-  const { user, emailAutoStatus, emailAutoError, autoBoundMailbox, loginMessage } = state.session
+  const { user, emailAutoStatus, emailAutoError, autoBoundMailbox, connectedMailbox, loginMessage } = state.session
+  const defaultMailboxEmail = connectedMailbox?.email || autoBoundMailbox?.email || user.email
+  const defaultMailboxProvider = connectedMailbox?.provider || autoBoundMailbox?.provider
+  const showsInternalMailSettings = defaultMailboxEmail.toLowerCase().endsWith('@ai.cuhk.edu.cn')
 
   const handleRetry = useCallback(async () => {
     setRetrying(true)
@@ -311,6 +314,11 @@ function InternalMailSection() {
       await applyEmailConfig()
 
       const pw = getSessionPassword()
+      if (connectedMailbox?.email || autoBoundMailbox?.email || !window.electronAPI?.emailTestConnection || !window.electronAPI?.emailTestSmtp) {
+        setImapResult({ ok: true, message: '当前登录已使用默认邮箱配置' })
+        setSmtpResult({ ok: true, message: '当前登录已使用默认邮箱配置' })
+        return
+      }
       if (pw) {
         const config: EmailAccountConfig = {
           providerType: 'internal-imap',
@@ -343,28 +351,32 @@ function InternalMailSection() {
     } finally {
       setRetrying(false)
     }
-  }, [applyEmailConfig, getSessionPassword, user])
+  }, [applyEmailConfig, autoBoundMailbox, connectedMailbox, getSessionPassword, user])
 
   return (
-    <Section style={{ marginTop: 14 }}>
+      <Section style={{ marginTop: 14 }}>
       <SectionHeader>
-        <SectionTitle>📧 内部邮箱</SectionTitle>
+        <SectionTitle>📧 邮箱</SectionTitle>
       </SectionHeader>
       <SectionBody>
-        <InfoRow><InfoLabel>邮箱地址</InfoLabel><InfoValue>{user.email}</InfoValue></InfoRow>
-        {autoBoundMailbox && (
-          <InfoRow><InfoLabel>自动绑定</InfoLabel><InfoValue>{autoBoundMailbox.email} · {autoBoundMailbox.provider}</InfoValue></InfoRow>
+        <InfoRow><InfoLabel>默认账号</InfoLabel><InfoValue>{defaultMailboxEmail}</InfoValue></InfoRow>
+        {(connectedMailbox || autoBoundMailbox) && (
+          <InfoRow><InfoLabel>自动绑定</InfoLabel><InfoValue>{defaultMailboxEmail} · {defaultMailboxProvider || 'imap/smtp/custom'}</InfoValue></InfoRow>
         )}
-        <InfoRow><InfoLabel>IMAP</InfoLabel><InfoValue>{INTERNAL_MAIL_HOST}:993 (SSL)</InfoValue></InfoRow>
-        <InfoRow><InfoLabel>SMTP</InfoLabel><InfoValue>{INTERNAL_MAIL_HOST}:465 (SSL)</InfoValue></InfoRow>
-        <InfoRow>
-          <InfoLabel>Webmail</InfoLabel>
-          <InfoValue>
-            <a href={INTERNAL_MAIL_WEB_URL} target="_blank" rel="noopener noreferrer" style={{ color: '#0e639c' }}>
-              打开 SOGo
-            </a>
-          </InfoValue>
-        </InfoRow>
+        {showsInternalMailSettings && (
+          <>
+            <InfoRow><InfoLabel>IMAP</InfoLabel><InfoValue>{INTERNAL_MAIL_HOST}:993 (SSL)</InfoValue></InfoRow>
+            <InfoRow><InfoLabel>SMTP</InfoLabel><InfoValue>{INTERNAL_MAIL_HOST}:465 (SSL)</InfoValue></InfoRow>
+            <InfoRow>
+              <InfoLabel>Webmail</InfoLabel>
+              <InfoValue>
+                <a href={INTERNAL_MAIL_WEB_URL} target="_blank" rel="noopener noreferrer" style={{ color: '#0e639c' }}>
+                  打开 SOGo
+                </a>
+              </InfoValue>
+            </InfoRow>
+          </>
+        )}
 
         {loginMessage ? (
           <StatusBox $ok style={{ marginTop: 10 }}>{loginMessage}</StatusBox>
@@ -382,9 +394,9 @@ function InternalMailSection() {
             )}
           </>
         ) : emailAutoStatus === 'applying' ? (
-          <StatusBox style={{ marginTop: 10 }}>正在自动配置内部邮箱...</StatusBox>
+          <StatusBox style={{ marginTop: 10 }}>正在自动配置默认邮箱...</StatusBox>
         ) : emailAutoStatus === 'applied' ? (
-          <StatusBox $ok style={{ marginTop: 10 }}>✓ 内部邮箱已自动配置</StatusBox>
+          <StatusBox $ok style={{ marginTop: 10 }}>✓ 默认邮箱已自动配置</StatusBox>
         ) : emailAutoStatus === 'error' ? (
           <StatusBox $error style={{ marginTop: 10 }}>
             邮箱自动配置失败：{emailAutoError || '未知错误'}
@@ -401,11 +413,11 @@ function InternalMailSection() {
             disabled={retrying}
             style={{ marginTop: 8 }}
           >
-            {emailAutoStatus === 'applied' || imapResult ? '重新应用并测试连接' : '应用内部邮箱配置'}
+            {emailAutoStatus === 'applied' || imapResult ? '重新应用并测试连接' : '应用默认邮箱配置'}
           </SmallBtn>
         )}
         <div style={{ fontSize: 14, color: '#8a9db5', marginTop: 6 }}>
-          邮箱 SMTP/IMAP 密码使用邮箱初始密码（与 AccountCenter 登录密码独立管理，修改登录密码不影响邮箱连接）。
+          邮箱 SMTP/IMAP 凭据以当前已绑定邮箱为准；如已绑定真实邮箱，会优先使用真实邮箱。
         </div>
       </SectionBody>
     </Section>

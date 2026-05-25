@@ -60,3 +60,7 @@ aioffice-workflow-service/data/*
 # test workspace run data (generated outputs, not source)
 .test-workspace*/
 .debug-template-slots/
+test-results/
+playwright-report/
+.playwright/
+.playwright-artifacts-*/

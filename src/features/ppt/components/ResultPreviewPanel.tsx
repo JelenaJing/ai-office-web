@@ -687,6 +687,7 @@ export default function ResultPreviewPanel() {
   const pptDeckDocumentId = workbench.sessions.ppt.pptDeckDocumentId ?? null
   const pptActiveTemplateManifestId = workbench.sessions.ppt.pptActiveTemplateManifestId ?? null
   const pptTaskStatus = workbench.sessions.ppt.pptTaskStatus
+  const pptGenerationProgress = workbench.sessions.ppt.pptGenerationProgress
   const pptEngine = workbench.sessions.ppt.pptEngine
   const pptFallbackFrom = workbench.sessions.ppt.pptFallbackFrom
   const pptFallbackReason = workbench.sessions.ppt.pptFallbackReason
@@ -2333,36 +2334,22 @@ export default function ResultPreviewPanel() {
     return (
       <div data-testid="generation-result-preview-panel" style={{ flex: 1, width: '100%', height: '100%', minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <PptWorkbenchPanel
-          title={workbench.resultTitle || workbench.generationPrompt.slice(0, 40) || 'PPT 工作台'}
+          title={workbench.resultTitle || workbench.generationPrompt.slice(0, 40) || 'PPT'}
           taskStatus={pptTaskStatus}
           liveSlides={effectivePptSlides}
-          totalSlides={pptTotalSlides}
           activeSlideIndex={pptActiveSlideIndex}
-          resultPath={workbench.resultPath}
-          templateStatusMessage={pptSkillApplyStatus || pptEngineStatusMessage || workbench.generationStatus.message}
-          pptEngineLabel={pptEngineStatusMessage || '生成引擎：待生成'}
-          pptEditEngineLabel={pptPageEditEngineLabel}
-          templateLabel={activePptTemplateLabel}
-          templateId={activePptTemplateId}
-          templateOptions={pptTemplateOptions}
-          pptDirty={pptDirty}
-          pptEditMessages={pptEditMessages}
-          pptEditingSlideId={pptEditingSlideId}
-          pptSlideEditStatus={pptSlideEditStatus}
-          templateBusy={pptSkillBusy || pptTaskStatus === 'applying_template'}
+          templateStatusMessage={pptSkillApplyStatus || workbench.generationStatus.message}
           pptDeckId={pptDeckId}
           pptOutputMode={pptOutputMode || undefined}
           pptPreviewUrl={pptPreviewUrl || undefined}
-          pptDownloadUrl={pptDownloadUrl}
           pptSlidevMarkdown={pptSlidevMarkdown || undefined}
+          generationProgress={pptGenerationProgress}
+          generationMessage={workbench.generationStatus.message}
           onDownloadPpt={() => void handleDownloadPptx()}
           onDownloadSlidevHtml={() => void handleDownloadSlidevHtml()}
           onOpenSlidevPreview={() => void handleOpenSlidevPreview()}
           onExportSlidev={(format) => void handleExportSlidev(format)}
-          onTemplateChange={(templateId) => void handleRetemplatePptDeck(templateId)}
           onSelectSlide={handlePptSelectSlide}
-          onRegenerateDeck={handleRegenerateDeck}
-          onSaveDeck={() => void handleSavePptDeck()}
           onAiEditSlide={handlePptEditSlideWithAi}
         />
       </div>

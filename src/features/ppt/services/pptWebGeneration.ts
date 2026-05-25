@@ -234,6 +234,14 @@ function validateCompletedCreatePayload(payload: WebPptDeckPayload | undefined, 
   return null
 }
 
+export interface WebPptTaskProgressUpdate {
+  taskId: string
+  status: string
+  progress: number
+  message: string
+  data?: WebPptDeckPayload
+}
+
 export async function runWebPptxCreate(input: {
   workspacePath: string
   title: string
@@ -244,6 +252,7 @@ export async function runWebPptxCreate(input: {
   language?: 'zh-CN' | 'en-US'
   engine?: 'minimax_pptx_generator' | 'slidev' | 'builtin'
   outputMode?: 'editable_pptx' | 'web_deck'
+  onProgress?: (update: WebPptTaskProgressUpdate) => void
 }): Promise<WebPptCreateResult> {
   const MAX_POLL_ATTEMPTS = 60
   const POLL_INTERVAL_MS = 1500
@@ -322,6 +331,18 @@ export async function runWebPptxCreate(input: {
         status: pollBody.status ?? `http-${pollResp.status}`,
         progress: pollBody.progress ?? null,
       })
+      if (pollBody.status === 'running' && pollBody.result) {
+        const partialPayload = parseWebPptDeckPayload(pollBody.result)
+        if (partialPayload?.deckId) {
+          input.onProgress?.({
+            taskId: startBody.taskId,
+            status: pollBody.status,
+            progress: pollBody.progress ?? 0,
+            message: pollBody.message || '正在生成…',
+            data: partialPayload,
+          })
+        }
+      }
       if (!pollResp.ok || !pollBody.success) {
         const message = pollBody.error || pollBody.message || `PPT 任务查询失败 (${pollResp.status})`
         console.error('[ppt-web] error', { stage: 'poll', taskId: startBody.taskId, status: pollResp.status, message })

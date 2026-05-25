@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Mic, RefreshCw } from 'lucide-react'
 import { useDocument } from '../../../contexts/DocumentContext'
 import { useFormalTemplateSession } from '../../../modules/formal/contexts/FormalTemplateSessionContext'
-import { useGenerationWorkbench, type PptSlidePreview } from '../../../contexts/GenerationWorkbenchContext'
+import { useGenerationWorkbench, type PptSlidePreview, type PptTaskStatus } from '../../../contexts/GenerationWorkbenchContext'
 import { useKnowledge } from '../../../contexts/KnowledgeContext'
 import { useWorkspace } from '../../../contexts/WorkspaceContext'
 import { useWorkspaceMode } from '../../../contexts/WorkspaceModeContext'
@@ -55,6 +55,9 @@ import {
   UnifiedComposerActionRow,
   UnifiedComposerAssist,
   UnifiedComposerShell,
+  UnifiedDockCollapseBar,
+  UnifiedDockCollapseBtn,
+  UnifiedDockCollapseLabel,
   UnifiedComposerStatusPill,
   UnifiedComposerStatusRow,
   UnifiedComposerStatusText,
@@ -704,6 +707,16 @@ export default function GenerationPromptComposer() {
   const pptPrimarySource = workbench.sessions.ppt.pptPrimarySource
   const pptStopRequested = workbench.sessions.ppt.pptStopRequested
   const pptResumeRequested = workbench.sessions.ppt.pptResumeRequested
+  const pptTaskStatus = workbench.sessions.ppt.pptTaskStatus
+  const pptHasDeckResult = Boolean(
+    workbench.sessions.ppt.pptDeckId
+    || workbench.sessions.ppt.pptLiveSlides.length > 0
+    || workbench.sessions.ppt.pptDownloadUrl
+    || workbench.sessions.ppt.pptSlidevMarkdown
+    || workbench.sessions.ppt.resultType,
+  )
+  const [pptComposerExpanded, setPptComposerExpanded] = useState(true)
+  const previousPptTaskStatusRef = useRef<PptTaskStatus>(pptTaskStatus)
 
   // Sync context stop flag to ref AND abort any in-flight LLM call
   useEffect(() => {
@@ -715,6 +728,22 @@ export default function GenerationPromptComposer() {
       }
     }
   }, [pptStopRequested])
+
+  useEffect(() => {
+    if (currentMode !== 'ppt') {
+      setPptComposerExpanded(true)
+      previousPptTaskStatusRef.current = pptTaskStatus
+      return
+    }
+    const previousStatus = previousPptTaskStatusRef.current
+    const justCompleted = previousStatus !== 'completed' && pptTaskStatus === 'completed'
+    if (!pptHasDeckResult) {
+      setPptComposerExpanded(true)
+    } else if (justCompleted) {
+      setPptComposerExpanded(false)
+    }
+    previousPptTaskStatusRef.current = pptTaskStatus
+  }, [currentMode, pptHasDeckResult, pptTaskStatus])
 
   const imageComposerAssist = useMemo(() => {
     if (currentMode !== 'image') return null
@@ -745,6 +774,13 @@ export default function GenerationPromptComposer() {
       }
     }).catch(() => { /* ignore */ })
   }, [currentMode])
+  useEffect(() => {
+    if (workbench.sessions.ppt.pptEngine === 'slidev') {
+      setPptEngineMode('slidev')
+    } else if (workbench.sessions.ppt.pptEngine === 'minimax_pptx_generator') {
+      setPptEngineMode('minimax_pptx_generator')
+    }
+  }, [workbench.sessions.ppt.pptEngine])
   const composerCapabilities: UnifiedComposerCapabilities = useMemo(() => ({
     canSend: true,
     canStop: false,
@@ -779,6 +815,9 @@ export default function GenerationPromptComposer() {
       setCommitResult(null)
     }
     workbench.clearCurrentResult()
+    if (currentMode === 'ppt') {
+      setPptComposerExpanded(true)
+    }
   }
 
   const handleGenerateImage = async (options?: { prompt?: string; forceEnterImageMode?: boolean; source?: string }) => {
@@ -911,6 +950,7 @@ export default function GenerationPromptComposer() {
       workbench.setModeSession('ppt', (session) => ({
         ...session,
         pptTaskStatus: 'generating_deck',
+        pptGenerationProgress: 0,
         pptDeckId: null,
         pptArtifactId: null,
         pptDownloadUrl: null,
@@ -961,6 +1001,26 @@ export default function GenerationPromptComposer() {
           prompt: rawUserPrompt,
           engine: pptEngineMode,
           outputMode: pptEngineMode === 'slidev' ? 'web_deck' : 'editable_pptx',
+          onProgress: (update) => {
+            const partial = update.data
+            if (!partial?.deckId) return
+            const partialSlides = mergeDeckIntoLiveSlides(partial, [])
+            workbench.setGenerationStatus('running', update.message)
+            workbench.setModeSession('ppt', (session) => ({
+              ...session,
+              pptTaskStatus: 'generating_deck',
+              pptGenerationProgress: update.progress,
+              pptDeckId: partial.deckId || session.pptDeckId,
+              pptEngine: partial.engine === 'slidev' ? 'slidev' : session.pptEngine,
+              pptOutputMode: partial.outputMode || (partial.engine === 'slidev' ? 'web_deck' : session.pptOutputMode),
+              pptPreviewUrl: partial.previewUrl || session.pptPreviewUrl,
+              pptSlidevMarkdown: partial.slidevMarkdown || session.pptSlidevMarkdown,
+              pptSlides: partialSlides.length > 0 ? partialSlides : session.pptSlides,
+              pptLiveSlides: partialSlides.length > 0 ? partialSlides : session.pptLiveSlides,
+              pptTotalSlides: partialSlides.length || session.pptTotalSlides,
+              pptDeckDocumentId: partial.deckId || session.pptDeckDocumentId,
+            }))
+          },
         })
         if (!result.success || !result.artifact) {
           const err = result.error || 'PPT 生成失败'
@@ -1007,6 +1067,7 @@ export default function GenerationPromptComposer() {
         workbench.setModeSession('ppt', (session) => ({
           ...session,
           pptTaskStatus: 'completed',
+          pptGenerationProgress: 100,
           pptDeckId: deckId,
           pptArtifactId: artifact.id,
           pptDownloadUrl: downloadUrl,
@@ -2501,8 +2562,48 @@ export default function GenerationPromptComposer() {
     void handleSubmit()
   }
 
+  const showCollapsedPptDock = currentMode === 'ppt' && pptHasDeckResult && !pptComposerExpanded && !effectiveBusy
+
   return (
     <UnifiedGenerationDockWrap data-testid="generation-prompt-composer">
+      {showCollapsedPptDock ? (
+        <>
+          <UnifiedDockCollapseBar data-testid="ppt-generation-dock-collapsed">
+            <UnifiedDockCollapseLabel>PPT 生成</UnifiedDockCollapseLabel>
+            <UnifiedDockCollapseBtn type="button" onClick={() => setPptComposerExpanded(true)}>
+              修改生成需求
+            </UnifiedDockCollapseBtn>
+          </UnifiedDockCollapseBar>
+          <div
+            style={{
+              minHeight: 48,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+              flexWrap: 'wrap',
+              padding: '10px 4px 0',
+            }}
+          >
+            <div style={{ minWidth: 0, display: 'grid', gap: 2 }}>
+              <span style={{ fontSize: 12, fontWeight: 800, color: '#30485f' }}>
+                {pptEngineMode === 'slidev' ? '当前模式：网页演示 Slidev' : '当前模式：正式 PPTX'}
+              </span>
+              <span style={{ fontSize: 12, color: '#667b90', lineHeight: 1.6 }}>
+                生成完成后默认收起输入区，把更多空间留给左侧缩略图和中间预览。
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <UnifiedGhostButton type="button" onClick={() => setPptComposerExpanded(true)}>
+                修改生成需求
+              </UnifiedGhostButton>
+              <UnifiedGhostButton type="button" onClick={handleClearResult}>
+                新建 PPT
+              </UnifiedGhostButton>
+            </div>
+          </div>
+        </>
+      ) : (
       <UnifiedComposerShell>
         <UnifiedComposerTextarea
           value={workbench.generationPrompt}
@@ -2587,6 +2688,7 @@ export default function GenerationPromptComposer() {
           )}
         </UnifiedComposerStatusRow>
       </UnifiedComposerShell>
+      )}
     </UnifiedGenerationDockWrap>
   )
 }

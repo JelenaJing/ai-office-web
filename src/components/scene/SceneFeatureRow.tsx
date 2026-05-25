@@ -89,12 +89,8 @@ const StatusBadge = styled.span<{ $kind: SceneFeatureStatus }>`
   border-radius: 999px;
   font-size: var(--font-size-xs);
   font-weight: 600;
-  background: ${p => p.$kind === 'requiresNetwork' ? '#e8f0fc'
-    : p.$kind === 'comingSoon' ? '#fdf0e2'
-    : '#f0f2f5'};
-  color: ${p => p.$kind === 'requiresNetwork' ? '#1f5fb4'
-    : p.$kind === 'comingSoon' ? '#a05c10'
-    : '#7a8898'};
+  background: ${p => p.$kind === 'requiresNetwork' ? '#e8f0fc' : '#f0f2f5'};
+  color: ${p => p.$kind === 'requiresNetwork' ? '#1f5fb4' : '#7a8898'};
 `
 
 const Description = styled.span`
@@ -143,7 +139,6 @@ const ActionBtn = styled.span<{ $accent: SceneFeatureAccent; $disabled: boolean 
 `
 
 function statusLabel(status: SceneFeatureStatus): string | null {
-  if (status === 'comingSoon') return '即将接入'
   if (status === 'requiresNetwork') return '需要网络'
   if (status === 'disabled') return '不可用'
   return null
@@ -159,8 +154,7 @@ export function SceneFeatureRow({
   actionLabel = '进入',
   onClick,
 }: SceneFeatureRowProps) {
-  const isDisabled = status === 'disabled'
-  const isComingSoon = status === 'comingSoon'
+  const isDisabled = status === 'disabled' || status === 'comingSoon'
   const badge = statusLabel(status)
 
   return (
@@ -168,7 +162,6 @@ export function SceneFeatureRow({
       $disabled={isDisabled}
       $accent={accent}
       onClick={isDisabled ? undefined : onClick}
-      style={isComingSoon ? { opacity: 0.92, cursor: onClick ? 'pointer' : 'default' } : undefined}
     >
       <IconWrap $accent={accent}>{icon}</IconWrap>
       <Body>

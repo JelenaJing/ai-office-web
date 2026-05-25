@@ -56,6 +56,10 @@ export interface CommunicationMessage {
   /** Primary recipient display name (populated for email threads) */
   toName?: string
   body: string
+  bodyText?: string
+  bodyPreview?: string
+  bodyFormat?: 'text' | 'html' | 'mixed'
+  bodyHtml?: string
   htmlBody?: string
   timestamp: string
   /** true = received from the other party; false = sent by current user */

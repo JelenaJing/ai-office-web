@@ -23,15 +23,30 @@ export interface InternalAccountUser {
   mustChangePassword: boolean
 }
 
+export interface ConnectedMailboxInfo {
+  email: string
+  provider?: string
+  status?: string
+  verified?: boolean
+  lastVerifiedAt?: string
+}
+
 export interface InternalAccountSession {
   token: string
   user: InternalAccountUser
   authMethod?: 'account_center' | 'email_fallback'
+  loginMethod?: string
+  connectedMailbox?: ConnectedMailboxInfo
   autoBoundMailbox?: {
     email: string
     provider: string
     mailboxId: string
+    verified?: boolean
   }
+  currentTenantId?: string
+  currentWorkspaceId?: string
+  currentWorkspacePath?: string
+  currentWorkspaceRole?: string
   loginMessage?: string
   bindings?: {
     mail?: ServiceBinding

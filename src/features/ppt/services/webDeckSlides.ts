@@ -91,6 +91,22 @@ function pickQuote(value: unknown): PptSlidePreview['quote'] | undefined {
   }
 }
 
+function pickVisual(value: unknown): PptSlidePreview['visual'] | undefined {
+  const raw = pickObject(value)
+  if (!raw) return undefined
+  const type = pickString(raw.type)
+  if (!type || !['svg', 'image', 'diagram', 'chart', 'cards', 'placeholder'].includes(type)) return undefined
+  return {
+    type: type as NonNullable<PptSlidePreview['visual']>['type'],
+    title: pickString(raw.title),
+    description: pickString(raw.description),
+    imageUrl: pickString(raw.imageUrl),
+    imagePrompt: pickString(raw.imagePrompt),
+    svg: pickString(raw.svg),
+    alt: pickString(raw.alt),
+  }
+}
+
 export function toPptSlidePreview(slide: Record<string, unknown>, index: number, current?: PptSlidePreview): PptSlidePreview {
   const slots = pickObject(slide.slots)
   const raw = pickObject(slide.raw)
@@ -134,6 +150,7 @@ export function toPptSlidePreview(slide: Record<string, unknown>, index: number,
     table: pickTable(slide.table ?? raw?.table) ?? current?.table,
     columns: pickColumns(slide.columns ?? raw?.columns) ?? current?.columns,
     quote: pickQuote(slide.quote ?? raw?.quote) ?? current?.quote,
+    visual: pickVisual(slide.visual ?? raw?.visual) ?? current?.visual,
     layout,
     previewImageUrl: pickString(slide.previewImageUrl) ?? pickString(raw?.previewImageUrl) ?? current?.previewImageUrl ?? current?.imagePath ?? null,
     raw: { ...(current?.raw || {}), ...(raw || {}), ...slide },

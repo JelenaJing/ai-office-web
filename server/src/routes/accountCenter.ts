@@ -5,6 +5,7 @@ import {
   ACCOUNT_CENTER_UNREACHABLE_MESSAGE,
   buildAccountCenterUrl,
   getAccountCenterBaseUrl,
+  logAccountCenterIssue,
 } from '../lib/accountCenter'
 import { accountCenterLoginCandidates } from '../features/auth/services/emailLoginFallback'
 
@@ -34,17 +35,34 @@ async function parseJsonOrText(upstream: Response): Promise<AccountCenterLoginRe
 
 router.get('/health', async (_req, res) => {
   const baseUrl = getAccountCenterBaseUrl()
+  const path = '/api/health'
   try {
-    const upstream = await fetch(baseUrl, { signal: AbortSignal.timeout(5000) })
-    res.json({ ok: true, baseUrl, upstreamStatus: upstream.status })
+    const upstream = await fetch(buildAccountCenterUrl(path), { signal: AbortSignal.timeout(5000) })
+    const payload = await parseJsonOrText(upstream)
+    if (upstream.status >= 500) {
+      logAccountCenterIssue({
+        scope: 'account-center-health',
+        method: 'GET',
+        path,
+        baseUrl,
+        status: upstream.status,
+      })
+    }
+    res.status(upstream.status).json({ ok: upstream.ok, baseUrl, path, upstreamStatus: upstream.status, payload })
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    console.error('[account-center] upstream unreachable', message)
+    logAccountCenterIssue({
+      scope: 'account-center-health',
+      method: 'GET',
+      path,
+      baseUrl,
+      error,
+    })
     res.status(502).json({
       ok: false,
       code: ACCOUNT_CENTER_UNREACHABLE_CODE,
       message: ACCOUNT_CENTER_UNREACHABLE_MESSAGE,
       baseUrl,
+      path,
     })
   }
 })
@@ -84,6 +102,16 @@ router.post('/login', authRateLimit, async (req, res) => {
         continue
       }
 
+      if (upstream.status >= 500) {
+        logAccountCenterIssue({
+          scope: 'account-center-login',
+          method: 'POST',
+          path: '/api/auth/login',
+          baseUrl,
+          status: upstream.status,
+        })
+      }
+
       const upstreamMessage = String(data.message ?? '').trim()
       console.warn('[account-center] login failed')
       return res.status(upstream.status).json({
@@ -92,8 +120,13 @@ router.post('/login', authRateLimit, async (req, res) => {
           : upstreamMessage || '账号中心登录失败，请稍后重试',
       })
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      console.error('[account-center] upstream unreachable', message)
+      logAccountCenterIssue({
+        scope: 'account-center-login',
+        method: 'POST',
+        path: '/api/auth/login',
+        baseUrl,
+        error,
+      })
       return res.status(502).json({
         code: ACCOUNT_CENTER_UNREACHABLE_CODE,
         message: ACCOUNT_CENTER_UNREACHABLE_MESSAGE,

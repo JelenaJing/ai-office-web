@@ -86,7 +86,10 @@ async function openPptWorkbench(page: Page): Promise<void> {
     }
   }
   await expect(page.locator('select[title*="选择生成引擎"]')).toBeVisible({ timeout: 10_000 })
-  await expect(page.locator('textarea').last()).toBeVisible({ timeout: 10_000 })
+  await expect(
+    page.locator('[data-testid="generation-prompt-composer"] textarea')
+      .or(page.locator('[data-testid="ppt-generation-dock-collapsed"]')),
+  ).toBeVisible({ timeout: 10_000 })
 }
 
 async function generatePptWithEngine(
@@ -94,6 +97,11 @@ async function generatePptWithEngine(
   engineMode: 'minimax_pptx_generator' | 'slidev',
   prompt: string,
 ): Promise<void> {
+  const collapsedDock = page.locator('[data-testid="ppt-generation-dock-collapsed"]')
+  if (await collapsedDock.isVisible().catch(() => false)) {
+    await collapsedDock.getByRole('button', { name: '修改生成需求' }).click()
+  }
+
   // Select engine mode from dropdown
   const engineSelect = page.locator('select[title*="选择生成引擎"]')
   if (await engineSelect.isVisible({ timeout: 3000 }).catch(() => false)) {
@@ -101,7 +109,7 @@ async function generatePptWithEngine(
   }
 
   // Type prompt
-  await page.locator('textarea').last().fill(prompt)
+  await page.locator('[data-testid="generation-prompt-composer"] textarea').fill(prompt)
   await page.keyboard.press('Enter')
 
   // Wait for generation to complete
@@ -197,6 +205,16 @@ test('Flow B: Slidev 网页演示 — generate 5-slide web deck', async ({ page 
     await expect(page.getByText(/Slidev 网页演示|网页演示 Slidev/).first()).toBeVisible({ timeout: 5000 })
   })
 
+  await test.step('dock collapses and preview stays dominant', async () => {
+    await expect(page.locator('[data-testid="ppt-generation-dock-collapsed"]')).toBeVisible({ timeout: 10_000 })
+    await expect(page.locator('[data-testid="generation-prompt-composer"] textarea')).toHaveCount(0)
+    const previewBox = await page.locator('[data-testid="ppt-slidev-preview-shell"]').boundingBox()
+    const dockBox = await page.locator('[data-testid="ppt-generation-dock-collapsed"]').boundingBox()
+    expect(previewBox).toBeTruthy()
+    expect(dockBox).toBeTruthy()
+    expect((previewBox?.height || 0)).toBeGreaterThan((dockBox?.height || 0) * 6)
+  })
+
   await writeFile(SCREENSHOTS.slidevGenerated, await page.screenshot()).catch(() => {})
 })
 
@@ -219,6 +237,8 @@ test('Flow B: Slidev 网页演示 — iframe or markdown preview shown', async (
   await expect(previewFrame.locator('body')).toContainText(/AI Office 技术分享|目录/, { timeout: 15_000 })
   await expect(previewFrame.locator('body')).not.toContainText('NO_WORKSPACE')
   await expect(previewFrame.locator('body')).not.toContainText('"success": false')
+  await expect(previewFrame.locator('[data-slidev-visual], .slidev-visual').first()).toBeVisible({ timeout: 15_000 })
+  expect(await previewFrame.locator('[data-slidev-visual], .slidev-visual').count()).toBeGreaterThanOrEqual(5)
 
   const [popup] = await Promise.all([
     page.waitForEvent('popup', { timeout: 15_000 }),
@@ -237,7 +257,7 @@ test('Flow B: Slidev 网页演示 — edit slide 3', async ({ page }) => {
     await thumbnails.nth(2).evaluate((node: HTMLElement) => node.click())
     await expect(page.getByText(/当前正在修改：第 3 页|本次只会修改第 3 页/).first()).toBeVisible({ timeout: 5000 })
     const editInput = page.locator('textarea[placeholder*="修改当前页"]').last()
-    await editInput.fill('把当前页改成时间线')
+    await editInput.fill('给这一页加一个视觉图，改成图文排版。')
     const refreshPreviewPromise = page.waitForResponse((response) =>
       response.url().includes('/api/ppt/decks/')
       && response.url().includes('/slidev-preview')
@@ -245,13 +265,14 @@ test('Flow B: Slidev 网页演示 — edit slide 3', async ({ page }) => {
       { timeout: 30_000 },
     )
     await page.locator('button').filter({ hasText: '发送' }).last().click()
-    await expect(page.getByText(/已修改 Slidev 第 3 页|只会修改第 3 页|时间线/).first()).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByText(/已修改 Slidev 第 3 页|只会修改第 3 页/).first()).toBeVisible({ timeout: 30_000 })
     const refreshPreview = await refreshPreviewPromise
     expect(refreshPreview.headers()['content-type'] || '').toContain('text/html')
     const previewFrame = page.frameLocator('iframe[title*="Slidev"]')
-    await expect(previewFrame.locator('body')).toContainText(/阶段 1|时间线|背景介绍/, { timeout: 15_000 })
+    await expect(previewFrame.locator('body')).toContainText(/管理层关注点|AI Office 技术分享|核心内容/, { timeout: 15_000 })
     await expect(previewFrame.locator('body')).not.toContainText('NO_WORKSPACE')
     await expect(previewFrame.locator('body')).not.toContainText('"success": false')
+    await expect(previewFrame.locator('[data-slidev-visual], .slidev-visual').nth(2)).toBeVisible({ timeout: 15_000 })
   })
 
   await writeFile(SCREENSHOTS.slidevPageEdit, await page.screenshot()).catch(() => {})

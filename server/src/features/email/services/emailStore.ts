@@ -1,6 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { encryptPassword, decryptPassword } from '../../../lib/passwordCrypto'
+import { stringifyJsonSafe } from '../../../lib/jsonSafe'
 
 const EMAIL_ROOT = path.resolve(__dirname, '../../../data/email')
 
@@ -13,6 +14,11 @@ export interface StoredEmailAccount {
   displayName: string
   provider?: string
   label?: string
+  ownerUserId?: string
+  ownerUsername?: string
+  status?: string
+  verified?: boolean
+  lastVerifiedAt?: string
   imapHost: string
   imapPort: number
   imapSecure: boolean
@@ -41,7 +47,7 @@ export function saveEmailAccount(userId: string, account: StoredEmailAccount): v
     password: encryptPassword(account.password),
   }
   fs.mkdirSync(EMAIL_ROOT, { recursive: true })
-  fs.writeFileSync(accountPath(userId), JSON.stringify(toSave, null, 2), 'utf-8')
+  fs.writeFileSync(accountPath(userId), stringifyJsonSafe(toSave, 2), 'utf-8')
 }
 
 export function getEmailAccount(userId: string): StoredEmailAccount | null {
@@ -66,6 +72,11 @@ export function maskAccount(account: StoredEmailAccount | null) {
     displayName: account.displayName,
     provider: account.provider,
     label: account.label,
+    ownerUserId: account.ownerUserId,
+    ownerUsername: account.ownerUsername,
+    status: account.status,
+    verified: account.verified,
+    lastVerifiedAt: account.lastVerifiedAt,
     imapHost: account.imapHost,
     imapPort: account.imapPort,
     imapSecure: account.imapSecure,

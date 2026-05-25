@@ -343,7 +343,7 @@ export function assertWorkspaceAccess(
   }
 
   if (parsed.ownerUserId !== userId) {
-    throw new WorkspaceAccessError('FORBIDDEN_WORKSPACE', '无权访问该工作区', 403, bootstrap)
+    throw new WorkspaceAccessError('FORBIDDEN_WORKSPACE', '当前账号没有工作区权限，请联系管理员或重新初始化工作区。', 403, bootstrap)
   }
 
   const entry = listValidWorkspaces(userId).find((item) => item.id === parsed.workspaceId)
@@ -358,7 +358,7 @@ export function assertWorkspaceAccess(
   }
 
   if (ROLE_WEIGHT[membership.role] < ROLE_WEIGHT[requiredRole]) {
-    throw new WorkspaceAccessError('INSUFFICIENT_ROLE', '当前用户角色不足，无法访问该工作区', 403, bootstrap)
+    throw new WorkspaceAccessError('INSUFFICIENT_ROLE', '当前账号没有工作区权限，请联系管理员或重新初始化工作区。', 403, bootstrap)
   }
 
   return {

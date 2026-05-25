@@ -374,7 +374,7 @@ function defaultEndTime(startTime: string, minutes: number): string | undefined 
   return end.toISOString()
 }
 
-function isIsoLike(value: string | undefined): boolean {
+function isIsoLike(value: string | undefined): value is string {
   if (!value) return false
   return Number.isFinite(new Date(value).getTime())
 }

@@ -19,6 +19,8 @@ export interface MailAttachment {
   tempPath: string
 }
 
+export type EmailBodyFormat = 'text' | 'html' | 'mixed'
+
 /** A file the user has chosen to attach to an outgoing reply */
 export interface OutgoingAttachment {
   filename: string
@@ -36,6 +38,10 @@ export interface MailItem {
   toName: string
   subject: string
   body: string
+  bodyText?: string
+  bodyPreview?: string
+  bodyFormat?: EmailBodyFormat
+  bodyHtml?: string
   /** Fully-resolved HTML version of the email body (inline CID images as data URIs) */
   htmlBody?: string
   timestamp: string
@@ -247,6 +253,7 @@ export interface BulkEmailDraft {
 /* ------------------------------------------------------------------ */
 
 export interface EmailAccountConfig {
+  mailboxId?: string
   user: string
   password: string
   displayName: string
@@ -268,6 +275,10 @@ export interface EmailAccountConfig {
   ownerUserId?: string
   /** AccountCenter username — used for debug display */
   ownerUsername?: string
+  /** Connected mailbox state from AccountCenter / server mailbox binder */
+  status?: string
+  verified?: boolean
+  lastVerifiedAt?: string
   /** SMTP STARTTLS */
   smtpStartTls?: boolean
   /** Webmail URL */

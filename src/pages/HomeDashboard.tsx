@@ -209,7 +209,7 @@ const HOME_CARD_DEFS: HomeCardDef[] = [
     icon: <BookOpen size={30} color="#1a7a4a" />,
     title: '学习',
     desc: '作业解析、课程学习与科学研究',
-    chips: ['作业解析', 'AI课堂', '课程资料', '科学研究'],
+    chips: ['作业解析', 'AI课堂', '论文写作', '数据图表'],
   },
   {
     featureKey: 'life',
@@ -219,8 +219,8 @@ const HOME_CARD_DEFS: HomeCardDef[] = [
     iconBg: '#fce5cf',
     icon: <Heart size={30} color="#c05c15" />,
     title: '生活',
-    desc: '兴趣创作、个人记录与轻量社区',
-    chips: ['AI论坛', '轻量写作', '图片创作', '生活记录'],
+    desc: 'AI 论坛、轻量写作、图片创作与科学资讯',
+    chips: ['AI论坛', '轻量写作', '图片创作', '科学资讯'],
   },
 ]
 
@@ -232,8 +232,8 @@ export default function HomeDashboard({ onNavigate }: HomeDashboardProps) {
   return (
     <Page>
       <Header>
-        <Title>AI-Office 个人工作台</Title>
-        <Subtitle>围绕行政、科研、学习、生活四个场景组织你的 AI 能力</Subtitle>
+        <Title>CUHK-Shenzhen（AI）</Title>
+        <Subtitle>CUHK-Shenzhen (AI) 是一个覆盖香港中文大学（深圳）行政、科研及教学等主要业务的 AI 平台。</Subtitle>
       </Header>
 
       <ScenarioGrid>

@@ -8,11 +8,14 @@ export function getWebApiBase(): string {
 
   if (typeof window !== 'undefined' && window.location) {
     if (window.location.port === '3001') {
+      // Running directly on the backend port — use absolute origin
       return trimTrailingSlash(window.location.origin)
     }
-    const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:'
-    const hostname = window.location.hostname || '127.0.0.1'
-    return `${protocol}//${hostname}:3001`
+    // Running on any other port (e.g. Vite dev server :5173, or production nginx).
+    // Return empty string so all /api/* requests are sent as relative URLs.
+    // The Vite proxy (or reverse proxy) then forwards them to the backend.
+    // This avoids direct cross-origin requests to port 3001 that may be blocked.
+    return ''
   }
 
   return 'http://127.0.0.1:3001'

@@ -106,6 +106,7 @@ export interface EmailAccountInput {
   ownerUserId?: string
   ownerUsername?: string
   status?: string
+  verified?: boolean
   lastVerifiedAt?: string
   imapTlsMode?: 'ssl' | 'starttls' | 'none'
   smtpTlsMode?: 'ssl' | 'starttls' | 'none'
@@ -130,6 +131,7 @@ export interface EmailAccountState {
   ownerUserId?: string
   ownerUsername?: string
   status?: string
+  verified?: boolean
   lastVerifiedAt?: string
   imapHost?: string
   imapPort?: number
@@ -149,11 +151,26 @@ export interface EmailMessageSummary {
   timestamp: string
   unread: boolean
   preview: string
+  bodyPreview?: string
+  bodyFormat?: 'text' | 'html' | 'mixed'
+  attachmentCount?: number
 }
 
 export interface EmailMessageDetail extends EmailMessageSummary {
   body: string
+  bodyText: string
+  bodyHtml?: string | null
+  htmlBody?: string | null
+  bodyPreview: string
+  bodyFormat: 'text' | 'html' | 'mixed'
+  bodySource?: 'text' | 'html' | 'mixed' | 'empty'
   to: string
+  attachments?: Array<{
+    id: string
+    filename: string
+    contentType: string
+    size: number
+  }>
 }
 
 export interface EmailSendInput {
@@ -273,9 +290,10 @@ export interface PlatformApi {
     getAccount(): Promise<EmailAccountState>
     saveAccount(config: EmailAccountInput): Promise<EmailAccountState>
     testConnection(): Promise<{ ok: boolean; message: string }>
-    listMessages(folder?: string): Promise<EmailMessageSummary[]>
+    listMessages(folder?: string, options?: { force?: boolean; limit?: number }): Promise<EmailMessageSummary[]>
+    discoverFolders(force?: boolean): Promise<{ ok: boolean; folders: unknown[] }>
     getMessage(id: string): Promise<EmailMessageDetail>
-    sendMessage(input: EmailSendInput): Promise<{ ok: boolean; message?: string }>
+    sendMessage(input: EmailSendInput): Promise<{ ok: boolean; message?: string; appendWarning?: string }>
   }
 
   settings: {

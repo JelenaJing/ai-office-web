@@ -7,6 +7,7 @@ import type {
   EmailAccountConfig,
   MailItem,
 } from '../../../types/email'
+import type { EmailAnalysisTaskSnapshot } from '../../../types/mailTriage'
 import type {
   EmailAccountInput,
   EmailAccountState,
@@ -31,16 +32,26 @@ function readAuthToken(): string | null {
 function mapWebAccountToConfig(state: EmailAccountState): EmailAccountConfig | null {
   if (!state.configured || !state.user) return null
   return {
+    mailboxId: state.mailboxId,
     user: state.user,
-    email: state.user,
+    email: state.email || state.user,
     password: '',
     displayName: state.displayName || state.user,
+    providerType: state.provider,
+    label: state.label,
+    ownerUserId: state.ownerUserId,
+    ownerUsername: state.ownerUsername,
+    status: state.status,
+    verified: state.verified,
+    lastVerifiedAt: state.lastVerifiedAt,
     imapHost: state.imapHost || 'imap.example.com',
-    imapPort: 993,
-    imapSecure: true,
+    imapPort: state.imapPort || 993,
+    imapSecure: state.imapSecure !== false,
     smtpHost: state.smtpHost || 'smtp.example.com',
-    smtpPort: 465,
-    smtpSecure: true,
+    smtpPort: state.smtpPort || 465,
+    smtpSecure: state.smtpSecure !== false,
+    allowSelfSignedCerts: state.allowSelfSignedCerts,
+    smtpStartTls: state.smtpTlsMode === 'starttls',
   }
 }
 
@@ -49,16 +60,29 @@ function configToInput(config: EmailAccountConfig): EmailAccountInput {
     user: config.user || config.email || '',
     password: config.password,
     displayName: config.displayName,
+    email: config.email,
+    username: config.username,
+    provider: config.providerType,
+    label: config.label,
+    ownerUserId: config.ownerUserId,
+    ownerUsername: config.ownerUsername,
+    status: config.status,
+    verified: config.verified,
+    lastVerifiedAt: config.lastVerifiedAt,
     imapHost: config.imapHost,
     imapPort: config.imapPort,
     imapSecure: config.imapSecure,
+    imapTlsMode: config.imapSecure ? 'ssl' : 'starttls',
     smtpHost: config.smtpHost,
     smtpPort: config.smtpPort,
     smtpSecure: config.smtpSecure,
+    smtpTlsMode: config.smtpStartTls ? 'starttls' : (config.smtpSecure ? 'ssl' : 'none'),
+    allowSelfSignedCerts: config.allowSelfSignedCerts,
   }
 }
 
-function summaryToMailItem(summary: EmailMessageSummary): MailItem {
+function summaryToMailItem(summary: EmailMessageSummary, folder: 'inbox' | 'sent' | 'trash' = 'inbox'): MailItem {
+  const bodyPreview = summary.bodyPreview || summary.preview || ''
   return {
     id: summary.id,
     from: summary.from,
@@ -66,15 +90,20 @@ function summaryToMailItem(summary: EmailMessageSummary): MailItem {
     to: '',
     toName: '',
     subject: summary.subject,
-    body: summary.preview || '',
+    body: bodyPreview,
+    bodyText: bodyPreview,
+    bodyPreview,
+    bodyFormat: summary.bodyFormat || 'text',
     timestamp: summary.timestamp,
     unread: summary.unread,
     replied: false,
-    folder: 'inbox',
+    folder,
   }
 }
 
 function detailToMailItem(detail: EmailMessageDetail): MailItem {
+  const bodyHtml = detail.bodyHtml || detail.htmlBody || undefined
+  const bodyText = detail.bodyText || detail.body || ''
   return {
     id: detail.id,
     from: detail.from,
@@ -82,7 +111,12 @@ function detailToMailItem(detail: EmailMessageDetail): MailItem {
     to: detail.to,
     toName: detail.to,
     subject: detail.subject,
-    body: detail.body,
+    body: bodyText,
+    bodyText,
+    bodyPreview: detail.bodyPreview || bodyText,
+    bodyFormat: detail.bodyFormat || (bodyHtml ? 'html' : 'text'),
+    bodyHtml,
+    htmlBody: bodyHtml,
     timestamp: detail.timestamp,
     unread: detail.unread,
     replied: false,
@@ -129,10 +163,10 @@ export async function emailRuntimeTestConnection(
   return { ok: true, message: '连接成功' }
 }
 
-export async function emailRuntimeFetchInbox(): Promise<MailItem[]> {
+export async function emailRuntimeFetchInbox(options?: { force?: boolean; limit?: number }): Promise<MailItem[]> {
   if (isWebShim()) {
-    const list = await platformApi.email.listMessages('inbox')
-    return list.map(summaryToMailItem)
+    const list = await platformApi.email.listMessages('inbox', options)
+    return list.map((s) => summaryToMailItem(s, 'inbox'))
   }
   const response = await getElectronApi().emailFetchInbox()
   if (Array.isArray(response)) return response as MailItem[]
@@ -148,8 +182,11 @@ export async function emailRuntimeFetchMessage(id: string): Promise<MailItem> {
   throw new Error('Electron 请使用收件箱列表中的完整邮件对象')
 }
 
-export async function emailRuntimeFetchSent(): Promise<MailItem[]> {
-  if (isWebShim()) return []
+export async function emailRuntimeFetchSent(options?: { force?: boolean; limit?: number }): Promise<MailItem[]> {
+  if (isWebShim()) {
+    const list = await platformApi.email.listMessages('sent', options)
+    return list.map((s) => summaryToMailItem(s, 'sent'))
+  }
   const api = getElectronApi()
   if (!api?.emailFetchSent) return []
   const response = await api.emailFetchSent()
@@ -157,8 +194,15 @@ export async function emailRuntimeFetchSent(): Promise<MailItem[]> {
   return response?.ok ? (response.mails as MailItem[]) : []
 }
 
-export async function emailRuntimeFetchTrash(): Promise<MailItem[]> {
-  if (isWebShim()) return []
+export async function emailRuntimeFetchTrash(options?: { force?: boolean; limit?: number }): Promise<MailItem[]> {
+  if (isWebShim()) {
+    try {
+      const list = await platformApi.email.listMessages('trash', options)
+      return list.map((s) => summaryToMailItem(s, 'trash'))
+    } catch {
+      return []
+    }
+  }
   const api = getElectronApi()
   if (!api?.emailFetchTrash) return []
   const response = await api.emailFetchTrash()
@@ -196,7 +240,11 @@ export function emailRuntimeSupportsAttachments(): boolean {
   return !isWebShim()
 }
 
-export async function emailRuntimeStartTriage(limit = 20): Promise<{ taskId: string }> {
+export async function emailRuntimeStartTriage(options?: {
+  limit?: number
+  messageIds?: string[]
+  force?: boolean
+}): Promise<{ taskId: string }> {
   if (!isWebShim()) {
     throw new Error('Electron 邮件整理继续使用本地 MailTriageContext。')
   }
@@ -206,7 +254,11 @@ export async function emailRuntimeStartTriage(limit = 20): Promise<{ taskId: str
   const response = await fetch('/api/email/triage/start', {
     method: 'POST',
     headers,
-    body: JSON.stringify({ limit }),
+    body: JSON.stringify({
+      limit: options?.limit ?? 30,
+      messageIds: options?.messageIds,
+      force: options?.force,
+    }),
   })
   const body = await response.json().catch(() => ({ error: `HTTP ${response.status}` })) as { taskId?: string; error?: string }
   if (!response.ok || !body.taskId) {
@@ -215,12 +267,12 @@ export async function emailRuntimeStartTriage(limit = 20): Promise<{ taskId: str
   return { taskId: body.taskId }
 }
 
-export async function emailRuntimeGetTriageTask(taskId: string): Promise<Record<string, unknown>> {
+export async function emailRuntimeGetTriageTask(taskId: string): Promise<EmailAnalysisTaskSnapshot> {
   const token = readAuthToken()
   const headers: Record<string, string> = {}
   if (token) headers.Authorization = `Bearer ${token}`
   const response = await fetch(`/api/email/triage/tasks/${taskId}`, { headers })
-  const body = await response.json().catch(() => ({ error: `HTTP ${response.status}` })) as Record<string, unknown>
+  const body = await response.json().catch(() => ({ error: `HTTP ${response.status}` })) as EmailAnalysisTaskSnapshot & { error?: string }
   if (!response.ok) {
     throw new Error(String(body.error || `邮件整理任务查询失败 (${response.status})`))
   }

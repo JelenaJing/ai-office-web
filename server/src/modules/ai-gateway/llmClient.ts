@@ -20,6 +20,7 @@ export interface LlmMessage {
 export interface LlmInvokeOptions {
   temperature?: number
   maxTokens?: number
+  timeoutMs?: number
 }
 
 export type ServerLlmProvider = 'openai' | 'qwen' | 'deepseek' | 'cuhk' | 'custom'
@@ -206,7 +207,7 @@ export async function invokeLlmText(
 
   const url = resolveChatCompletionsUrl(baseUrl)
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS)
+  const timer = setTimeout(() => controller.abort(), options?.timeoutMs ?? DEFAULT_TIMEOUT_MS)
 
   try {
     const res = await fetch(url, {
@@ -278,7 +279,7 @@ export async function invokeLlmJson<T>(
 
   const url = resolveChatCompletionsUrl(baseUrl)
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS)
+  const timer = setTimeout(() => controller.abort(), options?.timeoutMs ?? DEFAULT_TIMEOUT_MS)
 
   try {
     const res = await fetch(url, {

@@ -1,7 +1,6 @@
 import styled from 'styled-components'
 import {
-  Calculator, GraduationCap, FolderOpen, Brain,
-  ScrollText, BookMarked, BarChart2,
+  Calculator, GraduationCap, ScrollText, BarChart2,
 } from 'lucide-react'
 import { useWorkspaceMode } from '../contexts/WorkspaceModeContext'
 import { SceneFeatureRow } from '../components/scene/SceneFeatureRow'
@@ -57,7 +56,7 @@ export default function StudyWorkspace({ onGoToWorkspace }: StudyWorkspaceProps)
 
   const go = (fn: () => void) => { fn(); onGoToWorkspace() }
 
-  const block = () => { /* SceneFeatureRow shows comingSoon; no navigation */ }
+  const block = () => {}
 
   const enterFeature = (feature: string, method: string, fn: () => void) => {
     logWebWorkbenchEntry(feature, { method, scene: 'study' })
@@ -111,27 +110,6 @@ export default function StudyWorkspace({ onGoToWorkspace }: StudyWorkspaceProps)
           status={sceneStatusForWebFeature('image.generate')}
           actionLabel="生成图表"
           onClick={() => runWebFeatureAction('image.generate', () => enterFeature('数据图表', 'enterImageGenerationMode', enterImageGenerationMode), block)}
-        />
-        <SceneFeatureRow
-          icon={<FolderOpen size={24} />}
-          title="课程资料"
-          description="管理和引用课程资料、讲义和参考文件"
-          accent="green"
-          status="comingSoon"
-        />
-        <SceneFeatureRow
-          icon={<Brain size={24} />}
-          title="知识整理"
-          description="整理笔记、资料和知识点，构建个人知识库"
-          accent="green"
-          status="comingSoon"
-        />
-        <SceneFeatureRow
-          icon={<BookMarked size={24} />}
-          title="文献资料"
-          description="管理文献、论文和阅读材料，支持 PDF 解析"
-          accent="blue"
-          status="comingSoon"
         />
       </FeatureList>
     </Page>

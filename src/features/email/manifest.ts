@@ -5,6 +5,7 @@
  * This file must not import from email/components or email/services.
  */
 
+import type { ComponentType } from 'react'
 import type { FeatureManifest } from '../../core/contracts/feature'
 
 export const emailManifest: FeatureManifest = {
@@ -19,7 +20,7 @@ export const emailManifest: FeatureManifest = {
   },
   route: {
     section: 'work',
-    component: () => import('../../pages/WorkWorkspace').then(m => ({ default: m.default })),
+    component: () => import('../../pages/WorkWorkspace').then((m) => ({ default: m.default as ComponentType })),
   },
   bridges: [],
 }

@@ -1,6 +1,16 @@
 import type { Artifact } from '../../artifacts/ArtifactStore'
 import type { GeneratedSlidePlan, SlidePlanItem } from './services/simplePptx'
 
+export interface WebDeckSlideVisual {
+  type: 'svg' | 'image' | 'diagram' | 'chart' | 'cards' | 'placeholder'
+  title?: string
+  description?: string
+  imageUrl?: string
+  imagePrompt?: string
+  svg?: string
+  alt?: string
+}
+
 export interface WebDeckSlide {
   id: string
   index: number
@@ -15,6 +25,7 @@ export interface WebDeckSlide {
   layout?: string
   previewImageUrl?: string
   previewHtmlUrl?: string
+  visual?: WebDeckSlideVisual
   table?: {
     headers: string[]
     rows: string[][]
@@ -112,6 +123,9 @@ export interface WebDeckRuntimeMeta {
   artifactId: string | null
   exportUrl: string | null
   previewUrl?: string | null
+  slidevAppUrl?: string | null
+  slidevPreviewAccessToken?: string | null
+  slidevPreviewMode?: 'official' | 'fallback'
   htmlArtifactId?: string | null
   updatedAt: string
 }

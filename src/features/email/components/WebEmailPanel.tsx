@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { platformApi } from '../../../platform'
 import type {
   EmailAccountInput,
@@ -10,6 +10,7 @@ import {
   MvpBtn, MvpCard, MvpError, MvpHint, MvpInput, MvpLabel, MvpPage, MvpTextArea, MvpTitle,
 } from '../../../components/web/WebMvpLayout'
 import styled from 'styled-components'
+import { sanitizeHtmlForDisplay } from '../utils/emailHtmlDisplay'
 
 const Split = styled.div`
   display: grid;
@@ -107,6 +108,11 @@ export default function WebEmailPanel() {
     })
   }, [selectedId])
 
+  const detailHtml = useMemo(
+    () => (detail?.bodyHtml || detail?.htmlBody ? sanitizeHtmlForDisplay(detail.bodyHtml || detail.htmlBody || '').html : ''),
+    [detail],
+  )
+
   const saveAccount = async () => {
     setError(null)
     try {
@@ -197,7 +203,16 @@ export default function WebEmailPanel() {
             <>
               <MvpTitle style={{ fontSize: 15 }}>{detail.subject}</MvpTitle>
               <MvpHint>发件人：{detail.from} · {detail.timestamp}</MvpHint>
-              <pre style={{ whiteSpace: 'pre-wrap', fontSize: 13 }}>{detail.body}</pre>
+              {detail.bodyHtml || detail.htmlBody ? (
+                <iframe
+                  title="邮件正文"
+                  srcDoc={detailHtml}
+                  sandbox="allow-same-origin"
+                  style={{ width: '100%', minHeight: 320, border: '1px solid #e2e8f0', borderRadius: 10, background: '#fff' }}
+                />
+              ) : (
+                <pre style={{ whiteSpace: 'pre-wrap', fontSize: 13 }}>{detail.bodyText || detail.body}</pre>
+              )}
             </>
           ) : (
             <MvpHint>选择一封邮件查看详情</MvpHint>

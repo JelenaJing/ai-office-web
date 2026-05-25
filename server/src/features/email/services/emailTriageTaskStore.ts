@@ -1,45 +1,85 @@
 import { randomUUID } from 'crypto'
 
-export interface EmailTriageResult {
+export type EmailAnalysisTaskStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
+export type EmailAnalysisJobStatus = 'pending' | 'running' | 'done' | 'failed' | 'skipped'
+export type EmailAnalysisFailureStage =
+  | 'fetch_body'
+  | 'normalize'
+  | 'llm_request'
+  | 'llm_response'
+  | 'json_parse'
+  | 'save_result'
+export type EmailAnalysisErrorCode =
+  | 'BODY_INCOMPLETE'
+  | 'FETCH_BODY_FAILED'
+  | 'BODY_EMPTY'
+  | 'HTML_CLEAN_FAILED'
+  | 'BODY_TOO_LONG'
+  | 'LLM_TIMEOUT'
+  | 'MODEL_UNAVAILABLE'
+  | 'LLM_REQUEST_FAILED'
+  | 'LLM_NON_JSON'
+  | 'JSON_PARSE_FAILED'
+  | 'SAVE_FAILED'
+  | 'ALREADY_ANALYZED'
+  | 'ATTACHMENT_ONLY'
+  | 'SYSTEM_DELIVERY_NOTICE'
+
+export interface EmailAnalysisReasonCount {
+  key: string
+  label: string
+  count: number
+}
+
+export interface EmailAnalysisTaskSummary {
+  total: number
+  pending: number
+  running: number
+  done: number
+  failed: number
+  skipped: number
+  cached: number
+  failureReasons: EmailAnalysisReasonCount[]
+}
+
+export interface EmailAnalysisJobRecord {
+  jobId: string
+  accountId: string
+  folder: string
   messageId: string
-  subject: string
-  from: string
-  priority: 'low' | 'normal' | 'high'
-  urgency: 'low' | 'normal' | 'urgent'
-  category: 'reply_required' | 'action_required' | 'read_only' | 'risk' | 'unknown'
-  summary: string
-  needsReply: boolean
-  riskLevel: 'none' | 'low' | 'medium' | 'high'
-  tasks: string[]
-  replyDraft?: string
-  draftArtifactId?: string
-  salutation?: string
-  attachmentArtifacts: Array<{
-    attachmentId: string
-    filename: string
-    artifactId?: string
-    status: 'saved' | 'failed'
-    error?: string
-  }>
-  relationships: Array<{
-    emailId: string
-    artifactId: string
-    relation: 'email_draft' | 'attachment'
-    filename?: string
-  }>
-  status: 'success' | 'skipped' | 'failed'
-  partialMissing: string[]
+  messageUid: string
+  status: EmailAnalysisJobStatus
+  subject?: string
+  subjectHash?: string
+  cacheKey?: string
+  cacheHit?: boolean
+  bodyHash?: string
+  bodyLength?: number
+  truncated?: boolean
+  retryCount: number
+  stage?: EmailAnalysisFailureStage
+  errorCode?: EmailAnalysisErrorCode
+  error?: string
+  rawOutputPreview?: string
+  durationMs?: number
+  startedAt?: string
+  finishedAt?: string
+  result?: Record<string, unknown>
+  createdAt: string
+  updatedAt: string
 }
 
 export interface EmailTriageTaskRecord {
   taskId: string
-  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
+  status: EmailAnalysisTaskStatus
   progress: number
   message: string
-  results: EmailTriageResult[]
-  cacheKey?: string
+  jobs: EmailAnalysisJobRecord[]
+  summary: EmailAnalysisTaskSummary
   unreadOnly: boolean
   sourceMessageCount: number
+  promptVersion?: string
+  modelUnavailable: boolean
   error?: string
   cancelRequested: boolean
   createdAt: number
@@ -47,14 +87,27 @@ export interface EmailTriageTaskRecord {
 }
 
 const tasks = new Map<string, EmailTriageTaskRecord>()
-
 const TASK_TTL_MS = 60 * 60 * 1000
+
 setInterval(() => {
   const cutoff = Date.now() - TASK_TTL_MS
   for (const [taskId, task] of tasks.entries()) {
     if (task.createdAt < cutoff) tasks.delete(taskId)
   }
 }, 5 * 60 * 1000).unref()
+
+export function emptyEmailAnalysisSummary(): EmailAnalysisTaskSummary {
+  return {
+    total: 0,
+    pending: 0,
+    running: 0,
+    done: 0,
+    failed: 0,
+    skipped: 0,
+    cached: 0,
+    failureReasons: [],
+  }
+}
 
 export function createEmailTriageTask(): EmailTriageTaskRecord {
   const now = Date.now()
@@ -63,9 +116,11 @@ export function createEmailTriageTask(): EmailTriageTaskRecord {
     status: 'queued',
     progress: 0,
     message: '任务已排队',
-    results: [],
+    jobs: [],
+    summary: emptyEmailAnalysisSummary(),
     unreadOnly: true,
     sourceMessageCount: 0,
+    modelUnavailable: false,
     cancelRequested: false,
     createdAt: now,
     updatedAt: now,

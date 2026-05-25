@@ -33,7 +33,11 @@ import {
   ACCOUNT_CENTER_UNREACHABLE_MESSAGE,
   buildAccountCenterUrl,
   getAccountCenterBaseUrl,
+  logAccountCenterIssue,
 } from './lib/accountCenter'
+import { requireAccountIdentity } from './lib/authUser'
+import { bootstrapWorkspaceForUser } from './lib/workspaceAccess'
+import { getEmailAccount, maskAccount } from './features/email/services/emailStore'
 
 const app = express()
 const PORT = Number(process.env.PORT ?? 3001)
@@ -109,6 +113,24 @@ app.use('/api/settings', settingsRouter)
 app.use('/api/aios', aiosRouter)
 app.use('/api/integrations', handoffRateLimit, integrationsRouter)
 
+app.get('/api/me/context', async (req, res) => {
+  const user = await requireAccountIdentity(req, res)
+  if (!user) return
+  const context = bootstrapWorkspaceForUser(user.id)
+  const emailAccount = getEmailAccount(user.id)
+  const connectedMailbox = emailAccount?.verified ? maskAccount(emailAccount) : null
+  res.json({
+    userId: context.currentUserId,
+    username: user.username,
+    displayName: user.displayName ?? user.username,
+    currentTenantId: context.currentTenantId,
+    currentWorkspaceId: context.currentWorkspaceId,
+    currentWorkspacePath: context.currentWorkspacePath,
+    currentWorkspaceRole: context.role,
+    connectedMailbox,
+  })
+})
+
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() })
 })
@@ -138,6 +160,16 @@ app.use('/api', async (req, res) => {
       signal: AbortSignal.timeout(15000),
     })
 
+    if (upstream.status >= 500) {
+      logAccountCenterIssue({
+        scope: 'ac-proxy',
+        method: req.method,
+        path: req.originalUrl,
+        baseUrl: AC_URL,
+        status: upstream.status,
+      })
+    }
+
     const ct = upstream.headers.get('content-type') ?? ''
     res.status(upstream.status)
     if (ct.includes('application/json')) {
@@ -146,8 +178,13 @@ app.use('/api', async (req, res) => {
       res.send(await upstream.text())
     }
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    console.error(`[ac-proxy] ${req.method} ${req.originalUrl} →`, msg)
+    logAccountCenterIssue({
+      scope: 'ac-proxy',
+      method: req.method,
+      path: req.originalUrl,
+      baseUrl: AC_URL,
+      error: err,
+    })
     res.status(502).json({
       code: ACCOUNT_CENTER_UNREACHABLE_CODE,
       message: ACCOUNT_CENTER_UNREACHABLE_MESSAGE,

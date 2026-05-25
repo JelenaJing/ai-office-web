@@ -1,0 +1,12 @@
+{
+  "name": "aioffice-slidev-runtime",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "slidev build slides.md"
+  },
+  "devDependencies": {
+    "@slidev/cli": "0.49.29",
+    "@slidev/theme-default": "0.25.0"
+  }
+}

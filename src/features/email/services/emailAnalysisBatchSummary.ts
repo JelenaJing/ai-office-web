@@ -140,7 +140,7 @@ function groupResults(
 }
 
 function buildContentTopics(results: EmailAnalysisResult[]): EmailContentTopicSummary[] {
-  const analyzed = results.filter((item) => !item.error)
+  const analyzed = results.filter((item) => !item.error && item.status !== 'skipped' && item.status !== 'running' && item.status !== 'pending')
   if (analyzed.length === 0) return []
 
   let groups = groupResults(analyzed, (item) => item.category || 'unknown')
@@ -204,12 +204,12 @@ function buildSenderStats(results: EmailAnalysisResult[]): EmailAnalysisBatchSum
 }
 
 function buildCategoryStats(results: EmailAnalysisResult[]): EmailAnalysisBatchSummary['categoryStats'] {
-  return countBy(results.filter((item) => !item.error).map((item) => item.category || 'unknown'))
+  return countBy(results.filter((item) => !item.error && item.status !== 'skipped').map((item) => item.category || 'unknown'))
     .map(({ key, count }) => ({ category: key, count }))
 }
 
 function buildCalendarStats(results: EmailAnalysisResult[]): EmailAnalysisBatchSummary['calendarStats'] {
-  const analyzed = results.filter((item) => !item.error && item.timeIntent?.hasTimeRequirement)
+  const analyzed = results.filter((item) => !item.error && item.status !== 'skipped' && item.timeIntent?.hasTimeRequirement)
   return {
     meetingOrInterviewCount: analyzed.filter((item) => item.timeIntent?.type === 'meeting' || item.timeIntent?.type === 'interview' || item.timeIntent?.type === 'appointment').length,
     deadlineCount: analyzed.filter((item) => item.timeIntent?.type === 'deadline').length,
@@ -220,7 +220,7 @@ function buildCalendarStats(results: EmailAnalysisResult[]): EmailAnalysisBatchS
 }
 
 function buildCalendarItems(results: EmailAnalysisResult[]): EmailAnalysisBatchSummary['calendarItems'] {
-  const analyzed = results.filter((item) => !item.error && item.timeIntent?.hasTimeRequirement)
+  const analyzed = results.filter((item) => !item.error && item.status !== 'skipped' && item.timeIntent?.hasTimeRequirement)
   return {
     pending: analyzed
       .filter((item) => item.timeIntent?.needsUserConfirmation)
@@ -255,7 +255,7 @@ function buildCalendarItems(results: EmailAnalysisResult[]): EmailAnalysisBatchS
 
 function buildTopImportantEmails(results: EmailAnalysisResult[]): EmailAnalysisBatchSummary['topImportantEmails'] {
   return results
-    .filter((item) => !item.error && item.importance === 'important')
+    .filter((item) => !item.error && item.status !== 'skipped' && item.importance === 'important')
     .sort((a, b) =>
       ACTION_WEIGHT[b.actionType] - ACTION_WEIGHT[a.actionType] ||
       (a.receivedAt || '').localeCompare(b.receivedAt || ''),
@@ -289,6 +289,7 @@ function buildActionItems(results: EmailAnalysisResult[]): EmailAnalysisBatchSum
   return results
     .filter((item) => {
       if (item.error) return false
+      if (item.status === 'skipped') return false
       if (item.actionType === 'spam_or_noise' || item.actionType === 'no_action') return false
       return item.importance === 'important' || item.actionType !== 'notification'
     })
@@ -306,6 +307,37 @@ function buildActionItems(results: EmailAnalysisResult[]): EmailAnalysisBatchSum
       suggestedNextStep: suggestedNextStep(item),
       deadlineText: item.deadlineText,
       timeIntent: item.timeIntent,
+    }))
+}
+
+function buildFailureReasons(results: EmailAnalysisResult[]): EmailAnalysisBatchSummary['failureReasons'] {
+  const map = new Map<string, { key: string; label: string; count: number }>()
+  for (const item of results) {
+    if (!item.error) continue
+    const key = item.errorCode || item.stage || 'unknown'
+    const current = map.get(key) ?? {
+      key,
+      label: FAILURE_LABELS[key] || item.error || '分析失败',
+      count: 0,
+    }
+    current.count += 1
+    map.set(key, current)
+  }
+  return [...map.values()].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+}
+
+function buildFailedItems(results: EmailAnalysisResult[]): EmailAnalysisBatchSummary['failedItems'] {
+  return results
+    .filter((item) => Boolean(item.error))
+    .map((item) => ({
+      messageId: item.messageId,
+      subject: item.subject,
+      fromName: item.fromName,
+      fromEmail: item.fromEmail,
+      error: item.error || '分析失败',
+      stage: item.stage,
+      errorCode: item.errorCode,
+      retryCount: item.retryCount,
     }))
 }
 
@@ -353,7 +385,7 @@ function buildReportText(summary: Omit<EmailAnalysisBatchSummary, 'reportText' |
 
   const topicNames = summary.contentTopics.map((topic) => topic.topic).slice(0, 6).join('、')
   const failedText = summary.failedCount > 0
-    ? `其中 ${summary.failedCount} 封邮件分析失败，建议稍后重试。\n\n`
+    ? `其中 ${summary.failedCount} 封邮件分析失败，${summary.failureReasons.map((item) => `${item.label} ${item.count} 封`).join('，')}。\n\n`
     : ''
   const calendarLines = [
     `会议/面试安排：${summary.calendarStats.meetingOrInterviewCount} 封`,
@@ -364,7 +396,7 @@ function buildReportText(summary: Omit<EmailAnalysisBatchSummary, 'reportText' |
   ].map((line) => `- ${line}`)
 
   return [
-    `本次共分析 ${summary.totalEmails} 封未读邮件，其中重要邮件 ${summary.importantCount} 封，普通邮件 ${summary.normalCount} 封，低优先级邮件 ${summary.lowCount} 封。`,
+    `本次共处理 ${summary.totalEmails} 封邮件，其中完成 ${summary.doneCount} 封，跳过 ${summary.skippedCount} 封，失败 ${summary.failedCount} 封。`,
     '',
     failedText.trim(),
     '主要发件人：',
@@ -387,14 +419,20 @@ export function buildEmailAnalysisBatchSummary(
   batchId: string,
   results: EmailAnalysisResult[],
 ): EmailAnalysisBatchSummary {
-  const analyzedResults = results.filter((item) => !item.error)
+  const analyzedResults = results.filter((item) => !item.error && item.status !== 'skipped' && item.status !== 'running' && item.status !== 'pending')
+  const failureReasons = buildFailureReasons(results)
+  const failedItems = buildFailedItems(results)
   const contentTopics = buildContentTopics(results)
   const summaryWithoutText: Omit<EmailAnalysisBatchSummary, 'reportText' | 'contentOverviewText'> = {
     batchId,
     createdAt: new Date().toISOString(),
     totalEmails: results.length,
     analyzedCount: analyzedResults.length,
-    failedCount: results.length - analyzedResults.length,
+    doneCount: results.filter((item) => item.status === 'done' || (!item.status && !item.error)).length,
+    runningCount: results.filter((item) => item.status === 'running' || item.status === 'pending').length,
+    skippedCount: results.filter((item) => item.status === 'skipped').length,
+    cachedCount: results.filter((item) => item.status === 'skipped' && item.cacheHit).length,
+    failedCount: results.filter((item) => Boolean(item.error) || item.status === 'failed').length,
     importantCount: analyzedResults.filter((item) => item.importance === 'important').length,
     normalCount: analyzedResults.filter((item) => item.importance === 'normal').length,
     lowCount: analyzedResults.filter((item) => item.importance === 'low').length,
@@ -408,6 +446,8 @@ export function buildEmailAnalysisBatchSummary(
     contentTopics,
     topImportantEmails: buildTopImportantEmails(results),
     actionItems: buildActionItems(results),
+    failureReasons,
+    failedItems,
   }
 
   return {
@@ -415,4 +455,17 @@ export function buildEmailAnalysisBatchSummary(
     reportText: buildReportText(summaryWithoutText),
     contentOverviewText: buildContentOverviewText(results.length, contentTopics),
   }
+}
+const FAILURE_LABELS: Record<string, string> = {
+  BODY_INCOMPLETE: '正文获取失败',
+  FETCH_BODY_FAILED: '正文获取失败',
+  BODY_EMPTY: '正文为空',
+  HTML_CLEAN_FAILED: 'HTML 清洗失败',
+  BODY_TOO_LONG: '正文过长',
+  LLM_TIMEOUT: '模型超时',
+  MODEL_UNAVAILABLE: '模型服务不可用',
+  LLM_REQUEST_FAILED: '模型请求失败',
+  LLM_NON_JSON: '模型返回非 JSON',
+  JSON_PARSE_FAILED: 'JSON 解析失败',
+  SAVE_FAILED: '保存失败',
 }

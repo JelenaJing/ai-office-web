@@ -1,4 +1,5 @@
 import fs from 'fs'
+import path from 'path'
 import { createRequire } from 'module'
 import { Router } from 'express'
 import { requireAccountIdentity } from '../../lib/authUser'
@@ -16,7 +17,8 @@ import {
 } from './services/deckTaskStore'
 import { createDeckFromPrompt, exportDeckWithBuiltin, retemplateDeck } from './services/deckRuntime'
 import { editSlideWithMinimaxPptxGenerator, exportDeckWithMinimaxPptxGenerator, runMinimaxPptxGenerator } from './services/minimaxPptxGeneratorRunner'
-import { runSlidevDeckGenerator, editSlidevSlide, exportSlidevDeckArtifacts } from './services/slidevDeckRunner'
+import { runSlidevDeckGenerator, editSlidevSlide, exportSlidevDeckArtifacts, type SlidevDeckPartialSnapshot } from './services/slidevDeckRunner'
+import { serveOfficialSlidevAsset } from './services/slidevOfficialRunner'
 import { generateSlidevHtmlPreview } from './services/slidevHtmlPreview'
 import { compileDeckToSlidevMarkdown } from './services/slidevMarkdownCompiler'
 import type { WebDeckDocument, WebDeckSlide, WebDeckTaskResult, PptEngine, PptOutputMode } from './types'
@@ -38,6 +40,45 @@ function sendWorkspaceError(res: import('express').Response, error: unknown): vo
   }
   const message = error instanceof Error ? error.message : String(error)
   res.status(500).json({ success: false, error: message })
+}
+
+function buildSlidevPartialTaskResult(snapshot: SlidevDeckPartialSnapshot): WebDeckTaskResult {
+  return {
+    engine: 'slidev',
+    outputMode: 'web_deck',
+    deckId: snapshot.deckId,
+    deck: snapshot.deck,
+    slides: snapshot.deck.slides,
+    previewImages: snapshot.deck.slides.map((slide, index) => ({
+      slideId: slide.id,
+      index,
+      previewImageUrl: slide.previewImageUrl,
+      previewHtmlUrl: slide.previewHtmlUrl,
+    })),
+    artifact: {
+      id: `partial-${snapshot.deckId}`,
+      type: 'ppt-deck',
+      title: snapshot.deck.title,
+      status: 'partial',
+      exports: [],
+      createdAt: snapshot.deck.createdAt,
+      updatedAt: snapshot.deck.updatedAt,
+    } as unknown as WebDeckTaskResult['artifact'],
+    exportUrl: `/api/ppt/decks/${snapshot.deckId}/download`,
+    previewUrl: snapshot.previewUrl || `/api/ppt/decks/${snapshot.deckId}/slidev-preview`,
+    slidevMarkdown: snapshot.slidevMarkdown,
+    htmlArtifactId: snapshot.htmlArtifactId,
+    relationships: {
+      deckId: snapshot.deckId,
+      artifactId: `partial-${snapshot.deckId}`,
+      sourceRefs: snapshot.deck.sourceRefs,
+    },
+    diagnostics: {
+      chain: snapshot.deck.diagnostics.chain,
+      steps: [],
+      partialMissing: snapshot.deck.diagnostics.partialMissing,
+    },
+  }
 }
 
 function validateCompletedDeckTaskResult(result: WebDeckTaskResult | undefined): string | null {
@@ -242,6 +283,33 @@ router.post('/decks/start', async (req, res) => {
   console.info(`[ppt-runtime] usingMinimaxSkill=${activeEngine === 'minimax_pptx_generator'}`)
   updateDeckTask(task.taskId, { status: 'running', message: '正在启动 PPT DeckDocument 任务…', progress: 5 })
 
+  const applySlidevPartialSnapshot = (snapshot: SlidevDeckPartialSnapshot, message: string, progress: number) => {
+    saveDeck(snapshot.deck)
+    saveDeckRuntimeMeta({
+      deckId: snapshot.deckId,
+      userId: user.id,
+      workspacePath,
+      engine: 'slidev',
+      outputMode: 'web_deck',
+      skillId: 'web.ppt.slidev',
+      artifactId: null,
+      exportUrl: `/api/ppt/decks/${snapshot.deckId}/download`,
+      previewUrl: snapshot.previewUrl || `/api/ppt/decks/${snapshot.deckId}/slidev-preview`,
+      slidevAppUrl: snapshot.slidevAppUrl || null,
+      slidevPreviewAccessToken: snapshot.slidevPreviewAccessToken || null,
+      slidevPreviewMode: snapshot.slidevPreviewMode || 'fallback',
+      htmlArtifactId: snapshot.htmlArtifactId || null,
+      updatedAt: new Date().toISOString(),
+    })
+    updateDeckTask(task.taskId, {
+      deckId: snapshot.deckId,
+      status: 'running',
+      message,
+      progress,
+      result: buildSlidevPartialTaskResult(snapshot),
+    })
+  }
+
   const runBuiltinEngine = async (fallbackReason?: string) => {
     if (fallbackReason) {
       console.info('[ppt-runtime] fallback=builtin')
@@ -290,6 +358,14 @@ router.post('/decks/start', async (req, res) => {
           taskId: task.taskId,
           isCancelled: () => Boolean(getDeckTask(task.taskId)?.cancelRequested),
           onStep: (message, progress) => updateDeckTask(task.taskId, { status: 'running', message, progress }),
+          onPartial: (snapshot) => {
+            const current = getDeckTask(task.taskId)
+            applySlidevPartialSnapshot(
+              snapshot,
+              current?.message || '正在生成 Slidev 网页演示…',
+              current?.progress ?? 55,
+            )
+          },
         })
         return result as unknown as WebDeckTaskResult
       }
@@ -341,6 +417,14 @@ router.post('/decks/start', async (req, res) => {
             : undefined,
         isCancelled: () => Boolean(getDeckTask(task.taskId)?.cancelRequested),
         onStep: (message, progress) => updateDeckTask(task.taskId, { status: 'running', message, progress }),
+        onPartial: (snapshot) => {
+          const current = getDeckTask(task.taskId)
+          applySlidevPartialSnapshot(
+            snapshot,
+            current?.message || '正在生成 Slidev 网页演示…',
+            current?.progress ?? 55,
+          )
+        },
       })
       return result as unknown as WebDeckTaskResult
     }
@@ -410,7 +494,14 @@ router.post('/decks/start', async (req, res) => {
         message: engineLabel,
         result,
       })
-      const slidevResult = result as typeof result & { previewUrl?: string; htmlArtifactId?: string; outputMode?: PptOutputMode }
+      const slidevResult = result as typeof result & {
+        previewUrl?: string
+        slidevAppUrl?: string
+        slidevPreviewAccessToken?: string
+        slidevPreviewMode?: 'official' | 'fallback'
+        htmlArtifactId?: string
+        outputMode?: PptOutputMode
+      }
       saveDeckRuntimeMeta({
         deckId: result.deckId,
         userId: user.id,
@@ -421,6 +512,9 @@ router.post('/decks/start', async (req, res) => {
         artifactId: result.artifact.id,
         exportUrl: result.exportUrl,
         previewUrl: slidevResult.previewUrl || null,
+        slidevAppUrl: slidevResult.slidevAppUrl || null,
+        slidevPreviewAccessToken: slidevResult.slidevPreviewAccessToken || null,
+        slidevPreviewMode: slidevResult.slidevPreviewMode || 'fallback',
         htmlArtifactId: slidevResult.htmlArtifactId || null,
         updatedAt: new Date().toISOString(),
       })
@@ -501,6 +595,33 @@ router.get('/decks/:deckId', (req, res) => {
     return
   }
   res.json({ success: true, deck })
+})
+
+router.use('/decks/:deckId/slidev-access/:accessToken', (req, res) => {
+  const deckId = req.params.deckId
+  const accessToken = req.params.accessToken
+  const runtimeMeta = getDeckRuntimeMeta(deckId)
+  if (!runtimeMeta || runtimeMeta.engine !== 'slidev') {
+    res.status(404).json({ success: false, error: 'Slidev 预览不存在' })
+    return
+  }
+
+  const relativePath = req.path === '/' ? '' : req.path.replace(/^\//, '')
+  const served = serveOfficialSlidevAsset({
+    deckId,
+    accessToken,
+    runtimeToken: runtimeMeta.slidevPreviewAccessToken,
+    relativePath,
+  })
+  if (!served.ok) {
+    res.status(served.status).json({ success: false, error: served.error })
+    return
+  }
+
+  res.setHeader('Content-Type', served.contentType)
+  res.setHeader('X-Content-Type-Options', 'nosniff')
+  res.setHeader('Cache-Control', 'private, max-age=60')
+  res.sendFile(path.resolve(served.filePath))
 })
 
 router.get('/decks/:deckId/slidev-preview', async (req, res) => {

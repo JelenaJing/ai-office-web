@@ -1,14 +1,12 @@
 import React from 'react'
 import styled from 'styled-components'
-import PptTemplatePicker from './PptTemplatePicker'
-import type { PptTemplateOption } from '../services/pptTemplates'
 
 const Toolbar = styled.div`
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 14px 18px;
+  padding: 10px 16px;
   border-bottom: 1px solid #e2e8f0;
   background: rgba(255, 255, 255, 0.96);
 `
@@ -16,53 +14,44 @@ const Toolbar = styled.div`
 const Left = styled.div`
   min-width: 0;
   display: grid;
-  gap: 6px;
+  gap: 2px;
 `
 
 const Title = styled.div`
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 800;
   color: #15324b;
-`
-
-const Meta = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 `
 
 const StatusText = styled.div`
-  font-size: 12px;
-  line-height: 1.6;
-  color: #475569;
-`
-
-const MetaBadge = styled.span`
-  padding: 4px 10px;
-  border-radius: 999px;
-  border: 1px solid #dbe4ee;
-  background: #f8fbff;
   font-size: 11px;
-  font-weight: 700;
-  color: #30485f;
+  line-height: 1.5;
+  color: #64748b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 `
 
 const Actions = styled.div`
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
+  flex-shrink: 0;
 `
 
 const Button = styled.button<{ $primary?: boolean }>`
-  height: 38px;
-  padding: 0 14px;
-  border-radius: 12px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 10px;
   border: 1px solid ${({ $primary }) => ($primary ? '#2563eb' : '#dbe4ee')};
   background: ${({ $primary }) => ($primary ? 'linear-gradient(135deg, #2563eb, #0ea5e9)' : '#ffffff')};
   color: ${({ $primary }) => ($primary ? '#ffffff' : '#243b53')};
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 800;
   cursor: pointer;
 
@@ -74,67 +63,28 @@ const Button = styled.button<{ $primary?: boolean }>`
 
 interface PptTopToolbarProps {
   title: string
-  engineLabel: string
-  slideEditEngineLabel: string
-  pageLabel: string
-  templateLabel: string
-  templateId: string | null
-  templateOptions: PptTemplateOption[]
   statusMessage?: string | null
-  dirty: boolean
-  aiPanelCollapsed: boolean
-  canSave: boolean
-  templateBusy?: boolean
   onDownload: () => void
-  onTemplateChange: (templateId: string) => void
-  onRegenerate: () => void
-  onSave: () => void
-  onToggleAiPanel: () => void
+  downloadLabel?: string
+  extraActions?: React.ReactNode
 }
 
 export default function PptTopToolbar({
   title,
-  engineLabel,
-  slideEditEngineLabel,
-  pageLabel,
-  templateLabel,
-  templateId,
-  templateOptions,
   statusMessage,
-  dirty,
-  aiPanelCollapsed,
-  canSave,
-  templateBusy,
   onDownload,
-  onTemplateChange,
-  onRegenerate,
-  onSave,
-  onToggleAiPanel,
+  downloadLabel = '下载',
+  extraActions,
 }: PptTopToolbarProps) {
   return (
     <Toolbar>
       <Left>
         <Title>{title}</Title>
-        <Meta>
-          <MetaBadge>{engineLabel}</MetaBadge>
-          <MetaBadge>{slideEditEngineLabel}</MetaBadge>
-          <MetaBadge>{pageLabel}</MetaBadge>
-          <MetaBadge>{`模板：${templateLabel}`}</MetaBadge>
-          <MetaBadge>{dirty ? '存在未保存修改' : '已保存'}</MetaBadge>
-        </Meta>
         {statusMessage ? <StatusText>{statusMessage}</StatusText> : null}
       </Left>
       <Actions>
-        <PptTemplatePicker
-          value={templateId}
-          options={templateOptions}
-          disabled={templateBusy}
-          onChange={onTemplateChange}
-        />
-        <Button type="button" onClick={onToggleAiPanel}>{aiPanelCollapsed ? '展开 AI 面板' : '折叠 AI 面板'}</Button>
-        <Button type="button" onClick={onDownload}>下载 PPTX</Button>
-        <Button type="button" onClick={onRegenerate}>重新生成整套</Button>
-        <Button type="button" onClick={onSave} disabled={!canSave}>{dirty ? '保存修改' : '已保存'}</Button>
+        {extraActions}
+        <Button type="button" $primary onClick={onDownload}>{downloadLabel}</Button>
       </Actions>
     </Toolbar>
   )

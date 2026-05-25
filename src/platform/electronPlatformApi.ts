@@ -341,6 +341,9 @@ export const electronPlatformApi: PlatformApi = {
     async sendMessage() {
       notSupported('email.sendMessage')
     },
+    async discoverFolders() {
+      notSupported('email.discoverFolders')
+    },
   },
 
   settings: {
