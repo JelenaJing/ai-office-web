@@ -32,6 +32,19 @@ interface PreviewState {
   url: string
 }
 
+interface TemplateOption {
+  slug: string
+  name: string
+  tagline: string
+  scheme: string
+  density: string
+}
+
+interface TemplateListResponse {
+  success: boolean
+  templates: TemplateOption[]
+}
+
 const EXAMPLE_PROMPTS = [
   'AI Office 产品发布会',
   '高校行政办公 AIOS 方案',
@@ -117,6 +130,10 @@ function summarizeDebugError(message: string | undefined): string {
 
 export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
   const [inputText, setInputText] = useState('')
+  const [templateOptions, setTemplateOptions] = useState<TemplateOption[]>([])
+  const [selectedTemplateSlug, setSelectedTemplateSlug] = useState('')
+  const [enableImages, setEnableImages] = useState(true)
+  const [maxImages, setMaxImages] = useState(3)
   const [job, setJob] = useState<ArtifactJobResponse | null>(null)
   const [logs, setLogs] = useState('')
   const [submitError, setSubmitError] = useState('')
@@ -133,6 +150,22 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
 
   useEffect(() => {
     syncPreviewAuthCookie()
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    const loadTemplates = async () => {
+      try {
+        const payload = await apiFetchJson<TemplateListResponse>('/api/artifact-jobs/html-presentation/templates')
+        if (!cancelled) setTemplateOptions(payload.templates ?? [])
+      } catch {
+        if (!cancelled) setTemplateOptions([])
+      }
+    }
+    void loadTemplates()
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   const loadPreview = useCallback(async (artifactId: string) => {
@@ -245,6 +278,9 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
           skillId: 'html-ppt-beautiful',
           prompt: buildArtifactPrompt(trimmedInput),
           inputMarkdown: buildArtifactMarkdown(trimmedInput),
+          templateSlug: selectedTemplateSlug || undefined,
+          enableImages,
+          maxImages,
         }),
       })
       setJob(created)
@@ -254,7 +290,7 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
     } finally {
       setIsSubmitting(false)
     }
-  }, [inputText, loadJob])
+  }, [enableImages, inputText, loadJob, maxImages, selectedTemplateSlug])
 
   const handleSubmit = useCallback(async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -334,6 +370,54 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
           {uiState === 'generating' ? '生成中…' : '生成演示文稿'}
         </button>
       </div>
+
+      <div style={s.controlRow}>
+        <label style={s.controlField}>
+          <span style={s.controlLabel}>模板</span>
+          <select
+            value={selectedTemplateSlug}
+            onChange={(event) => setSelectedTemplateSlug(event.target.value)}
+            style={s.select}
+            disabled={uiState === 'generating'}
+          >
+            <option value="">自动选择（推荐）</option>
+            {templateOptions.map((template) => (
+              <option key={template.slug} value={template.slug}>
+                {template.name} · {template.scheme} · {template.density}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label style={{ ...s.controlField, ...s.controlFieldInline }}>
+          <span style={s.controlLabel}>自动配图</span>
+          <input
+            type="checkbox"
+            checked={enableImages}
+            onChange={(event) => setEnableImages(event.target.checked)}
+            disabled={uiState === 'generating'}
+          />
+        </label>
+
+        <label style={s.controlField}>
+          <span style={s.controlLabel}>最大图片数</span>
+          <input
+            type="number"
+            min={0}
+            max={6}
+            value={maxImages}
+            onChange={(event) => setMaxImages(Math.max(0, Math.min(6, Number.parseInt(event.target.value || '0', 10) || 0)))}
+            style={s.numberInput}
+            disabled={uiState === 'generating' || !enableImages}
+          />
+        </label>
+      </div>
+
+      {selectedTemplateSlug && templateOptions.some((template) => template.slug === selectedTemplateSlug) ? (
+        <div style={s.templateHint}>
+          {templateOptions.find((template) => template.slug === selectedTemplateSlug)?.tagline}
+        </div>
+      ) : null}
 
       {!compact ? (
         <div style={s.chipRow}>
@@ -622,6 +706,57 @@ const s: Record<string, React.CSSProperties> = {
   },
   textareaWrap: {
     position: 'relative',
+  },
+  controlRow: {
+    marginTop: 14,
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 12,
+    alignItems: 'flex-end',
+  },
+  controlField: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 6,
+    minWidth: 180,
+    flex: '1 1 220px',
+  },
+  controlFieldInline: {
+    flex: '0 0 auto',
+    minWidth: 120,
+    alignItems: 'flex-start',
+  },
+  controlLabel: {
+    fontSize: 12,
+    fontWeight: 700,
+    color: '#667a90',
+  },
+  select: {
+    height: 40,
+    borderRadius: 12,
+    border: '1px solid #d7e1ec',
+    background: '#fff',
+    color: '#13233b',
+    padding: '0 12px',
+    fontSize: 13,
+    fontWeight: 600,
+  },
+  numberInput: {
+    height: 40,
+    borderRadius: 12,
+    border: '1px solid #d7e1ec',
+    background: '#fff',
+    color: '#13233b',
+    padding: '0 12px',
+    fontSize: 13,
+    fontWeight: 600,
+    width: 120,
+  },
+  templateHint: {
+    marginTop: 10,
+    fontSize: 12,
+    lineHeight: 1.6,
+    color: '#667a90',
   },
   textarea: {
     width: '100%',

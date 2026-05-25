@@ -6,6 +6,10 @@ import { enqueueArtifactJob } from './services/artifactJobQueue'
 import { getArtifactJob, registerArtifactJob } from './services/artifactJobStore'
 import { prepareArtifactJobWorkspace } from './services/opencodeHtmlArtifactRunner'
 import { getSkill } from '../skills/skillRegistry'
+import {
+  listAvailableHtmlPresentationTemplates,
+  normalizeHtmlPresentationJobOptions,
+} from './services/htmlPresentationTemplates'
 
 const router = Router()
 
@@ -28,6 +32,15 @@ function normalizeInputMarkdown(value: unknown): string {
   return typeof value === 'string' ? value : ''
 }
 
+router.get('/html-presentation/templates', async (req, res) => {
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+  res.json({
+    success: true,
+    templates: listAvailableHtmlPresentationTemplates(),
+  })
+})
+
 router.post('/', async (req, res) => {
   const userId = await requireAccountUser(req, res)
   if (!userId) return
@@ -38,6 +51,12 @@ router.post('/', async (req, res) => {
   const rawInputMarkdown = req.body?.inputMarkdown
   const inputMarkdown = normalizeInputMarkdown(rawInputMarkdown)
   const skillId = typeof req.body?.skillId === 'string' ? req.body.skillId.trim() : undefined
+  const htmlPresentationOptions = normalizeHtmlPresentationJobOptions({
+    ...(req.body?.htmlPresentationOptions && typeof req.body.htmlPresentationOptions === 'object' ? req.body.htmlPresentationOptions : {}),
+    templateSlug: req.body?.templateSlug,
+    enableImages: req.body?.enableImages,
+    maxImages: req.body?.maxImages,
+  })
 
   if (!type) {
     res.status(400).json({ success: false, error: '当前仅支持 type=html 或 type=html_presentation' })
@@ -67,13 +86,20 @@ router.post('/', async (req, res) => {
 
   try {
     const jobId = randomUUID()
-    const workspace = prepareArtifactJobWorkspace({ jobId, inputMarkdown, prompt, skillId })
+    const workspace = prepareArtifactJobWorkspace({
+      jobId,
+      inputMarkdown,
+      prompt,
+      skillId,
+      htmlPresentationOptions,
+    })
     const job = registerArtifactJob({
       id: jobId,
       userId,
       type,
       skillId,
       prompt,
+      htmlPresentationOptions,
       jobDir: workspace.jobDir,
       inputPath: workspace.inputPath,
       skillPath: workspace.skillPath,
@@ -88,6 +114,7 @@ router.post('/', async (req, res) => {
       status: job.status,
       type: job.type,
       skillId: job.skillId,
+      htmlPresentationOptions: job.htmlPresentationOptions,
       message: job.message,
     })
   } catch (error) {
@@ -113,9 +140,10 @@ router.get('/:jobId', async (req, res) => {
     success: true,
     jobId: job.id,
     status: job.status,
-    type: job.type,
-    skillId: job.skillId,
-    message: job.message,
+      type: job.type,
+      skillId: job.skillId,
+      htmlPresentationOptions: job.htmlPresentationOptions,
+      message: job.message,
     error: job.error,
     artifactId: job.artifactId,
     artifactFileUrl: job.artifactFileUrl,

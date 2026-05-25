@@ -5,6 +5,14 @@ import type { ArtifactJobRecord } from './artifactJobStore'
 import { createHtmlArtifact } from './htmlArtifactStore'
 import { registerUserFile } from '../../../lib/userFiles'
 import { bootstrapWorkspaceForUser } from '../../../lib/workspaceAccess'
+import { postProcessHtmlPresentationOutput } from './htmlPresentationPostProcess'
+import {
+  normalizeHtmlPresentationJobOptions,
+  resolveTemplateSelection,
+  type CandidateTemplateRecord,
+  type HtmlPresentationJobOptions,
+  type TemplateProfileRecord,
+} from './htmlPresentationTemplates'
 
 export const ARTIFACT_JOB_ROOT = '/data/darebug/aios-agent-jobs'
 export const AIOS_SKILLS_ROOT = '/data/darebug/aios-skills'
@@ -45,6 +53,8 @@ const HTML_PPT_BEAUTIFUL_LITE_SKILL = `你是 AIOS 的 HTML 演示文稿生成�
 - input/source.md
 - skill/SKILL.md
 - skill/TEMPLATE_STYLE.md
+- skill/TEMPLATE_PROFILE.json
+- skill/CANDIDATE_TEMPLATES.json
 - skill/frontend-slides-lite/*
 
 必须遵守：
@@ -52,6 +62,10 @@ const HTML_PPT_BEAUTIFUL_LITE_SKILL = `你是 AIOS 的 HTML 演示文稿生成�
 - 单文件 HTML，内联 CSS，可选少量内联 JS
 - 16:9 横向演示文稿，7-10 页
 - 每页信息密度适中，重点明确，不要堆满文字
+- 每一页必须使用 <section class="slide"> 作为 slide 根节点
+- 尽量直接输出 data-slide-id、data-block-id、data-block-type、data-block-role；如果未输出，后处理层会补齐
+- 最终结果需要兼容 output/content-model.json、output/template-profile.json、output/candidate-templates.json 作为 sidecar
+- 如果启用了图片规划，优先保留图片槽位；图片失败时允许使用内联 SVG placeholder
 - 不要访问网络，不要安装依赖，不要引用外部 CDN
 - 不要读取 beautiful-html-templates/templates
 - 不要读取任何 template.html
@@ -72,6 +86,14 @@ interface HtmlPptStyleProfile {
   inspirationTemplates: string[]
   visualDirection: string[]
   layoutRequirements: string[]
+}
+
+interface HtmlPptPreparedSelection {
+  selectedTemplateSlug: string
+  candidateTemplateSlugs: string[]
+  fallbackUsed: boolean
+  templateProfile: TemplateProfileRecord
+  candidateTemplates: CandidateTemplateRecord[]
 }
 
 function safeSegment(value: string, maxLen = 96): string {
@@ -152,15 +174,18 @@ function buildHtmlPptLiteOpenCodePrompt(userPrompt: string, repairOnly = false):
 
   return [
     '请严格执行以下任务：',
-    '1. 只允许读取 input/source.md、skill/SKILL.md、skill/TEMPLATE_STYLE.md。',
+    '1. 只允许读取 input/source.md、skill/SKILL.md、skill/TEMPLATE_STYLE.md、skill/TEMPLATE_PROFILE.json、skill/CANDIDATE_TEMPLATES.json。',
     '2. 如需参考版式，只允许读取 skill/frontend-slides-lite/viewport-base.css、skill/frontend-slides-lite/html-template.md、skill/frontend-slides-lite/animation-patterns.md、skill/frontend-slides-lite/STYLE_PRESETS.md。',
     '3. 不要扫描 skill/vendors，不要读取 beautiful-html-templates/templates，不要读取任何 template.html。',
     '3.1 不存在额外的模板 markdown 文件；不要猜测或尝试读取 product-keynote-lite.md、academic-report-lite.md 之类的文件。',
     '4. 不要读取 job 目录之外的文件，不要访问网络，不要安装依赖。',
     '5. 生成单文件 HTML PPT，适合 iframe sandbox 预览，必须是 16:9 横向页面。',
-    '6. 必须把完整结果写入 output/index.html。',
-    '7. 不要只在回复中输出 HTML。',
-    '8. 不要输出到 index.html、presentation.html、slides.html、output.html；如果误写到这些名字，结束前必须复制为 output/index.html。',
+    '6. 每个 slide 根节点必须优先使用 <section class="slide">。',
+    '7. 每个 slide 尽量直接带 data-slide-id；每个文本块尽量带 data-block-id、data-block-type="text"、data-block-role；每个图片块尽量带 data-block-id、data-block-type="image"、data-block-role="visual"。',
+    '8. 如果存在图片规划，请优先为封面页、场景页、概念页预留可视区域；图片失败时允许使用内联 SVG placeholder。',
+    '9. 必须把完整结果写入 output/index.html。',
+    '10. 不要只在回复中输出 HTML。',
+    '11. 不要输出到 index.html、presentation.html、slides.html、output.html；如果误写到这些名字，结束前必须复制为 output/index.html。',
     ...repairLines,
     '',
     '用户 prompt：',
@@ -300,13 +325,22 @@ function chooseHtmlPptStyle(prompt: string, inputMarkdown: string): HtmlPptStyle
   }
 }
 
-function buildTemplateStyleMarkdown(selection: HtmlPptStyleProfile): string {
+function buildTemplateStyleMarkdown(
+  selection: HtmlPptStyleProfile,
+  prepared: HtmlPptPreparedSelection,
+  options: HtmlPresentationJobOptions,
+): string {
   return [
     '# Selected Template Style',
     '',
     `templateId: ${selection.styleId}`,
     `reason: ${selection.reason}`,
     `inspirationTemplates: ${selection.inspirationTemplates.join(', ')}`,
+    `selectedTemplateSlug: ${prepared.selectedTemplateSlug}`,
+    `candidateTemplateSlugs: ${prepared.candidateTemplateSlugs.join(', ')}`,
+    `fallbackUsed: ${prepared.fallbackUsed}`,
+    `enableImages: ${options.enableImages}`,
+    `maxImages: ${options.maxImages}`,
     '',
     '## Visual Direction',
     ...selection.visualDirection.map((item) => `- ${item}`),
@@ -330,11 +364,18 @@ function formatSkillPrepareLog(
   files: SkillTextFileSummary[],
   totalTextBytes: number,
   selection: HtmlPptStyleProfile,
+  prepared: HtmlPptPreparedSelection,
+  options: HtmlPresentationJobOptions,
 ): string {
   const lines = [
     `selectedStyleId: ${selection.styleId}`,
     `selectedStyleReason: ${selection.reason}`,
     `inspirationTemplates: ${selection.inspirationTemplates.join(', ')}`,
+    `selectedTemplateSlug: ${prepared.selectedTemplateSlug}`,
+    `candidateTemplateSlugs: ${prepared.candidateTemplateSlugs.join(', ')}`,
+    `fallbackUsed: ${prepared.fallbackUsed}`,
+    `imagePlanningEnabled: ${options.enableImages}`,
+    `maxImages: ${options.maxImages}`,
     'templateHtmlSkipped: true',
     `targetTotalTextLimitBytes: ${MAX_SKILL_TOTAL_TARGET_BYTES}`,
     `hardTotalTextLimitBytes: ${MAX_SKILL_TOTAL_HARD_LIMIT_BYTES}`,
@@ -358,21 +399,34 @@ function addRelativePath(summary: SkillTextFileSummary, relativePath: string): S
   return { ...summary, relativePath }
 }
 
+function readJsonFile<T>(filePath: string): T {
+  return JSON.parse(fs.readFileSync(filePath, 'utf-8')) as T
+}
+
 function prepareHtmlPptBeautifulLiteSkillWorkspace(input: {
   jobDir: string
   inputMarkdown: string
   prompt: string
   sourceSkillDir: string
   skillDir: string
+  outputDir: string
   skillPrepareLogPath: string
-}): void {
+  options: HtmlPresentationJobOptions
+}): HtmlPptPreparedSelection {
   const frontendSlidesSourceDir = path.join(input.sourceSkillDir, 'vendors', 'frontend-slides')
   const frontendSlidesLiteDir = path.join(input.skillDir, 'frontend-slides-lite')
   const selection = chooseHtmlPptStyle(input.prompt, input.inputMarkdown)
+  const prepared = resolveTemplateSelection({
+    prompt: input.prompt,
+    inputMarkdown: input.inputMarkdown,
+    options: input.options,
+  })
   const files: SkillTextFileSummary[] = []
 
   fs.rmSync(input.skillDir, { recursive: true, force: true })
   fs.mkdirSync(frontendSlidesLiteDir, { recursive: true })
+  fs.mkdirSync(input.outputDir, { recursive: true })
+  fs.mkdirSync(path.join(input.outputDir, 'assets'), { recursive: true })
 
   files.push(addRelativePath(
     writeTextFileWithLimit(path.join(input.skillDir, 'SKILL.md'), HTML_PPT_BEAUTIFUL_LITE_SKILL, MAX_SKILL_TEXT_FILE_BYTES),
@@ -381,10 +435,32 @@ function prepareHtmlPptBeautifulLiteSkillWorkspace(input: {
   files.push(addRelativePath(
     writeTextFileWithLimit(
       path.join(input.skillDir, 'TEMPLATE_STYLE.md'),
-      buildTemplateStyleMarkdown(selection),
+      buildTemplateStyleMarkdown(selection, prepared, input.options),
       MAX_SKILL_TEXT_FILE_BYTES,
     ),
     'TEMPLATE_STYLE.md',
+  ))
+  const templateProfileJson = JSON.stringify(prepared.templateProfile, null, 2)
+  const candidateTemplatesJson = JSON.stringify({
+    selectedTemplateSlug: prepared.selectedTemplateSlug,
+    fallbackUsed: prepared.fallbackUsed,
+    candidates: prepared.candidateTemplates,
+  }, null, 2)
+  files.push(addRelativePath(
+    writeTextFileWithLimit(
+      path.join(input.skillDir, 'TEMPLATE_PROFILE.json'),
+      templateProfileJson,
+      MAX_SKILL_TEXT_FILE_BYTES,
+    ),
+    'TEMPLATE_PROFILE.json',
+  ))
+  files.push(addRelativePath(
+    writeTextFileWithLimit(
+      path.join(input.skillDir, 'CANDIDATE_TEMPLATES.json'),
+      candidateTemplatesJson,
+      MAX_SKILL_TEXT_FILE_BYTES,
+    ),
+    'CANDIDATE_TEMPLATES.json',
   ))
 
   const liteFiles = [
@@ -403,14 +479,19 @@ function prepareHtmlPptBeautifulLiteSkillWorkspace(input: {
     ))
   }
 
+  fs.writeFileSync(path.join(input.outputDir, 'template-profile.json'), templateProfileJson, 'utf-8')
+  fs.writeFileSync(path.join(input.outputDir, 'candidate-templates.json'), candidateTemplatesJson, 'utf-8')
+
   const totalTextBytes = files.reduce((sum, file) => sum + file.sizeBytes, 0)
-  const skillPrepareLog = formatSkillPrepareLog(files, totalTextBytes, selection)
+  const skillPrepareLog = formatSkillPrepareLog(files, totalTextBytes, selection, prepared, input.options)
   fs.mkdirSync(path.dirname(input.skillPrepareLogPath), { recursive: true })
   fs.writeFileSync(input.skillPrepareLogPath, skillPrepareLog, 'utf-8')
 
   if (totalTextBytes > MAX_SKILL_TOTAL_HARD_LIMIT_BYTES) {
     throw new Error('Skill workspace too large for OpenCode context')
   }
+
+  return prepared
 }
 
 function readLogTail(logPath: string, lineCount = OPENCODE_LOG_TAIL_LINES): string {
@@ -453,6 +534,8 @@ function buildOpenCodeAttachments(job: ArtifactJobRecord): string[] {
   if (job.skillId === HTML_PPT_BEAUTIFUL_SKILL_ID) {
     const extraFiles = [
       path.join(job.jobDir, 'skill', 'TEMPLATE_STYLE.md'),
+      path.join(job.jobDir, 'skill', 'TEMPLATE_PROFILE.json'),
+      path.join(job.jobDir, 'skill', 'CANDIDATE_TEMPLATES.json'),
       path.join(job.jobDir, 'skill', 'frontend-slides-lite', 'viewport-base.css'),
       path.join(job.jobDir, 'skill', 'frontend-slides-lite', 'html-template.md'),
       path.join(job.jobDir, 'skill', 'frontend-slides-lite', 'animation-patterns.md'),
@@ -561,6 +644,7 @@ export function prepareArtifactJobWorkspace(input: {
   inputMarkdown: string
   prompt: string
   skillId?: string
+  htmlPresentationOptions?: HtmlPresentationJobOptions
 }): {
   jobDir: string
   inputPath: string
@@ -596,13 +680,16 @@ export function prepareArtifactJobWorkspace(input: {
   if (input.skillId) {
     const sourceSkillDir = validateAndResolveSkillDir(input.skillId)
     if (input.skillId === HTML_PPT_BEAUTIFUL_SKILL_ID) {
+      const htmlPresentationOptions = normalizeHtmlPresentationJobOptions(input.htmlPresentationOptions)
       prepareHtmlPptBeautifulLiteSkillWorkspace({
         jobDir,
         inputMarkdown: input.inputMarkdown,
         prompt: input.prompt,
         sourceSkillDir,
         skillDir,
+        outputDir,
         skillPrepareLogPath,
+        options: htmlPresentationOptions,
       })
     } else {
       copyDirRecursive(sourceSkillDir, skillDir)
@@ -673,12 +760,69 @@ export async function runHtmlArtifactJob(job: ArtifactJobRecord): Promise<{
   tryMaterializeFallbackOutput(job)
   ensureOutputFile(job.outputPath)
 
+  if (job.skillId === HTML_PPT_BEAUTIFUL_SKILL_ID) {
+    const options = normalizeHtmlPresentationJobOptions(job.htmlPresentationOptions)
+    const templateProfilePath = path.join(job.jobDir, 'output', 'template-profile.json')
+    const candidateTemplatesPath = path.join(job.jobDir, 'output', 'candidate-templates.json')
+    const templateProfile = ensureRegularFile(templateProfilePath)
+      ? readJsonFile<TemplateProfileRecord>(templateProfilePath)
+      : resolveTemplateSelection({ prompt: job.prompt, inputMarkdown: fs.readFileSync(job.inputPath, 'utf-8'), options }).templateProfile
+    const candidatePayload = ensureRegularFile(candidateTemplatesPath)
+      ? readJsonFile<{ selectedTemplateSlug: string; fallbackUsed: boolean; candidates: CandidateTemplateRecord[] }>(candidateTemplatesPath)
+      : (() => {
+          const selection = resolveTemplateSelection({
+            prompt: job.prompt,
+            inputMarkdown: fs.readFileSync(job.inputPath, 'utf-8'),
+            options,
+          })
+          return {
+            selectedTemplateSlug: selection.selectedTemplateSlug,
+            fallbackUsed: selection.fallbackUsed,
+            candidates: selection.candidateTemplates,
+          }
+        })()
+
+    const postProcessed = postProcessHtmlPresentationOutput({
+      jobId: job.id,
+      outputDir: path.join(job.jobDir, 'output'),
+      htmlPath: job.outputPath,
+      title: titleFromPrompt(job.prompt),
+      templateProfile,
+      candidateTemplates: candidatePayload.candidates,
+      selectedTemplateSlug: candidatePayload.selectedTemplateSlug,
+      fallbackUsed: candidatePayload.fallbackUsed,
+      options,
+    })
+
+    appendLog(
+      job.logPath,
+      [
+        '',
+        `[${new Date().toISOString()}] selectedTemplateSlug=${postProcessed.selectedTemplateSlug}`,
+        `[${new Date().toISOString()}] candidateTemplateSlugs=${postProcessed.candidateTemplateSlugs.join(',')}`,
+        `[${new Date().toISOString()}] fallbackUsed=${String(postProcessed.fallbackUsed)}`,
+        `[${new Date().toISOString()}] imagePlanningEnabled=${String(postProcessed.imagePlanningEnabled)}`,
+        `[${new Date().toISOString()}] plannedImageCount=${postProcessed.plannedImageCount}`,
+        `[${new Date().toISOString()}] generatedImageCount=${postProcessed.generatedImageCount}`,
+        `[${new Date().toISOString()}] placeholderCount=${postProcessed.placeholderCount}`,
+      ].join('\n'),
+    )
+  }
+
   const artifact = createHtmlArtifact({
     userId: job.userId,
     jobId: job.id,
     sourceFilePath: job.outputPath,
     title: titleFromPrompt(job.prompt),
     type: job.type,
+    sidecarFilePaths: [
+      path.join(job.jobDir, 'output', 'content-model.json'),
+      path.join(job.jobDir, 'output', 'template-profile.json'),
+      path.join(job.jobDir, 'output', 'candidate-templates.json'),
+    ],
+    sidecarDirPaths: [
+      path.join(job.jobDir, 'output', 'assets'),
+    ],
   })
 
   try {

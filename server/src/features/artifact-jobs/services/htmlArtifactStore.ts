@@ -41,6 +41,8 @@ export function createHtmlArtifact(input: {
   sourceFilePath: string
   title?: string
   type?: HtmlArtifactType
+  sidecarFilePaths?: string[]
+  sidecarDirPaths?: string[]
 }): HtmlArtifactRecord {
   const artifactId = randomUUID()
   const dir = ensureWithinBaseDir(ARTIFACTS_ROOT, artifactDir(artifactId))
@@ -55,6 +57,20 @@ export function createHtmlArtifact(input: {
     createdAt: new Date().toISOString(),
   }
   fs.copyFileSync(input.sourceFilePath, targetFilePath)
+  for (const sidecarPath of input.sidecarFilePaths ?? []) {
+    if (!fs.existsSync(sidecarPath)) continue
+    const filename = path.basename(sidecarPath)
+    fs.copyFileSync(sidecarPath, path.join(dir, filename))
+  }
+  for (const sidecarDirPath of input.sidecarDirPaths ?? []) {
+    if (!fs.existsSync(sidecarDirPath) || !fs.statSync(sidecarDirPath).isDirectory()) continue
+    const targetDir = path.join(dir, path.basename(sidecarDirPath))
+    fs.mkdirSync(targetDir, { recursive: true })
+    for (const entry of fs.readdirSync(sidecarDirPath, { withFileTypes: true })) {
+      if (!entry.isFile()) continue
+      fs.copyFileSync(path.join(sidecarDirPath, entry.name), path.join(targetDir, entry.name))
+    }
+  }
   fs.writeFileSync(path.join(dir, 'artifact.json'), JSON.stringify(artifact, null, 2), 'utf-8')
   return artifact
 }
@@ -71,6 +87,10 @@ export function getHtmlArtifact(artifactId: string): HtmlArtifactRecord | null {
 
 export function getHtmlArtifactFilePath(artifactId: string): string {
   return path.join(artifactDir(artifactId), 'index.html')
+}
+
+export function getHtmlArtifactSidecarPath(artifactId: string, filename: string): string {
+  return path.join(artifactDir(artifactId), filename)
 }
 
 const DEFAULT_HTML_ARTIFACT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000

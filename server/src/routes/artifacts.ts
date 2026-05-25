@@ -13,12 +13,17 @@ import { Router } from 'express'
 import path from 'path'
 import fs from 'fs'
 import { deleteArtifact, getArtifact, getArtifactFilePath, listArtifactsByUser, updateArtifact } from '../artifacts/ArtifactStore'
-import { getHtmlArtifact, getHtmlArtifactFilePath } from '../features/artifact-jobs/services/htmlArtifactStore'
+import {
+  getHtmlArtifact,
+  getHtmlArtifactFilePath,
+  getHtmlArtifactSidecarPath,
+} from '../features/artifact-jobs/services/htmlArtifactStore'
 import { requireAccountUser } from '../lib/authUser'
 import { saveSkillArtifact } from '../lib/skillArtifact'
 import { assertWorkspaceAccess, WorkspaceAccessError } from '../lib/workspaceAccess'
 
 const router = Router()
+const HTML_PPT_SIDECAR_FILES = new Set(['content-model.json', 'template-profile.json', 'candidate-templates.json'])
 
 function sendWorkspaceError(res: import('express').Response, error: unknown): void {
   const workspaceError = error instanceof WorkspaceAccessError ? error : null
@@ -144,6 +149,30 @@ router.get('/:artifactId/file', async (req, res) => {
   res.setHeader('X-Content-Type-Options', 'nosniff')
   return res.sendFile(filePath)
 })
+
+router.get('/:artifactId/sidecars/:filename', async (req, res) => {
+  const { artifactId, filename } = req.params
+  if (!HTML_PPT_SIDECAR_FILES.has(filename)) {
+    return res.status(404).json({ success: false, error: 'Sidecar not found' })
+  }
+  const artifact = getHtmlArtifact(artifactId)
+  if (!artifact) {
+    return res.status(404).json({ success: false, error: 'Artifact not found', artifactId })
+  }
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+  if (!assertArtifactOwnership(userId, artifact, res)) return
+  const filePath = getHtmlArtifactSidecarPath(artifactId, filename)
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ success: false, error: 'Sidecar missing on disk', artifactId, filename })
+  }
+  res.setHeader('Cache-Control', 'no-store')
+  res.setHeader('Content-Type', 'application/json; charset=utf-8')
+  return res.sendFile(filePath)
+})
+
+// TODO(phase-2): add POST /api/html-ppt/:artifactId/patch to persist local edit patches.
+// Phase 1 only stores patch history in localStorage inside the generated HTML runtime.
 
 // ── GET /api/artifacts/:artifactId ────────────────────────────────────────────
 

@@ -3,12 +3,19 @@ import { randomUUID } from 'crypto'
 export type ArtifactJobStatus = 'queued' | 'running' | 'succeeded' | 'failed'
 export type ArtifactJobType = 'html' | 'html_presentation'
 
+export interface ArtifactJobHtmlPresentationOptions {
+  templateSlug?: string
+  enableImages: boolean
+  maxImages: number
+}
+
 export interface ArtifactJobRecord {
   id: string
   userId: string
   type: ArtifactJobType
   skillId?: string
   prompt: string
+  htmlPresentationOptions?: ArtifactJobHtmlPresentationOptions
   jobDir: string
   inputPath: string
   skillPath: string
@@ -30,6 +37,7 @@ export interface RegisterArtifactJobInput {
   type: ArtifactJobType
   skillId?: string
   prompt: string
+  htmlPresentationOptions?: ArtifactJobHtmlPresentationOptions
   jobDir: string
   inputPath: string
   skillPath: string
@@ -56,6 +64,7 @@ export function registerArtifactJob(input: RegisterArtifactJobInput): ArtifactJo
     type: input.type,
     skillId: input.skillId,
     prompt: input.prompt,
+    htmlPresentationOptions: input.htmlPresentationOptions,
     jobDir: input.jobDir,
     inputPath: input.inputPath,
     skillPath: input.skillPath,
