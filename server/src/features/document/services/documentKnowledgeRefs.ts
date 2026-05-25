@@ -2,6 +2,7 @@ import fs from 'fs'
 import { parseWorkspacePath, type ArtifactKnowledgeRef, type ArtifactSourceRef } from '../../../artifacts/ArtifactStore'
 import { resolveUserFile } from '../../../lib/userFiles'
 import { getKnowledgeBase, listFiles } from '../../../modules/knowledge'
+import { resolveRemoteKnowledgeSource } from '../../knowledge/services/remoteKnowledgeSearchClient'
 import type { DocumentKnowledgeRef, DocumentKnowledgeRefInput } from '../types'
 
 const TEXT_EXTS = new Set(['.txt', '.md', '.markdown', '.csv', '.json'])
@@ -31,6 +32,32 @@ export async function resolveDocumentKnowledgeRefs(input: {
 
   for (const ref of refs) {
     if (ref.kind === 'knowledge_base') {
+      const remoteSource = await resolveRemoteKnowledgeSource(ref.id).catch(() => null)
+      if (remoteSource) {
+        resolved.push({
+          kind: 'knowledge_base',
+          id: ref.id,
+          label: ref.label?.trim() || remoteSource.title,
+          excerpt: typeof remoteSource.metadata?.previewText === 'string'
+            ? remoteSource.metadata.previewText.trim() || undefined
+            : undefined,
+          sourceTitles: [remoteSource.title],
+          provider: 'remote',
+          sourceType: remoteSource.sourceType,
+          sourceId: ref.sourceId || remoteSource.id,
+          trustLevel: ref.trustLevel || remoteSource.trustLevel,
+          metadata: {
+            ...remoteSource.metadata,
+            ...(ref.metadata || {}),
+          },
+          citationStatus: ref.trustLevel === 'unverified' || remoteSource.trustLevel === 'unverified'
+            ? 'unverified'
+            : remoteSource.trustLevel === 'verified'
+              ? 'verified'
+              : 'partial',
+        })
+        continue
+      }
       try {
         const kb = await getKnowledgeBase(ref.id)
         const files = await listFiles(ref.id).catch(() => [])
@@ -39,6 +66,11 @@ export async function resolveDocumentKnowledgeRefs(input: {
           id: ref.id,
           label: ref.label?.trim() || kb?.name || ref.id,
           sourceTitles: files.slice(0, 6).map((item) => item.title || item.originalName).filter(Boolean),
+          provider: ref.provider,
+          sourceType: ref.sourceType,
+          sourceId: ref.sourceId || ref.id,
+          trustLevel: ref.trustLevel,
+          metadata: ref.metadata,
           citationStatus: files.length > 0 ? 'partial' : 'unverified',
         })
       } catch {
@@ -46,6 +78,11 @@ export async function resolveDocumentKnowledgeRefs(input: {
           kind: 'knowledge_base',
           id: ref.id,
           label: ref.label?.trim() || ref.id,
+          provider: ref.provider,
+          sourceType: ref.sourceType,
+          sourceId: ref.sourceId || ref.id,
+          trustLevel: ref.trustLevel,
+          metadata: ref.metadata,
           citationStatus: 'unverified',
         })
       }
@@ -59,6 +96,11 @@ export async function resolveDocumentKnowledgeRefs(input: {
       id: ref.id,
       label: ref.label?.trim() || file?.entry.name || ref.id,
       excerpt: file ? readFileSnippet(file.absolutePath, file.entry.name, 2800) : undefined,
+      provider: 'workspace',
+      sourceType: ref.sourceType || 'file',
+      sourceId: ref.sourceId || ref.id,
+      trustLevel: ref.trustLevel || (file ? 'verified' : 'unverified'),
+      metadata: ref.metadata,
       citationStatus: file ? 'verified' : 'unverified',
     })
   }
@@ -94,16 +136,29 @@ export function buildKnowledgeRefPromptBlock(refs: DocumentKnowledgeRef[]): stri
 export function toArtifactKnowledgeRefs(refs: DocumentKnowledgeRef[]): ArtifactKnowledgeRef[] {
   return refs.map((ref) => ({
     documentId: ref.id,
-    departmentId: ref.kind === 'knowledge_base' ? ref.id : undefined,
+    departmentId: ref.kind === 'knowledge_base'
+      ? (typeof ref.metadata?.departmentId === 'string' ? ref.metadata.departmentId : ref.id)
+      : undefined,
     title: ref.label,
     citationStatus: ref.citationStatus,
+    provider: ref.provider,
+    sourceId: ref.sourceId || ref.id,
+    chunkId: ref.chunkId,
+    trustLevel: ref.trustLevel,
+    metadata: ref.metadata,
   }))
 }
 
 export function toArtifactSourceRefs(refs: DocumentKnowledgeRef[]): ArtifactSourceRef[] {
   return refs.map((ref) => ({
     type: ref.kind === 'knowledge_base' ? 'knowledge' : 'document',
-    id: ref.id,
+    id: ref.sourceId || ref.id,
     label: ref.label,
+    provider: ref.provider,
+    sourceId: ref.sourceId || ref.id,
+    chunkId: ref.chunkId,
+    trustLevel: ref.trustLevel,
+    excerpt: ref.excerpt,
+    metadata: ref.metadata,
   }))
 }

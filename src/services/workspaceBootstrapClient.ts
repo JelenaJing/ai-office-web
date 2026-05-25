@@ -1,3 +1,5 @@
+import { resolveWebApiUrl } from '../runtime/apiBase'
+
 const PRIMARY_TOKEN_KEY = 'aios_auth_token'
 const USER_KEY = 'aios_auth_user'
 const LEGACY_TOKEN_KEYS = ['aios_itoken', 'ai_office_internal_token'] as const
@@ -6,6 +8,7 @@ const CURRENT_USER_ID_KEY = 'aios.currentUserId'
 const CURRENT_TENANT_ID_KEY = 'aios.currentTenantId'
 const CURRENT_WORKSPACE_ID_KEY = 'aios.currentWorkspaceId'
 const CURRENT_WORKSPACE_PATH_KEY = 'aios.currentWorkspacePath'
+const CURRENT_WORKSPACE_ROLE_KEY = 'aios.currentWorkspaceRole'
 
 export interface WorkspaceBootstrapPayload {
   success: boolean
@@ -29,6 +32,7 @@ export interface CurrentWorkspaceState {
   currentTenantId: string | null
   currentWorkspaceId: string | null
   currentWorkspacePath: string | null
+  currentWorkspaceRole: string | null
 }
 
 function storedToken(): string | null {
@@ -46,7 +50,7 @@ function authHeaders(): Record<string, string> {
 }
 
 function readCurrentUserIdFromSession(): string | null {
-  const raw = localStorage.getItem(USER_KEY)
+  const raw = localStorage.getItem(USER_KEY) || localStorage.getItem('ai_office_internal_user')
   if (!raw) return null
   try {
     const user = JSON.parse(raw) as { id?: string }
@@ -67,6 +71,7 @@ export function readCurrentWorkspaceState(): CurrentWorkspaceState {
     currentTenantId: localStorage.getItem(CURRENT_TENANT_ID_KEY),
     currentWorkspaceId: localStorage.getItem(CURRENT_WORKSPACE_ID_KEY),
     currentWorkspacePath: localStorage.getItem(CURRENT_WORKSPACE_PATH_KEY),
+    currentWorkspaceRole: localStorage.getItem(CURRENT_WORKSPACE_ROLE_KEY),
   }
 }
 
@@ -75,6 +80,7 @@ export function clearCurrentWorkspaceState(): void {
   localStorage.removeItem(CURRENT_TENANT_ID_KEY)
   localStorage.removeItem(CURRENT_WORKSPACE_ID_KEY)
   localStorage.removeItem(CURRENT_WORKSPACE_PATH_KEY)
+  localStorage.removeItem(CURRENT_WORKSPACE_ROLE_KEY)
 }
 
 export function persistCurrentWorkspaceState(input: {
@@ -82,6 +88,7 @@ export function persistCurrentWorkspaceState(input: {
   currentTenantId?: string | null
   currentWorkspaceId?: string | null
   currentWorkspacePath?: string | null
+  currentWorkspaceRole?: string | null
 }): CurrentWorkspaceState {
   const previous = readCurrentWorkspaceState()
   const has = (key: keyof typeof input) => Object.prototype.hasOwnProperty.call(input, key)
@@ -90,6 +97,7 @@ export function persistCurrentWorkspaceState(input: {
     currentTenantId: has('currentTenantId') ? (input.currentTenantId ?? null) : previous.currentTenantId,
     currentWorkspaceId: has('currentWorkspaceId') ? (input.currentWorkspaceId ?? null) : previous.currentWorkspaceId,
     currentWorkspacePath: has('currentWorkspacePath') ? (input.currentWorkspacePath ?? null) : previous.currentWorkspacePath,
+    currentWorkspaceRole: has('currentWorkspaceRole') ? (input.currentWorkspaceRole ?? null) : previous.currentWorkspaceRole,
   }
 
   if (next.currentUserId) localStorage.setItem(CURRENT_USER_ID_KEY, next.currentUserId)
@@ -104,6 +112,9 @@ export function persistCurrentWorkspaceState(input: {
   if (next.currentWorkspacePath) localStorage.setItem(CURRENT_WORKSPACE_PATH_KEY, next.currentWorkspacePath)
   else localStorage.removeItem(CURRENT_WORKSPACE_PATH_KEY)
 
+  if (next.currentWorkspaceRole) localStorage.setItem(CURRENT_WORKSPACE_ROLE_KEY, next.currentWorkspaceRole)
+  else localStorage.removeItem(CURRENT_WORKSPACE_ROLE_KEY)
+
   return next
 }
 
@@ -112,6 +123,7 @@ export function persistWorkspaceSelection(input: {
   currentTenantId?: string | null
   currentWorkspacePath?: string | null
   currentWorkspaceId?: string | null
+  currentWorkspaceRole?: string | null
 }): CurrentWorkspaceState {
   const resolvedWorkspaceId = input.currentWorkspaceId ?? workspaceIdFromPath(input.currentWorkspacePath)
   return persistCurrentWorkspaceState({
@@ -119,12 +131,13 @@ export function persistWorkspaceSelection(input: {
     currentTenantId: input.currentTenantId,
     currentWorkspaceId: resolvedWorkspaceId,
     currentWorkspacePath: input.currentWorkspacePath,
+    currentWorkspaceRole: input.currentWorkspaceRole,
   })
 }
 
 export async function bootstrapWorkspaceForUser(userId?: string | null): Promise<WorkspaceBootstrapPayload> {
   const expectedUserId = userId || readCurrentUserIdFromSession()
-  const res = await fetch('/api/workspaces/bootstrap', {
+  const res = await fetch(resolveWebApiUrl('/api/workspaces/bootstrap'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -146,6 +159,7 @@ export async function bootstrapWorkspaceForUser(userId?: string | null): Promise
     currentTenantId: payload.currentTenantId,
     currentWorkspaceId: payload.currentWorkspaceId,
     currentWorkspacePath: payload.currentWorkspacePath || payload.workspace.path,
+    currentWorkspaceRole: payload.role || null,
   })
 
   return payload
@@ -160,6 +174,7 @@ export async function ensureWorkspaceBootstrap(userId?: string | null): Promise<
     && current.currentTenantId
     && current.currentWorkspaceId
     && current.currentWorkspacePath
+    && current.currentWorkspaceRole
   ) {
     return current
   }

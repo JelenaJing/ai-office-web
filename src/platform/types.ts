@@ -3,6 +3,7 @@ import type {
   KnowledgeDocumentMeta,
   KnowledgeImportResult,
   KnowledgeLibraryInfo,
+  KnowledgeSourceListItem,
 } from '../types/knowledge'
 
 export interface UserInfo {
@@ -23,6 +24,7 @@ export interface WorkspaceInfo {
   isDefault?: boolean
   tenantId?: string
   userId?: string
+  role?: string
 }
 
 export interface FileEntry {
@@ -46,7 +48,17 @@ export interface Artifact {
   title: string
   createdAt: string
   exports: ArtifactExport[]
-  sourceRefs?: Array<{ type: string; id: string; label?: string }>
+  sourceRefs?: Array<{
+    type: string
+    id: string
+    label?: string
+    provider?: 'remote' | 'workspace'
+    sourceId?: string
+    chunkId?: string
+    trustLevel?: 'verified' | 'partial' | 'unverified' | 'unknown'
+    excerpt?: string
+    metadata?: Record<string, unknown>
+  }>
   metadata?: Record<string, unknown>
 }
 
@@ -87,6 +99,17 @@ export interface EmailAccountInput {
   user: string
   password: string
   displayName?: string
+  email?: string
+  username?: string
+  provider?: string
+  label?: string
+  ownerUserId?: string
+  ownerUsername?: string
+  status?: string
+  lastVerifiedAt?: string
+  imapTlsMode?: 'ssl' | 'starttls' | 'none'
+  smtpTlsMode?: 'ssl' | 'starttls' | 'none'
+  allowSelfSignedCerts?: boolean
   imapHost: string
   imapPort: number
   imapSecure: boolean
@@ -97,10 +120,26 @@ export interface EmailAccountInput {
 
 export interface EmailAccountState {
   configured: boolean
+  mailboxId?: string
   user?: string
+  email?: string
+  username?: string
   displayName?: string
+  provider?: string
+  label?: string
+  ownerUserId?: string
+  ownerUsername?: string
+  status?: string
+  lastVerifiedAt?: string
   imapHost?: string
+  imapPort?: number
+  imapSecure?: boolean
+  imapTlsMode?: 'ssl' | 'starttls' | 'none'
   smtpHost?: string
+  smtpPort?: number
+  smtpSecure?: boolean
+  smtpTlsMode?: 'ssl' | 'starttls' | 'none'
+  allowSelfSignedCerts?: boolean
 }
 
 export interface EmailMessageSummary {
@@ -131,7 +170,7 @@ export interface AiSettingsView {
   imageConfigured: boolean
 }
 
-export type { Department, KnowledgeLibraryInfo, KnowledgeDocumentMeta, KnowledgeImportResult }
+export type { Department, KnowledgeLibraryInfo, KnowledgeDocumentMeta, KnowledgeImportResult, KnowledgeSourceListItem }
 
 /**
  * Unified platform API — business components must use this instead of
@@ -218,6 +257,7 @@ export interface PlatformApi {
   knowledge: {
     getBaseInfo(departmentId: string): Promise<KnowledgeLibraryInfo>
     listDocuments(departmentId: string): Promise<KnowledgeDocumentMeta[]>
+    listSources(workspaceId?: string | null): Promise<KnowledgeSourceListItem[]>
     importDocuments(departmentId: string, files?: File[]): Promise<KnowledgeImportResult>
     deleteDocument(departmentId: string, documentId: string): Promise<void>
   }

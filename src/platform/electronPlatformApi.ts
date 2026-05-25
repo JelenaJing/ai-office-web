@@ -12,6 +12,7 @@ import type {
   KnowledgeLibraryInfo,
   KnowledgeDocumentMeta,
   KnowledgeImportResult,
+  KnowledgeSourceListItem,
 } from './types'
 
 type ElectronApiShape = {
@@ -254,6 +255,41 @@ export const electronPlatformApi: PlatformApi = {
       return api.listKnowledgeDocuments(departmentId)
     },
 
+    async listSources(): Promise<KnowledgeSourceListItem[]> {
+      const api = getElectronApi()
+      if (typeof api.listDepartments !== 'function' || typeof api.listKnowledgeDocuments !== 'function') {
+        notSupported('knowledge.listSources')
+      }
+      const departments = await api.listDepartments()
+      const documentGroups = await Promise.all(
+        departments.map(async (department) => ({
+          department,
+          documents: await api.listKnowledgeDocuments?.(department.id) ?? [],
+        })),
+      )
+      return documentGroups.flatMap(({ department, documents }) => (
+        documents.map((document) => ({
+          id: document.id,
+          title: document.title || document.originalName || document.id,
+          sourceType: document.documentCategory === 'academic'
+            ? 'literature'
+            : 'knowledge_base',
+          provider: 'remote' as const,
+          trustLevel: document.extractionStatus === 'failed'
+            ? 'unverified'
+            : document.extractionStatus === 'ready'
+              ? 'partial'
+              : 'unknown',
+          updatedAt: document.updatedAt || document.importedAt,
+          metadata: {
+            departmentId: department.id,
+            departmentName: department.name,
+            originalName: document.originalName,
+          },
+        }))
+      ))
+    },
+
     async importDocuments(departmentId: string): Promise<KnowledgeImportResult> {
       const api = getElectronApi()
       if (typeof api.importKnowledgeDocuments !== 'function') {
@@ -344,4 +380,3 @@ export const electronPlatformApi: PlatformApi = {
     },
   },
 }
-

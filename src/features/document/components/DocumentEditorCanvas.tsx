@@ -329,6 +329,7 @@ export interface DocumentEditorCanvasHandle {
     citationId: string
     refId: string
     sourceId?: string
+    provider?: 'remote' | 'workspace'
     sourceType?: string
     chunkId?: string
     trustLevel?: string
@@ -342,6 +343,7 @@ export interface DocumentEditorCanvasHandle {
     label: string
     refLabel?: string
     sourceId?: string
+    provider?: 'remote' | 'workspace'
     sourceType?: string
     chunkId?: string
     trustLevel?: string
@@ -918,7 +920,7 @@ export const DocumentEditorCanvas = forwardRef<DocumentEditorCanvasHandle, Docum
           root,
           patch: {
             type: 'insert_citation',
-            html: `<span class="doc-citation" data-citation-id="${escapeHtml(input.citationId)}" data-ref-id="${escapeHtml(input.refId)}" data-ref-label="${escapeHtml(input.label)}" data-source-id="${escapeHtml(input.sourceId || '')}" data-source-type="${escapeHtml(input.sourceType || '')}" data-chunk-id="${escapeHtml(input.chunkId || '')}" data-trust-level="${escapeHtml(input.trustLevel || '')}" data-render-mode="${escapeHtml(input.renderMode || 'inline')}">[${escapeHtml(input.label)}]</span>`,
+            html: `<span class="doc-citation" data-citation-id="${escapeHtml(input.citationId)}" data-ref-id="${escapeHtml(input.refId)}" data-ref-label="${escapeHtml(input.label)}" data-source-id="${escapeHtml(input.sourceId || '')}" data-provider="${escapeHtml(input.provider || '')}" data-source-type="${escapeHtml(input.sourceType || '')}" data-chunk-id="${escapeHtml(input.chunkId || '')}" data-trust-level="${escapeHtml(input.trustLevel || '')}" data-render-mode="${escapeHtml(input.renderMode || 'inline')}">[${escapeHtml(input.label)}]</span>`,
             citation: {
               id: input.citationId,
               refId: input.refId,

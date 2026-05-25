@@ -1,14 +1,17 @@
 import fs from 'fs'
 import path from 'path'
 import { runAcademicWritingWorkflow } from '../server/src/features/document/services/academicWritingService'
-import { searchKnowledgeCitationChunks } from '../server/src/features/knowledge/services/knowledgeSearchService'
+import { searchKnowledgeCitation, searchKnowledgeCitationChunks } from '../server/src/features/knowledge/services/knowledgeSearchService'
 import { getOrCreateDefaultWorkspace, workspaceDir } from '../server/src/lib/workspaceStore'
+import { installMockRemoteKnowledgeFetch } from './remoteKnowledgeMock'
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message)
 }
 
 async function main() {
+  process.env.REMOTE_KNOWLEDGE_BASE_URL = 'http://mock-knowledge-search.local'
+  process.env.REMOTE_KNOWLEDGE_API_TOKEN = 'knowledge-search-token'
   const userId = `knowledge-search-smoke-${Date.now()}`
   const workspace = getOrCreateDefaultWorkspace(userId)
   const filesRoot = path.join(workspaceDir(userId, workspace.id), 'files')
@@ -54,6 +57,71 @@ async function main() {
     chunks.some((chunk) => chunk.excerpt.includes('引用可审计') || chunk.excerpt.includes('sourceId')),
     'knowledge search excerpt should come from the real file text',
   )
+  assert(chunks.every((chunk) => chunk.provider === 'workspace'), 'workspace-backed search should still return workspace provider')
+
+  const remoteSourceId = 'doc-knowledge-policy'
+  const remoteChunkId = 'doc-knowledge-policy:chunk-2'
+  const remoteMock = installMockRemoteKnowledgeFetch({
+    baseUrl: process.env.REMOTE_KNOWLEDGE_BASE_URL!,
+    departments: [{ id: 'kb-governance', name: '治理政策库' }],
+    filesByDepartment: {
+      'kb-governance': [
+        {
+          id: remoteSourceId,
+          title: '知识引用治理办法.pdf',
+          originalName: '知识引用治理办法.pdf',
+        },
+      ],
+    },
+    qaByDepartment: {
+      'kb-governance': {
+        ok: true,
+        results: [
+          {
+            documentId: remoteSourceId,
+            documentTitle: '知识引用治理办法',
+            chunkId: remoteChunkId,
+            text: '远端知识库要求统一 provider 字段，并与 workspace 结果一起排序、去重、截断。',
+            score: 0.99,
+            trustLevel: 'verified',
+            sourceType: 'policy',
+            metadata: { channel: 'remote' },
+          },
+          {
+            documentId: remoteSourceId,
+            documentTitle: '知识引用治理办法',
+            chunkId: remoteChunkId,
+            text: '重复 chunk 用于验证去重。',
+            score: 0.4,
+            trustLevel: 'verified',
+            sourceType: 'policy',
+          },
+        ],
+      },
+    },
+  })
+
+  try {
+    const merged = await searchKnowledgeCitation({
+      userId,
+      query: 'provider 排序 去重 截断 sourceId chunkId',
+      workspaceId: workspace.path,
+      selectedSourceIds: [fileId, remoteSourceId],
+      topK: 3,
+    })
+
+    assert(merged.chunks.length >= 2, 'merged search should include remote and workspace chunks')
+    assert(merged.chunks.some((chunk) => chunk.provider === 'remote'), 'merged search should include remote provider')
+    assert(merged.chunks.some((chunk) => chunk.provider === 'workspace'), 'merged search should include workspace provider')
+    const dedupeKeys = new Set(merged.chunks.map((chunk) => `${chunk.provider}:${chunk.sourceId}:${chunk.chunkId}`))
+    assert(dedupeKeys.size === merged.chunks.length, 'merged search should dedupe duplicate chunks')
+    for (let index = 1; index < merged.chunks.length; index += 1) {
+      assert((merged.chunks[index - 1]!.score || 0) >= (merged.chunks[index]!.score || 0), 'merged search should sort by score desc')
+    }
+    assert(merged.chunks.length <= 3, 'merged search should respect topK')
+  } finally {
+    remoteMock.restore()
+  }
 
   const result = await runAcademicWritingWorkflow({
     userId,

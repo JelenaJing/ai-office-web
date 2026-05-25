@@ -5,6 +5,8 @@ import {
   deleteFile,
   getBaseInfo,
   getKnowledgeBase,
+  listRemoteKnowledgeSources,
+  listWorkspaceKnowledgeSources,
   ingestFilesFromBuffers,
   listFiles,
   resolveRemoteKnowledgePartitionId,
@@ -20,6 +22,42 @@ async function resolvePartition(departmentId: string): Promise<string> {
   const nameEn = remote?.nameEn ?? deptId
   return resolveRemoteKnowledgePartitionId(deptId, nameEn)
 }
+
+router.get('/sources', async (req, res) => {
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+
+  const workspaceId = typeof req.query.workspaceId === 'string'
+    ? req.query.workspaceId.trim()
+    : ''
+
+  const [remoteResult, workspaceResult] = await Promise.allSettled([
+    listRemoteKnowledgeSources(),
+    listWorkspaceKnowledgeSources({ userId, workspaceId }),
+  ])
+
+  const warnings: string[] = []
+  const sources = [
+    ...(workspaceResult.status === 'fulfilled'
+      ? workspaceResult.value
+      : (() => {
+          const message = workspaceResult.reason instanceof Error ? workspaceResult.reason.message : String(workspaceResult.reason)
+          warnings.push(`工作区附件列表读取失败：${message}`)
+          console.warn(`[knowledge] list workspace sources failed user=${userId}:`, message)
+          return []
+        })()),
+    ...(remoteResult.status === 'fulfilled'
+      ? remoteResult.value
+      : (() => {
+          const message = remoteResult.reason instanceof Error ? remoteResult.reason.message : String(remoteResult.reason)
+          warnings.push(`远端知识库列表读取失败：${message}`)
+          console.warn(`[knowledge] list remote sources failed user=${userId}:`, message)
+          return []
+        })()),
+  ]
+
+  res.json({ sources, warnings })
+})
 
 /** GET /api/knowledge/:departmentId/info */
 router.get('/:departmentId/info', async (req, res) => {
@@ -71,7 +109,7 @@ router.get('/:departmentId/parity-status', async (req, res) => {
   }
 })
 
-/** POST /api/knowledge/search — workspace-backed citation retrieval. */
+/** POST /api/knowledge/search — unified remote + workspace citation retrieval. */
 router.post('/search', async (req, res) => {
   const userId = await requireAccountUser(req, res)
   if (!userId) return
@@ -82,11 +120,6 @@ router.post('/search', async (req, res) => {
     ? req.body.selectedSourceIds.map((id: unknown) => String(id || '').trim()).filter(Boolean)
     : []
   const topK = Math.max(1, Math.min(Number(req.body?.topK) || 5, 10))
-
-  if (selectedSourceIds.length === 0) {
-    res.json({ success: true, query, workspaceId, chunks: [], mockable: false })
-    return
-  }
 
   const searchResult = await searchKnowledgeCitation({
     userId,
@@ -104,6 +137,7 @@ router.post('/search', async (req, res) => {
     topK,
     chunks: searchResult.chunks.slice(0, topK),
     mockable: searchResult.mockable,
+    warnings: searchResult.warnings ?? [],
   })
 })
 

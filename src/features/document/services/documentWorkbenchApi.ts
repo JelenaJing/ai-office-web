@@ -1,5 +1,6 @@
 import { platformApi } from '../../../platform'
-import type { FileEntry } from '../../../platform'
+import type { FileEntry, KnowledgeSourceListItem } from '../../../platform'
+import { resolveWebApiUrl } from '../../../runtime/apiBase'
 
 export type DocumentEngine = 'builtin' | 'minimax_docx'
 export type DocumentLanguage = 'zh-CN' | 'en-US'
@@ -22,6 +23,11 @@ export interface DocumentKnowledgeRefInput {
   kind: 'knowledge_base' | 'file'
   id: string
   label?: string
+  provider?: 'remote' | 'workspace'
+  sourceType?: 'knowledge_base' | 'file' | 'policy' | 'literature' | 'manual_note'
+  sourceId?: string
+  trustLevel?: 'verified' | 'partial' | 'unverified' | 'unknown'
+  metadata?: Record<string, unknown>
 }
 
 export interface DocumentKnowledgeRef {
@@ -30,10 +36,12 @@ export interface DocumentKnowledgeRef {
   label: string
   excerpt?: string
   sourceTitles?: string[]
+  provider?: 'remote' | 'workspace'
   sourceType?: 'knowledge_base' | 'file' | 'policy' | 'literature' | 'manual_note'
   sourceId?: string
   chunkId?: string
   trustLevel?: 'verified' | 'partial' | 'unverified' | 'unknown'
+  metadata?: Record<string, unknown>
   citationStatus: 'verified' | 'partial' | 'unverified'
 }
 
@@ -59,9 +67,11 @@ export interface DocumentReference {
   sourceId: string
   sourceLabel?: string
   excerpt?: string
+  provider?: 'remote' | 'workspace'
   sourceType?: 'knowledge_base' | 'file' | 'policy' | 'literature' | 'manual_note'
   chunkId?: string
   trustLevel?: 'verified' | 'partial' | 'unverified' | 'unknown'
+  metadata?: Record<string, unknown>
   citedBlockIds?: string[]
   citationStatus?: 'verified' | 'partial' | 'unverified'
 }
@@ -74,9 +84,11 @@ export interface DocumentCitation {
   text: string
   renderMode: 'inline' | 'footnote' | 'badge'
   sourceId?: string
+  provider?: 'remote' | 'workspace'
   sourceType?: string
   chunkId?: string
   trustLevel?: string
+  metadata?: Record<string, unknown>
 }
 
 export interface KnowledgeCitationChunk {
@@ -86,6 +98,9 @@ export interface KnowledgeCitationChunk {
   excerpt: string
   sourceType: 'knowledge_base' | 'file' | 'policy' | 'literature' | 'manual_note'
   trustLevel: 'verified' | 'partial' | 'unverified' | 'unknown'
+  score: number
+  provider: 'remote' | 'workspace'
+  metadata?: Record<string, unknown>
 }
 
 export interface DocumentExportPaths {
@@ -214,7 +229,17 @@ export interface DocumentArtifact {
   title: string
   html: string
   canonicalData: DocumentCanonicalData
-  sourceRefs: Array<{ type: string; id: string; label?: string }>
+  sourceRefs: Array<{
+    type: string
+    id: string
+    label?: string
+    provider?: 'remote' | 'workspace'
+    sourceId?: string
+    chunkId?: string
+    trustLevel?: 'verified' | 'partial' | 'unverified' | 'unknown'
+    excerpt?: string
+    metadata?: Record<string, unknown>
+  }>
   knowledgeRefs: DocumentKnowledgeRef[]
   references: DocumentReference[]
   citations: DocumentCitation[]
@@ -469,7 +494,7 @@ function authHeaders(): Record<string, string> {
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
+  const response = await fetch(resolveWebApiUrl(path), {
     ...init,
     headers: {
       ...authHeaders(),
@@ -635,12 +660,16 @@ export async function queryKnowledgeCitationChunks(input: {
   workspaceId?: string | null
   selectedSourceIds?: string[]
   topK?: number
-}): Promise<{ success: boolean; chunks: KnowledgeCitationChunk[]; mockable: boolean }> {
+}): Promise<{ success: boolean; chunks: KnowledgeCitationChunk[]; mockable: boolean; warnings?: string[] }> {
   return requestJson('/api/knowledge/search', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
   })
+}
+
+export async function listKnowledgeSources(workspaceId?: string | null): Promise<KnowledgeSourceListItem[]> {
+  return platformApi.knowledge.listSources(workspaceId)
 }
 
 export async function saveEditableDocument(input: {
@@ -806,7 +835,7 @@ export async function importDocumentDocx(input: {
   if (input.file) formData.append('file', input.file)
   if (input.artifactId) formData.append('artifactId', input.artifactId)
   if (input.workspacePath) formData.append('workspacePath', input.workspacePath)
-  const response = await fetch('/api/documents/import-docx', {
+  const response = await fetch(resolveWebApiUrl('/api/documents/import-docx'), {
     method: 'POST',
     headers: authHeaders(),
     body: formData,
@@ -821,18 +850,30 @@ export async function importDocumentDocx(input: {
 export function buildKnowledgeRefsFromSelection(
   knowledgeIds: string[],
   attachments: FileEntry[],
-  knowledgeNameMap: Map<string, string>,
+  knowledgeSourceMap: Map<string, KnowledgeSourceListItem>,
 ): DocumentKnowledgeRefInput[] {
   return [
-    ...knowledgeIds.map((id) => ({
-      kind: 'knowledge_base' as const,
-      id,
-      label: knowledgeNameMap.get(id) || id,
-    })),
+    ...knowledgeIds.map((id) => {
+      const source = knowledgeSourceMap.get(id)
+      return {
+        kind: 'knowledge_base' as const,
+        id,
+        label: source?.title || id,
+        provider: source?.provider || 'remote',
+        sourceType: source?.sourceType || 'knowledge_base',
+        sourceId: source?.id || id,
+        trustLevel: source?.trustLevel,
+        metadata: source?.metadata,
+      }
+    }),
     ...attachments.map((file) => ({
       kind: 'file' as const,
       id: file.id,
       label: file.name,
+      provider: 'workspace' as const,
+      sourceType: 'file' as const,
+      sourceId: file.id,
+      trustLevel: 'verified' as const,
     })),
   ]
 }

@@ -2,10 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, ty
 import styled from 'styled-components'
 import { useWorkspace } from '../../../contexts/WorkspaceContext'
 import { useDocumentWorkspaceKnowledge } from '../../../contexts/DocumentWorkspaceContext'
-import { useDepartment } from '../../../contexts/DepartmentContext'
-import { KnowledgeTreePicker } from '../../../components/knowledge/KnowledgeTreePicker'
 import { platformApi } from '../../../platform'
-import type { FileEntry } from '../../../platform'
+import type { FileEntry, KnowledgeSourceListItem } from '../../../platform'
 import {
   DocumentAiEditPanel,
   type DocumentAiScope,
@@ -16,6 +14,7 @@ import {
   type DocumentEditorCanvasHandle,
 } from './DocumentEditorCanvas'
 import { DocumentAttachmentPanel, DocumentKnowledgePanel } from './DocumentKnowledgePanel'
+import { DocumentKnowledgeSourcePicker } from './DocumentKnowledgeSourcePicker'
 import { DocumentOutlinePanel } from './DocumentOutlinePanel'
 import { DocumentTemplatePanel } from './DocumentTemplatePanel'
 import { DocumentTopToolbar } from './DocumentTopToolbar'
@@ -32,6 +31,7 @@ import {
   engineLabel,
   exportDocumentArtifact,
   importDocumentDocx,
+  listKnowledgeSources,
   loadDocumentWorkbenchConfig,
   previewFormalTemplate,
   queryKnowledgeCitationChunks,
@@ -492,13 +492,14 @@ function buildPdfPrintHtml(input: { title: string; html: string }): string {
 export default function DocumentWorkbench() {
   const { activeWorkspacePath, openWorkspace } = useWorkspace()
   const { workspaceKbIds, setWorkspaceKbIds } = useDocumentWorkspaceKnowledge()
-  const { departments, loading: departmentsLoading } = useDepartment()
 
   const [templates, setTemplates] = useState<DocumentTemplateOption[]>([])
   const [defaultEngine, setDefaultEngine] = useState<'builtin' | 'minimax_docx'>('minimax_docx')
   const [fallbackMode, setFallbackMode] = useState<'builtin' | 'none'>('builtin')
   const [selectedTemplateId, setSelectedTemplateId] = useState('annual_report')
   const [attachments, setAttachments] = useState<FileEntry[]>([])
+  const [knowledgeSources, setKnowledgeSources] = useState<KnowledgeSourceListItem[]>([])
+  const [knowledgeSourcesLoading, setKnowledgeSourcesLoading] = useState(false)
   const [editorState, setEditorState] = useState<EditableDocumentState>(createEmptyEditorState('minimax_docx'))
   const [artifactFilename, setArtifactFilename] = useState<string | null>(null)
   const [modifiedSectionIds, setModifiedSectionIds] = useState<string[]>([])
@@ -553,6 +554,28 @@ export default function DocumentWorkbench() {
       disposed = true
     }
   }, [selectedTemplateId])
+
+  useEffect(() => {
+    let disposed = false
+    setKnowledgeSourcesLoading(true)
+    void listKnowledgeSources(activeWorkspacePath)
+      .then((sources) => {
+        if (disposed) return
+        setKnowledgeSources(sources)
+      })
+      .catch((error) => {
+        if (disposed) return
+        setStatusMessage(error instanceof Error ? error.message : '加载知识来源失败')
+        setStatusTone('err')
+      })
+      .finally(() => {
+        if (disposed) return
+        setKnowledgeSourcesLoading(false)
+      })
+    return () => {
+      disposed = true
+    }
+  }, [activeWorkspacePath])
 
   useEffect(() => {
     setHydrated(false)
@@ -676,9 +699,9 @@ export default function DocumentWorkbench() {
     () => templates.find((item) => item.id === selectedTemplateId) || templates[0] || null,
     [selectedTemplateId, templates],
   )
-  const knowledgeNameMap = useMemo(
-    () => new Map(departments.map((department) => [department.id, department.name])),
-    [departments],
+  const knowledgeSourceMap = useMemo(
+    () => new Map(knowledgeSources.filter((source) => source.provider === 'remote').map((source) => [source.id, source])),
+    [knowledgeSources],
   )
 
   const selectedSection = useMemo(
@@ -916,13 +939,19 @@ export default function DocumentWorkbench() {
       setStatusTone(undefined)
       const entry = await platformApi.files.upload(file)
       setAttachments((prev) => [...prev, entry])
+      try {
+        const sources = await listKnowledgeSources(activeWorkspacePath)
+        setKnowledgeSources(sources)
+      } catch {
+        // Keep the uploaded attachment selection even if the source list refresh lags behind.
+      }
       setStatusMessage(`已添加附件引用：${entry.name}`)
       setStatusTone('ok')
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : '上传附件失败')
       setStatusTone('err')
     }
-  }, [])
+  }, [activeWorkspacePath])
 
   const handleImportDocxFileChange = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -968,7 +997,7 @@ export default function DocumentWorkbench() {
     setExportError(null)
     try {
       if (promptOverride) setGenerationPrompt(promptOverride)
-      const knowledgeRefs = buildKnowledgeRefsFromSelection(workspaceKbIds, attachments, knowledgeNameMap)
+      const knowledgeRefs = buildKnowledgeRefsFromSelection(workspaceKbIds, attachments, knowledgeSourceMap)
       const routed = await routeDocumentTask({
         prompt: generationText,
         currentDocument: editorState.documentDraft
@@ -1095,7 +1124,7 @@ export default function DocumentWorkbench() {
     } finally {
       setBusy(false)
     }
-  }, [activeWorkspacePath, attachments, editorState.documentDraft, editorState.selectedSectionId, editorState.selectedText, editorState.title, generationPrompt, knowledgeNameMap, syncEditorStateFromTaskResult, template, workspaceKbIds])
+  }, [activeWorkspacePath, attachments, editorState.documentDraft, editorState.selectedSectionId, editorState.selectedText, editorState.title, generationPrompt, knowledgeSourceMap, syncEditorStateFromTaskResult, template, workspaceKbIds])
 
   const handleAcademicWritingGenerate = useCallback(async (input: AcademicWritingPanelSubmit) => {
     if (!activeWorkspacePath) {
@@ -1108,7 +1137,7 @@ export default function DocumentWorkbench() {
     setExportError(null)
     try {
       setStatusMessage('正在生成论文大纲与章节内容…')
-      const knowledgeRefs = buildKnowledgeRefsFromSelection(workspaceKbIds, attachments, knowledgeNameMap)
+      const knowledgeRefs = buildKnowledgeRefsFromSelection(workspaceKbIds, attachments, knowledgeSourceMap)
       const response = await runAcademicWritingWorkflow({
         workspacePath: activeWorkspacePath,
         topic: input.topic,
@@ -1134,7 +1163,7 @@ export default function DocumentWorkbench() {
     } finally {
       setBusy(false)
     }
-  }, [activeWorkspacePath, attachments, knowledgeNameMap, syncEditorStateFromTaskResult, workspaceKbIds])
+  }, [activeWorkspacePath, attachments, knowledgeSourceMap, syncEditorStateFromTaskResult, workspaceKbIds])
 
   const handleSelectSection = useCallback((sectionId: string) => {
     setEditorState((prev) => ({
@@ -1429,13 +1458,15 @@ export default function DocumentWorkbench() {
       let citationKnowledgeRef: DocumentKnowledgeRef | null = null
       let refSource = availableRefs[0] || (knowledgeRefs[0]
         ? {
-            id: `ref-${knowledgeRefs[0].kind}-${knowledgeRefs[0].id}`,
+            id: `ref-${knowledgeRefs[0].provider || 'unknown'}-${knowledgeRefs[0].kind}-${knowledgeRefs[0].sourceId || knowledgeRefs[0].id}`,
             label: knowledgeRefs[0].label || '知识库引用',
             kind: knowledgeRefs[0].kind,
             sourceId: knowledgeRefs[0].sourceId || knowledgeRefs[0].id || 'kb-unknown',
+            provider: knowledgeRefs[0].provider,
             sourceType: knowledgeRefs[0].sourceType || knowledgeRefs[0].kind,
             chunkId: knowledgeRefs[0].chunkId,
             trustLevel: knowledgeRefs[0].trustLevel || knowledgeRefs[0].citationStatus,
+            metadata: knowledgeRefs[0].metadata,
           }
         : null)
       const retrievalSourceIds = [...workspaceKbIds, ...attachments.map((item) => item.id)]
@@ -1450,27 +1481,31 @@ export default function DocumentWorkbench() {
           })
           const chunk = retrieval.chunks[0]
           if (chunk) {
-            const sourceKind = attachments.some((item) => item.id === chunk.sourceId) ? 'file' : 'knowledge_base'
+            const sourceKind = chunk.provider === 'workspace' ? 'file' : 'knowledge_base'
             citationKnowledgeRef = {
               kind: sourceKind,
               id: chunk.sourceId,
               label: chunk.title,
               excerpt: chunk.excerpt,
+              provider: chunk.provider,
               sourceType: chunk.sourceType,
               sourceId: chunk.sourceId,
               chunkId: chunk.chunkId,
               trustLevel: chunk.trustLevel,
+              metadata: chunk.metadata,
               citationStatus: chunk.trustLevel === 'verified' ? 'verified' : chunk.trustLevel === 'unverified' ? 'unverified' : 'partial',
             }
             refSource = {
-              id: `ref-${sourceKind}-${chunk.sourceId}`,
+              id: `ref-${chunk.provider}-${sourceKind}-${chunk.sourceId}`,
               label: chunk.title,
               kind: sourceKind,
               sourceId: chunk.sourceId,
+              provider: chunk.provider,
               sourceType: chunk.sourceType,
               chunkId: chunk.chunkId,
               trustLevel: chunk.trustLevel,
               excerpt: chunk.excerpt,
+              metadata: chunk.metadata,
             }
           }
         } catch (error) {
@@ -1498,6 +1533,7 @@ export default function DocumentWorkbench() {
         label: refSource.label,
         refLabel: refSource.label,
         sourceId: refSource.sourceId,
+        provider: refSource.provider,
         sourceType: refSource.sourceType,
         chunkId: refSource.chunkId,
         trustLevel: refSource.trustLevel,
@@ -1840,7 +1876,7 @@ export default function DocumentWorkbench() {
         title: editorState.title,
         html: editorState.html,
         document: editorState.documentDraft,
-        knowledgeRefs: buildKnowledgeRefsFromSelection(workspaceKbIds, attachments, knowledgeNameMap),
+        knowledgeRefs: buildKnowledgeRefsFromSelection(workspaceKbIds, attachments, knowledgeSourceMap),
         currentSection: selectedSection,
         documentContext: {
           title: editorState.title,
@@ -1890,7 +1926,7 @@ export default function DocumentWorkbench() {
     }
   }
 
-  const handleAiSubmit = useCallback(runAiSubmit, [appendHistory, attachments, captureAiSnapshot, editorState, handleDocumentRewrite, knowledgeNameMap, markSectionModified, selectedSection, syncEditorStateFromTaskResult, template, workspaceKbIds])
+  const handleAiSubmit = useCallback(runAiSubmit, [appendHistory, attachments, captureAiSnapshot, editorState, handleDocumentRewrite, knowledgeSourceMap, markSectionModified, selectedSection, syncEditorStateFromTaskResult, template, workspaceKbIds])
 
   const handleAiPanelGenerate = useCallback(async (text: string) => {
     await handleGenerate(text)
@@ -2129,7 +2165,7 @@ export default function DocumentWorkbench() {
               {sidebarOpen.knowledge ? (
                 <>
                   <DocumentKnowledgePanel
-                    departments={departments}
+                    sources={knowledgeSources.filter((source) => source.provider === 'remote')}
                     selectedKnowledgeIds={workspaceKbIds}
                     onOpenKnowledgePicker={() => {
                       setKbPickerOpen(true)
@@ -2231,10 +2267,10 @@ export default function DocumentWorkbench() {
       {statusMessage ? <StatusBar $tone={statusTone}>{statusMessage}</StatusBar> : null}
 
       {kbPickerOpen && (
-        <KnowledgeTreePicker
-          departments={departments}
+        <DocumentKnowledgeSourcePicker
+          sources={knowledgeSources}
           selectedIds={workspaceKbIds}
-          loading={departmentsLoading}
+          loading={knowledgeSourcesLoading}
           onApply={(ids) => {
             setWorkspaceKbIds(ids)
             setKbPickerOpen(false)

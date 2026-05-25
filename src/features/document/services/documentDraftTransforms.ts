@@ -64,15 +64,17 @@ function blockId(sectionId: string, kind: string, index: number): string {
 
 function buildReferences(knowledgeRefs: DocumentKnowledgeRef[]): DocumentReference[] {
   return knowledgeRefs.map((ref) => ({
-    id: `ref-${ref.kind}-${ref.id}`,
+    id: `ref-${ref.provider || 'unknown'}-${ref.kind}-${ref.sourceId || ref.id}`,
     label: ref.label,
     kind: ref.kind,
     sourceId: ref.sourceId || ref.id,
     sourceLabel: ref.label,
     excerpt: ref.excerpt,
+    provider: ref.provider,
     sourceType: ref.sourceType || ref.kind,
     chunkId: ref.chunkId,
     trustLevel: ref.trustLevel || ref.citationStatus,
+    metadata: ref.metadata,
     citationStatus: ref.citationStatus,
   }))
 }
@@ -105,6 +107,7 @@ function buildCitationsFromHtml(input: {
       text: normalizeText(node.textContent || ''),
       renderMode: (node.dataset.renderMode as DocumentCitation['renderMode']) || 'inline',
       sourceId: node.dataset.sourceId || undefined,
+      provider: (node.dataset.provider as DocumentCitation['provider']) || undefined,
       sourceType: node.dataset.sourceType || undefined,
       chunkId: node.dataset.chunkId || undefined,
       trustLevel: node.dataset.trustLevel || undefined,
@@ -332,9 +335,11 @@ function buildDocumentArtifactFromHtml(input: {
       kind: 'manual_note',
       sourceId: node.dataset.sourceId || refId,
       sourceLabel: label,
+      provider: (node.dataset.provider as DocumentReference['provider']) || undefined,
       sourceType: node.dataset.sourceType || 'manual_note',
       chunkId: node.dataset.chunkId,
       trustLevel: node.dataset.trustLevel || 'partial',
+      metadata: undefined,
       citationStatus: 'partial',
     })
     knownRefIds.add(refId)
@@ -346,6 +351,12 @@ function buildDocumentArtifactFromHtml(input: {
       type: ref.sourceType || ref.kind,
       id: ref.sourceId,
       label: ref.sourceLabel || ref.label,
+      provider: ref.provider,
+      sourceId: ref.sourceId,
+      chunkId: ref.chunkId,
+      trustLevel: ref.trustLevel,
+      excerpt: ref.excerpt,
+      metadata: ref.metadata,
     }))
 
   return {

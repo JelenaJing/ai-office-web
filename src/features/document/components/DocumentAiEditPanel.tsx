@@ -192,6 +192,12 @@ interface DocumentAiEditPanelProps {
   onSubmit: (instruction: string, scope: DocumentAiScope) => Promise<void> | void
 }
 
+function providerLabel(provider?: 'remote' | 'workspace'): string {
+  if (provider === 'remote') return '远端知识库'
+  if (provider === 'workspace') return '工作区附件'
+  return '未标注来源'
+}
+
 export function DocumentAiEditPanel({
   selectedSectionId,
   selectedSectionLabel,
@@ -301,7 +307,8 @@ export function DocumentAiEditPanel({
               {references.map((reference) => (
                 <RefCard key={reference.id}>
                   <RefLabel>{reference.label}</RefLabel>
-                  <RefMeta>{reference.sourceType || reference.kind} · sourceId: {reference.sourceId || '手动来源'}</RefMeta>
+                  <RefMeta>来源：{providerLabel(reference.provider)} · {reference.sourceType || reference.kind}</RefMeta>
+                  <RefMeta>sourceId: {reference.sourceId || '手动来源'}</RefMeta>
                   <RefMeta>chunkId: {reference.chunkId || '待检索'} · trustLevel: {reference.trustLevel || reference.citationStatus || 'unknown'}</RefMeta>
                   {reference.citedBlockIds?.length ? <RefMeta>引用段落：{reference.citedBlockIds.join('、')}</RefMeta> : null}
                   {reference.excerpt ? <RefMeta>{reference.excerpt}</RefMeta> : null}
@@ -323,6 +330,7 @@ export function DocumentAiEditPanel({
                   <RefCard key={citation.id}>
                     <RefLabel>{citation.text || citation.id}</RefLabel>
                     <RefMeta>{citation.renderMode} · blockId: {citation.blockId}</RefMeta>
+                    <RefMeta>来源：{providerLabel(citation.provider)}</RefMeta>
                     <RefMeta>sourceId: {citation.sourceId || 'manual'} · chunkId: {citation.chunkId || '待检索'} · trustLevel: {citation.trustLevel || 'unknown'}</RefMeta>
                   </RefCard>
                 ))}

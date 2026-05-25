@@ -1,14 +1,9 @@
 import fs from 'fs'
 import path from 'path'
-import {
-  getKnowledgeBase,
-  listFiles,
-  resolveRemoteKnowledgePartitionId,
-  type RemoteDocumentMeta,
-} from './index'
 import { extractDocxContent } from '../../document/services/docxExtractService'
 import { listUserFilesInWorkspace, resolveUserFileInWorkspace, type ResolvedUserFile } from '../../../lib/userFiles'
 import { workspaceDir } from '../../../lib/workspaceStore'
+import { searchRemoteKnowledgeChunks } from './remoteKnowledgeSearchClient'
 import type {
   KnowledgeChunk,
   KnowledgeCitationChunk,
@@ -26,26 +21,6 @@ interface CachedWorkspaceChunks {
   fingerprint: string
   source: KnowledgeSource
   chunks: KnowledgeChunk[]
-}
-
-async function resolvePartition(departmentId: string): Promise<string> {
-  const deptId = String(departmentId || '').trim()
-  const remote = await getKnowledgeBase(deptId)
-  const nameEn = remote?.nameEn ?? deptId
-  return resolveRemoteKnowledgePartitionId(deptId, nameEn)
-}
-
-function sourceTypeForDocument(doc: RemoteDocumentMeta): KnowledgeCitationChunk['sourceType'] {
-  const haystack = `${doc.title} ${doc.originalName} ${doc.documentCategory || ''}`.toLowerCase()
-  if (/政策|法规|条例|办法|policy|regulation/u.test(haystack)) return 'policy'
-  if (/论文|文献|研究|paper|literature|journal|academic/u.test(haystack)) return 'literature'
-  return 'knowledge_base'
-}
-
-function trustLevelForDocument(doc: RemoteDocumentMeta): KnowledgeCitationChunk['trustLevel'] {
-  if (doc.extractionStatus === 'ready') return 'partial'
-  if (doc.extractionStatus === 'failed') return 'unverified'
-  return 'unknown'
 }
 
 function normalizeSearchText(value: string): string {
@@ -186,6 +161,12 @@ async function loadWorkspaceFileChunks(userId: string, file: ResolvedUserFile): 
     text,
     sourceType: source.sourceType,
     trustLevel: source.trustLevel,
+    score: 0,
+    provider: 'workspace' as const,
+    metadata: {
+      workspacePath: file.workspacePath,
+      fileId: file.entry.id,
+    },
   }))
 
   fs.writeFileSync(
@@ -209,32 +190,6 @@ async function loadSelectedWorkspaceChunks(input: KnowledgeSearchInput): Promise
   return chunks.flat()
 }
 
-async function loadRemoteKnowledgeChunks(selectedSourceIds: string[]): Promise<KnowledgeChunk[]> {
-  const chunks: KnowledgeChunk[] = []
-  for (const sourceId of selectedSourceIds) {
-    try {
-      const partition = await resolvePartition(sourceId)
-      const docs = await listFiles(partition)
-      for (const doc of docs) {
-        const previewText = doc.previewText?.trim() || `${doc.title || doc.originalName || sourceId}`
-        chunks.push({
-          sourceId,
-          chunkId: `${sourceId}:${doc.id}:chunk-1`,
-          title: doc.title || doc.originalName || sourceId,
-          excerpt: excerptForChunk(previewText),
-          text: previewText,
-          sourceType: sourceTypeForDocument(doc),
-          trustLevel: trustLevelForDocument(doc),
-        })
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      console.warn(`[knowledge] search remote source=${sourceId} failed:`, msg)
-    }
-  }
-  return chunks
-}
-
 function rankChunks(chunks: KnowledgeChunk[], query: string, topK: number): KnowledgeCitationChunk[] {
   const terms = buildSearchTerms(query)
   const normalizedQuery = normalizeSearchText(query)
@@ -247,49 +202,130 @@ function rankChunks(chunks: KnowledgeChunk[], query: string, topK: number): Know
     .sort((left, right) => {
       const scoreDiff = (right.score || 0) - (left.score || 0)
       if (scoreDiff !== 0) return scoreDiff
-      return left.chunkId.localeCompare(right.chunkId)
+      return `${left.provider}:${left.chunkId}`.localeCompare(`${right.provider}:${right.chunkId}`)
     })
     .slice(0, topK)
 
-  return ranked.map(({ sourceId, chunkId, title, excerpt, sourceType, trustLevel }) => ({
+  return ranked.map(({ sourceId, chunkId, title, excerpt, sourceType, trustLevel, score, provider, metadata }) => ({
     sourceId,
     chunkId,
     title,
     excerpt,
     sourceType,
     trustLevel,
+    score: score || 0,
+    provider,
+    metadata,
   }))
 }
 
-export async function searchKnowledgeCitation(input: KnowledgeSearchInput): Promise<KnowledgeSearchResult> {
-  const query = String(input.query || '').trim()
-  const selectedSourceIds = input.selectedSourceIds.map((id) => String(id || '').trim()).filter(Boolean)
-  const topK = Math.max(1, Math.min(Number(input.topK) || 5, 10))
+function isLikelyWorkspaceSourceId(sourceId: string): boolean {
+  return /^(file-|upload-|workspace-)/i.test(sourceId)
+}
 
-  if (selectedSourceIds.length === 0) {
-    return { chunks: [], mockable: false }
-  }
+function isLikelyRemoteSourceId(sourceId: string): boolean {
+  return /^(kb-|remote-|knowledge-|doc-)/i.test(sourceId)
+}
 
-  const userId = String(input.userId || '').trim()
-  const resolvedWorkspaceSourceIds = userId
-    ? new Set(
-      selectedSourceIds.filter((sourceId) => Boolean(resolveUserFileInWorkspace(userId, sourceId, input.workspaceId))),
-    )
-    : new Set<string>()
-  const workspaceChunks = await loadSelectedWorkspaceChunks({
-    ...input,
-    selectedSourceIds,
+function dedupeCitationChunks(chunks: KnowledgeCitationChunk[]): KnowledgeCitationChunk[] {
+  const deduped = new Map<string, KnowledgeCitationChunk>()
+  chunks.forEach((chunk) => {
+    const key = `${chunk.provider}:${chunk.sourceId}:${chunk.chunkId}`
+    const existing = deduped.get(key)
+    if (!existing || (chunk.score || 0) > (existing.score || 0)) {
+      deduped.set(key, chunk)
+    }
   })
-  const remoteSourceIds = selectedSourceIds.filter((sourceId) => !resolvedWorkspaceSourceIds.has(sourceId))
-  const remoteChunks = await loadRemoteKnowledgeChunks(remoteSourceIds)
-  const ranked = rankChunks([...workspaceChunks, ...remoteChunks], query, topK)
+  return Array.from(deduped.values())
+}
+
+export async function searchWorkspaceKnowledgeChunks(input: KnowledgeSearchInput): Promise<KnowledgeCitationChunk[]> {
+  const topK = Math.max(1, Math.min(Number(input.topK) || 5, 20))
+  return rankChunks(await loadSelectedWorkspaceChunks(input), String(input.query || '').trim(), topK)
+}
+
+export async function searchKnowledgeCitation(input: KnowledgeSearchInput): Promise<KnowledgeSearchResult> {
+  const selectedSourceIds = input.selectedSourceIds.map((id) => String(id || '').trim()).filter(Boolean)
+  const topK = Math.max(1, Math.min(Number(input.topK) || 5, 20))
+  const userId = String(input.userId || '').trim()
+
+  const workspaceSelectedSourceIds: string[] = []
+  const remoteSelectedSourceIds: string[] = []
+
+  selectedSourceIds.forEach((sourceId) => {
+    const isWorkspaceResolved = userId
+      ? Boolean(resolveUserFileInWorkspace(userId, sourceId, input.workspaceId))
+      : false
+    if (isWorkspaceResolved || isLikelyWorkspaceSourceId(sourceId)) {
+      workspaceSelectedSourceIds.push(sourceId)
+      return
+    }
+    if (isLikelyRemoteSourceId(sourceId) || !isWorkspaceResolved) {
+      remoteSelectedSourceIds.push(sourceId)
+    }
+  })
+
+  const [workspaceChunks, remoteResult] = await Promise.all([
+    searchWorkspaceKnowledgeChunks({
+      ...input,
+      selectedSourceIds: selectedSourceIds.length === 0 ? [] : workspaceSelectedSourceIds,
+      topK: Math.max(topK * 2, 8),
+    }),
+    searchRemoteKnowledgeChunks({
+      ...input,
+      selectedSourceIds: selectedSourceIds.length === 0 ? [] : remoteSelectedSourceIds,
+      topK: Math.max(topK * 2, 8),
+    }),
+  ])
+
+  const chunks = dedupeCitationChunks([
+    ...workspaceChunks,
+    ...remoteResult.chunks,
+  ])
+    .sort((left, right) => {
+      const scoreDiff = (right.score || 0) - (left.score || 0)
+      if (scoreDiff !== 0) return scoreDiff
+      return `${left.provider}:${left.chunkId}`.localeCompare(`${right.provider}:${right.chunkId}`)
+    })
+    .slice(0, topK)
 
   return {
-    chunks: ranked,
+    chunks,
     mockable: false,
+    warnings: remoteResult.warnings,
   }
 }
 
 export async function searchKnowledgeCitationChunks(input: KnowledgeSearchInput): Promise<KnowledgeCitationChunk[]> {
   return (await searchKnowledgeCitation(input)).chunks
+}
+
+export async function listWorkspaceKnowledgeSources(input: {
+  userId: string
+  workspaceId?: string
+}): Promise<Array<{
+  id: string
+  title: string
+  sourceType: KnowledgeSourceType
+  provider: 'workspace'
+  trustLevel: KnowledgeTrustLevel
+  updatedAt?: string
+  metadata?: Record<string, unknown>
+}>> {
+  const files = listUserFilesInWorkspace(input.userId, input.workspaceId)
+  return files.map((file) => ({
+    id: file.entry.id,
+    title: file.entry.name,
+    sourceType: inferSourceType(file.entry.name, '', 'file'),
+    provider: 'workspace' as const,
+    trustLevel: 'verified' as const,
+    updatedAt: file.entry.uploadedAt,
+    metadata: {
+      workspacePath: file.workspacePath,
+      fileId: file.entry.id,
+      ext: file.entry.ext,
+      mimeType: file.entry.mimeType,
+      size: file.entry.size,
+    },
+  }))
 }

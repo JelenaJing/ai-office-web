@@ -1,7 +1,6 @@
 import styled from 'styled-components'
 import { BookOpen, Paperclip, Plus, X } from 'lucide-react'
-import type { FileEntry } from '../../../platform'
-import type { Department } from '../../../types/knowledge'
+import type { FileEntry, KnowledgeSourceListItem } from '../../../platform'
 
 const Panel = styled.section`
   border: 1px solid #d8e3ef;
@@ -57,6 +56,17 @@ const Tag = styled.div`
   font-weight: 700;
 `
 
+const ProviderPill = styled.span<{ $provider: 'remote' | 'workspace' }>`
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: ${({ $provider }) => ($provider === 'remote' ? '#e8efff' : '#eef8ec')};
+  color: ${({ $provider }) => ($provider === 'remote' ? '#2c55b8' : '#2e7d32')};
+  font-size: 11px;
+  font-weight: 700;
+`
+
 const RemoveButton = styled.button`
   border: none;
   background: transparent;
@@ -68,7 +78,7 @@ const RemoveButton = styled.button`
 `
 
 interface DocumentKnowledgePanelProps {
-  departments: Department[]
+  sources: KnowledgeSourceListItem[]
   selectedKnowledgeIds: string[]
   onOpenKnowledgePicker: () => void
 }
@@ -80,29 +90,37 @@ interface DocumentAttachmentPanelProps {
 }
 
 export function DocumentKnowledgePanel({
-  departments,
+  sources,
   selectedKnowledgeIds,
   onOpenKnowledgePicker,
 }: DocumentKnowledgePanelProps) {
-  const departmentNameMap = new Map(departments.map((department) => [department.id, department.name]))
+  const sourceMap = new Map(sources.map((source) => [source.id, source]))
 
   return (
     <Panel data-testid="document-knowledge-panel">
       <div style={{ display: 'grid', gap: 10 }}>
         <div style={{ display: 'grid', gap: 6 }}>
-          <Title>知识库选择</Title>
-          <Description>生成文稿时会把所选知识库一并传入 `/api/documents/start`。</Description>
+          <Title>远端知识库</Title>
+          <Description>引用检索统一走 `/api/knowledge/search`，这里选择的是远端知识库文档，不再只传部门分区。</Description>
         </div>
         <div>
           <ActionButton type="button" onClick={onOpenKnowledgePicker}>
             <BookOpen size={14} />
-            选择知识库
+            选择远端文档
           </ActionButton>
         </div>
         <TagList>
           {selectedKnowledgeIds.length > 0
-            ? selectedKnowledgeIds.map((id) => <Tag key={id}>{departmentNameMap.get(id) || id}</Tag>)
-            : <div style={{ fontSize: 12, color: '#6b7f92' }}>未选择知识库</div>}
+            ? selectedKnowledgeIds.map((id) => {
+                const source = sourceMap.get(id)
+                return (
+                  <Tag key={id}>
+                    <ProviderPill $provider="remote">远端知识库</ProviderPill>
+                    {source?.title || id}
+                  </Tag>
+                )
+              })
+            : <div style={{ fontSize: 12, color: '#6b7f92' }}>未选择远端知识库文档</div>}
         </TagList>
       </div>
     </Panel>
@@ -118,8 +136,8 @@ export function DocumentAttachmentPanel({
     <Panel data-testid="document-attachment-panel">
       <div style={{ display: 'grid', gap: 10 }}>
         <div style={{ display: 'grid', gap: 6 }}>
-          <Title>附件引用</Title>
-          <Description>可附加 DOCX、PDF、TXT、Markdown 等材料，作为当前文稿的引用输入。</Description>
+          <Title>工作区附件</Title>
+          <Description>可附加 DOCX、PDF、TXT、Markdown 等材料，作为当前文稿的 workspace-backed 引用输入。</Description>
         </div>
         <div>
           <ActionButton type="button" onClick={onAddAttachment}>
@@ -131,6 +149,7 @@ export function DocumentAttachmentPanel({
           {attachments.length > 0
             ? attachments.map((file) => (
               <Tag key={file.id}>
+                <ProviderPill $provider="workspace">工作区附件</ProviderPill>
                 <Paperclip size={12} />
                 {file.name}
                 <RemoveButton type="button" onClick={() => onRemoveAttachment(file.id)} aria-label={`移除附件 ${file.name}`}>

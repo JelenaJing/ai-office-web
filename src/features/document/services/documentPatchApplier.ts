@@ -287,6 +287,7 @@ export function appendCitationToBlock(
     label: string
     refLabel?: string
     sourceId?: string
+    provider?: 'remote' | 'workspace'
     sourceType?: string
     chunkId?: string
     trustLevel?: string
@@ -305,6 +306,9 @@ export function appendCitationToBlock(
   if (input.sourceId) {
     span.dataset.sourceId = input.sourceId
   }
+  if (input.provider) {
+    span.dataset.provider = input.provider
+  }
   if (input.sourceType) {
     span.dataset.sourceType = input.sourceType
   }
@@ -320,6 +324,9 @@ export function appendCitationToBlock(
   span.setAttribute('data-ref-label', input.refLabel || input.label)
   if (input.sourceId) {
     span.setAttribute('data-source-id', input.sourceId)
+  }
+  if (input.provider) {
+    span.setAttribute('data-provider', input.provider)
   }
   if (input.sourceType) {
     span.setAttribute('data-source-type', input.sourceType)

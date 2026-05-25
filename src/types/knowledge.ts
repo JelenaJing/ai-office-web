@@ -279,6 +279,20 @@ export interface KnowledgeLibraryInfo {
   updatedAt: string
 }
 
+export type KnowledgeCitationSourceType = 'knowledge_base' | 'file' | 'policy' | 'literature' | 'manual_note'
+export type KnowledgeCitationTrustLevel = 'verified' | 'partial' | 'unverified' | 'unknown'
+export type KnowledgeSourceProvider = 'remote' | 'workspace'
+
+export interface KnowledgeSourceListItem {
+  id: string
+  title: string
+  sourceType: KnowledgeCitationSourceType
+  provider: KnowledgeSourceProvider
+  trustLevel: KnowledgeCitationTrustLevel
+  updatedAt?: string
+  metadata?: Record<string, unknown>
+}
+
 export interface KnowledgeImportResult {
   imported: KnowledgeDocumentMeta[]
   duplicates: KnowledgeDocumentMeta[]

@@ -16,6 +16,11 @@ export interface DocumentKnowledgeRefInput {
   kind: 'knowledge_base' | 'file'
   id: string
   label?: string
+  provider?: 'remote' | 'workspace'
+  sourceType?: 'knowledge_base' | 'file' | 'policy' | 'literature' | 'manual_note'
+  sourceId?: string
+  trustLevel?: 'verified' | 'partial' | 'unverified' | 'unknown'
+  metadata?: Record<string, unknown>
 }
 
 export interface DocumentKnowledgeRef {
@@ -24,10 +29,12 @@ export interface DocumentKnowledgeRef {
   label: string
   excerpt?: string
   sourceTitles?: string[]
+  provider?: 'remote' | 'workspace'
   sourceType?: 'knowledge_base' | 'file' | 'policy' | 'literature' | 'manual_note'
   sourceId?: string
   chunkId?: string
   trustLevel?: 'verified' | 'partial' | 'unverified' | 'unknown'
+  metadata?: Record<string, unknown>
   citationStatus: 'verified' | 'partial' | 'unverified'
 }
 
@@ -53,9 +60,11 @@ export interface DocumentReference {
   sourceId: string
   sourceLabel?: string
   excerpt?: string
+  provider?: 'remote' | 'workspace'
   sourceType?: 'knowledge_base' | 'file' | 'policy' | 'literature' | 'manual_note'
   chunkId?: string
   trustLevel?: 'verified' | 'partial' | 'unverified' | 'unknown'
+  metadata?: Record<string, unknown>
   citedBlockIds?: string[]
   citationStatus?: 'verified' | 'partial' | 'unverified'
 }
@@ -68,9 +77,11 @@ export interface DocumentCitation {
   text: string
   renderMode: 'inline' | 'footnote' | 'badge'
   sourceId?: string
+  provider?: 'remote' | 'workspace'
   sourceType?: string
   chunkId?: string
   trustLevel?: string
+  metadata?: Record<string, unknown>
 }
 
 export interface DocumentExportPaths {

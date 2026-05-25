@@ -27,6 +27,7 @@
     "smoke:paper-stream": "rm -rf .tmp-smoke && npx tsc --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck --jsx react-jsx --outDir .tmp-smoke build/run-paper-streaming-smoke.ts src/services/PaperService.ts src/services/paperStreaming.ts src/engines/documentEngine/embeddedPaperDocument.ts src/engines/documentEngine/registry.ts src/utils/markdownToHtml.ts src/types/electron.d.ts electron/main/services/settingsStore.ts && node .tmp-smoke/build/run-paper-streaming-smoke.js && rm -rf .tmp-smoke",
     "smoke:knowledge-service": "npm exec --yes --package tsx tsx build/run-knowledge-service-smoke.ts",
     "smoke:knowledge-search": "npm exec --yes --package tsx tsx build/run-knowledge-search-smoke.ts",
+    "smoke:remote-knowledge-search": "npm exec --yes --package tsx tsx build/run-remote-knowledge-search-smoke.ts",
     "diagnostic:scientific-papers": "npm exec --yes --package tsx tsx build/run-scientific-papers-retrieval-diagnostic.ts",
     "test:hybrid-references": "npm exec --yes --package tsx tsx build/test-hybrid-references.ts",
     "smoke:knowledge-pptx-flow": "npm exec --yes --package tsx tsx build/run-knowledge-pptx-flow-smoke.ts",

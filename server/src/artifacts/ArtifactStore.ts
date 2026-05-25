@@ -30,6 +30,12 @@ export interface ArtifactSourceRef {
   type: 'email' | 'matter' | 'deck' | 'document' | 'knowledge' | 'manual' | string
   id: string
   label?: string
+  provider?: 'remote' | 'workspace'
+  sourceId?: string
+  chunkId?: string
+  trustLevel?: 'verified' | 'partial' | 'unverified' | 'unknown'
+  excerpt?: string
+  metadata?: Record<string, unknown>
 }
 
 export interface ArtifactKnowledgeRef {
@@ -37,6 +43,11 @@ export interface ArtifactKnowledgeRef {
   departmentId?: string
   title?: string
   citationStatus?: 'verified' | 'partial' | 'unverified'
+  provider?: 'remote' | 'workspace'
+  sourceId?: string
+  chunkId?: string
+  trustLevel?: 'verified' | 'partial' | 'unverified' | 'unknown'
+  metadata?: Record<string, unknown>
 }
 
 export interface Artifact {

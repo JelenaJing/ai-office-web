@@ -7,11 +7,12 @@
 // Config
 // ---------------------------------------------------------------------------
 
-const DEFAULT_BASE_URL = 'http://10.26.1.25:8010'
-const API_TIMEOUT_MS = 8000
+const DEFAULT_BASE_URL = 'http://127.0.0.1:8010'
+const DEFAULT_TIMEOUT_MS = 15_000
 
 function getBaseUrl(): string {
   return (
+    process.env.REMOTE_KNOWLEDGE_BASE_URL ??
     process.env.KNOWLEDGE_SERVICE_URL ??
     process.env.KNOWLEDGE_API_BASE_URL ??
     DEFAULT_BASE_URL
@@ -19,12 +20,19 @@ function getBaseUrl(): string {
 }
 
 function getServiceToken(): string | undefined {
-  const t = process.env.KNOWLEDGE_SERVICE_TOKEN?.trim()
+  const t = (
+    process.env.REMOTE_KNOWLEDGE_API_TOKEN ??
+    process.env.KNOWLEDGE_SERVICE_TOKEN
+  )?.trim()
   return t || undefined
 }
 
 function makeSignal(): AbortSignal {
-  return AbortSignal.timeout(API_TIMEOUT_MS)
+  const parsedTimeout = Number(process.env.REMOTE_KNOWLEDGE_TIMEOUT_MS)
+  const timeoutMs = Number.isFinite(parsedTimeout) && parsedTimeout > 0
+    ? parsedTimeout
+    : DEFAULT_TIMEOUT_MS
+  return AbortSignal.timeout(timeoutMs)
 }
 
 function buildHeaders(partition?: string): Record<string, string> {
@@ -94,6 +102,51 @@ interface RawFile {
   parser_used?: string
 }
 
+interface RawQaSource {
+  id?: string
+  file_id?: string
+  fileId?: string
+  document_id?: string
+  documentId?: string
+  source_id?: string
+  sourceId?: string
+  chunk_id?: string
+  chunkId?: string
+  page_no?: number
+  pageNo?: number
+  text?: string
+  content?: string
+  excerpt?: string
+  quote?: string
+  page_context?: string
+  pageContext?: string
+  display_name?: string
+  displayName?: string
+  title?: string
+  document_title?: string
+  documentTitle?: string
+  score?: number
+  similarity?: number
+  relevance?: number
+  trust_level?: string
+  trustLevel?: string
+  source_type?: string
+  sourceType?: string
+  metadata?: Record<string, unknown>
+  [key: string]: unknown
+}
+
+interface RawQaResponse {
+  ok?: boolean
+  results?: RawQaSource[]
+  sources?: RawQaSource[]
+  matches?: RawQaSource[]
+  chunks?: RawQaSource[]
+  documents?: RawQaSource[]
+  data?: RawQaSource[] | { results?: RawQaSource[]; sources?: RawQaSource[]; matches?: RawQaSource[]; chunks?: RawQaSource[]; documents?: RawQaSource[] }
+  source_files?: Array<Record<string, unknown>>
+}
+
 // ---------------------------------------------------------------------------
 // Mapped types (renderer / platformApi expectations)
 // ---------------------------------------------------------------------------
@@ -133,6 +186,18 @@ export interface RemoteLibraryInfo {
   documentCount: number
   createdAt: string
   updatedAt: string
+}
+
+export interface RemoteRetrievalHit {
+  documentId: string
+  documentTitle: string
+  chunkId: string
+  text: string
+  score?: number
+  pageNo?: number
+  trustLevel?: string
+  sourceType?: string
+  metadata?: Record<string, unknown>
 }
 
 // ---------------------------------------------------------------------------
@@ -203,6 +268,88 @@ function mapFileToDocument(f: RawFile): RemoteDocumentMeta {
   }
 }
 
+function firstString(...values: unknown[]): string {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return ''
+}
+
+function firstNumber(...values: unknown[]): number | undefined {
+  for (const value of values) {
+    const parsed = typeof value === 'number' ? value : Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return undefined
+}
+
+function extractQaItems(payload: RawQaResponse | null | undefined): RawQaSource[] {
+  if (!payload || typeof payload !== 'object') return []
+  const directCandidates = [
+    payload.results,
+    payload.sources,
+    payload.matches,
+    payload.chunks,
+    payload.documents,
+  ]
+  for (const candidate of directCandidates) {
+    if (Array.isArray(candidate)) return candidate
+  }
+  if (Array.isArray(payload.data)) return payload.data
+  if (payload.data && typeof payload.data === 'object') {
+    const dataRecord = payload.data as Record<string, unknown>
+    const nestedCandidates = [
+      dataRecord.results,
+      dataRecord.sources,
+      dataRecord.matches,
+      dataRecord.chunks,
+      dataRecord.documents,
+    ]
+    for (const candidate of nestedCandidates) {
+      if (Array.isArray(candidate)) return candidate as RawQaSource[]
+    }
+  }
+  return []
+}
+
+function mapSourceToHit(source: RawQaSource): RemoteRetrievalHit {
+  const documentId = firstString(
+    source.file_id,
+    source.fileId,
+    source.document_id,
+    source.documentId,
+    source.source_id,
+    source.sourceId,
+    source.id,
+  )
+  const text = firstString(
+    source.page_context,
+    source.pageContext,
+    source.text,
+    source.content,
+    source.excerpt,
+    source.quote,
+  )
+  return {
+    documentId,
+    documentTitle: firstString(
+      source.display_name,
+      source.displayName,
+      source.document_title,
+      source.documentTitle,
+      source.title,
+      documentId,
+    ),
+    chunkId: firstString(source.chunk_id, source.chunkId, source.id) || `${documentId}:chunk-1`,
+    text,
+    score: firstNumber(source.score, source.similarity, source.relevance),
+    pageNo: firstNumber(source.page_no, source.pageNo),
+    trustLevel: firstString(source.trust_level, source.trustLevel) || undefined,
+    sourceType: firstString(source.source_type, source.sourceType) || undefined,
+    metadata: source.metadata ?? undefined,
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -231,6 +378,28 @@ export async function listFiles(kbId: string): Promise<RemoteDocumentMeta[]> {
     kbId,
   )
   return (data.files || []).map(mapFileToDocument)
+}
+
+export async function qaSearch(
+  kbId: string,
+  query: string,
+  fileIds: string[] | null = null,
+  topK = 8,
+): Promise<RemoteRetrievalHit[]> {
+  const data = await apiPost<RawQaResponse>(
+    '/qa',
+    {
+      query,
+      file_ids: fileIds,
+      top_k: topK,
+      partition: kbId,
+      llm: false,
+    },
+    kbId,
+  )
+  return extractQaItems(data)
+    .map(mapSourceToHit)
+    .filter((item) => Boolean(item.documentId) && Boolean(item.text))
 }
 
 export async function getBaseInfo(kbId: string): Promise<RemoteLibraryInfo> {

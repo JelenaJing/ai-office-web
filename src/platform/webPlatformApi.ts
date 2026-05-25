@@ -12,6 +12,7 @@ import type {
   KnowledgeLibraryInfo,
   KnowledgeDocumentMeta,
   KnowledgeImportResult,
+  KnowledgeSourceListItem,
   CalendarEvent,
   EmailAccountState,
   EmailAccountInput,
@@ -26,6 +27,7 @@ import {
   ensureWorkspaceBootstrap,
   readCurrentWorkspaceState,
 } from '../services/workspaceBootstrapClient'
+import { resolveWebApiUrl } from '../runtime/apiBase'
 
 // ── Token storage ─────────────────────────────────────────────────────────────
 // Check all known token keys so that sessions created by the legacy login flow
@@ -63,7 +65,7 @@ export class ApiFetchError extends Error {
 }
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
+  const res = await fetch(resolveWebApiUrl(path), {
     ...init,
     headers: {
       ...authHeaders(),
@@ -108,7 +110,7 @@ async function ensureWorkspacePath(preferredWorkspacePath?: string): Promise<str
 
 /** Fetch a protected resource and trigger a browser file download. */
 async function downloadBlob(url: string, filename: string): Promise<void> {
-  const res = await fetch(url, { headers: authHeaders() })
+  const res = await fetch(resolveWebApiUrl(url), { headers: authHeaders() })
   if (!res.ok) throw new Error(`下载失败 (${res.status})`)
   const blob = await res.blob()
   const objectUrl = URL.createObjectURL(blob)
@@ -195,6 +197,7 @@ export const webPlatformApi: PlatformApi = {
         isDefault: data.workspace.isDefault,
         tenantId: data.currentTenantId,
         userId: data.currentUserId,
+        role: data.role,
       }
     },
 
@@ -243,7 +246,7 @@ export const webPlatformApi: PlatformApi = {
       const form = new FormData()
       form.append('file', file)
       form.append('workspacePath', workspacePath)
-      const res = await fetch('/api/files/upload', {
+      const res = await fetch(resolveWebApiUrl('/api/files/upload'), {
         method: 'POST',
         headers: authHeaders(),
         body: form,
@@ -405,6 +408,12 @@ export const webPlatformApi: PlatformApi = {
       return data.documents ?? []
     },
 
+    async listSources(workspaceId?: string | null): Promise<KnowledgeSourceListItem[]> {
+      const query = workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : ''
+      const data = await apiFetch<{ sources: KnowledgeSourceListItem[] }>(`/api/knowledge/sources${query}`)
+      return data.sources ?? []
+    },
+
     async importDocuments(
       departmentId: string,
       files?: File[],
@@ -416,7 +425,7 @@ export const webPlatformApi: PlatformApi = {
         }
       }
       const res = await fetch(
-        `/api/knowledge/${encodeURIComponent(departmentId)}/import`,
+        resolveWebApiUrl(`/api/knowledge/${encodeURIComponent(departmentId)}/import`),
         {
           method: 'POST',
           headers: authHeaders(),

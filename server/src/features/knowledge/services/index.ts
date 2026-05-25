@@ -5,9 +5,11 @@ export {
   getBaseInfo,
   deleteFile,
   ingestFilesFromBuffers,
+  qaSearch,
   type RemoteDepartment,
   type RemoteDocumentMeta,
   type RemoteLibraryInfo,
+  type RemoteRetrievalHit,
 } from './remoteKnowledgeClient'
 
 export {
@@ -15,3 +17,13 @@ export {
   applyPresetHierarchy,
   resolveRemoteKnowledgePartitionId,
 } from './presetDepartments'
+
+export {
+  listRemoteKnowledgeSources,
+  resolveRemoteKnowledgeSource,
+  searchRemoteKnowledgeChunks,
+} from './remoteKnowledgeSearchClient'
+
+export {
+  listWorkspaceKnowledgeSources,
+} from './knowledgeSearchService'

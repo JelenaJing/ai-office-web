@@ -1,5 +1,6 @@
 export type KnowledgeSourceType = 'knowledge_base' | 'file' | 'policy' | 'literature' | 'manual_note'
 export type KnowledgeTrustLevel = 'verified' | 'partial' | 'unverified' | 'unknown'
+export type KnowledgeProvider = 'remote' | 'workspace'
 
 export interface KnowledgeSearchInput {
   userId?: string
@@ -27,14 +28,27 @@ export interface KnowledgeCitationChunk {
   excerpt: string
   sourceType: KnowledgeSourceType
   trustLevel: KnowledgeTrustLevel
+  score: number
+  provider: KnowledgeProvider
+  metadata?: Record<string, unknown>
 }
 
 export interface KnowledgeChunk extends KnowledgeCitationChunk {
   text: string
-  score?: number
 }
 
 export interface KnowledgeSearchResult {
   chunks: KnowledgeCitationChunk[]
   mockable: boolean
+  warnings?: string[]
+}
+
+export interface KnowledgeSourceSummary {
+  id: string
+  title: string
+  sourceType: KnowledgeSourceType
+  provider: KnowledgeProvider
+  trustLevel: KnowledgeTrustLevel
+  updatedAt?: string
+  metadata?: Record<string, unknown>
 }

@@ -1,4 +1,5 @@
 import { runAcademicWritingWorkflow } from '../server/src/features/document/services/academicWritingService'
+import { getOrCreateDefaultWorkspace } from '../server/src/lib/workspaceStore'
 
 function assert(condition: boolean, message: string): void {
   if (!condition) {
@@ -8,7 +9,7 @@ function assert(condition: boolean, message: string): void {
 
 async function main() {
   const userId = `academic-smoke-${Date.now()}`
-  const workspacePath = `web-workspace:${userId}:academic-writing-smoke`
+  const workspacePath = getOrCreateDefaultWorkspace(userId).path
   const result = await runAcademicWritingWorkflow({
     userId,
     workspacePath,

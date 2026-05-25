@@ -2,6 +2,7 @@ import fs from 'fs'
 import { parseWorkspacePath } from '../../../artifacts/ArtifactStore'
 import { resolveUserFile } from '../../../lib/userFiles'
 import { getKnowledgeBase, listFiles } from '../../../modules/knowledge'
+import { resolveRemoteKnowledgeSource } from '../../knowledge/services/remoteKnowledgeSearchClient'
 
 export interface DocumentContextInput {
   workspacePath?: string
@@ -58,6 +59,15 @@ export async function buildDocumentContextWithStats(
     )
     const kbLines: string[] = []
     for (const id of kbIds.slice(0, 8)) {
+      const remoteSource = await resolveRemoteKnowledgeSource(id).catch(() => null)
+      if (remoteSource) {
+        kbLines.push(
+          `- ${remoteSource.title} [${remoteSource.id}]（来源：${remoteSource.metadata?.departmentName || remoteSource.metadata?.departmentId || '远端知识库'}；可信度：${remoteSource.trustLevel}）`,
+        )
+        totalFileCount += 1
+        console.info(`[document-context] remoteSource=${remoteSource.id} dept=${remoteSource.metadata?.departmentId || ''}`)
+        continue
+      }
       try {
         const kb = await getKnowledgeBase(id)
         const label = kb?.name ?? id

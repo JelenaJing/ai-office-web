@@ -47,15 +47,17 @@ function splitParagraphs(value: string): string[] {
 
 function deriveReferences(knowledgeRefs: DocumentKnowledgeRef[]): DocumentReference[] {
   return knowledgeRefs.map((ref) => ({
-    id: `ref-${ref.kind}-${ref.id}`,
+    id: `ref-${ref.provider || 'unknown'}-${ref.kind}-${ref.sourceId || ref.id}`,
     label: ref.label,
     kind: ref.kind,
     sourceId: ref.sourceId || ref.id,
     sourceLabel: ref.label,
     excerpt: ref.excerpt,
+    provider: ref.provider,
     sourceType: ref.sourceType || ref.kind,
     chunkId: ref.chunkId,
     trustLevel: ref.trustLevel || ref.citationStatus,
+    metadata: ref.metadata,
     citationStatus: ref.citationStatus,
   }))
 }
@@ -104,6 +106,7 @@ function deriveCitations(input: {
       text: normalizeText(getText(node)),
       renderMode: (getAttributeValue(node, 'data-render-mode') as DocumentCitation['renderMode']) || 'inline',
       sourceId: getAttributeValue(node, 'data-source-id') || undefined,
+      provider: (getAttributeValue(node, 'data-provider') as DocumentCitation['provider']) || undefined,
       sourceType: getAttributeValue(node, 'data-source-type') || undefined,
       chunkId: getAttributeValue(node, 'data-chunk-id') || undefined,
       trustLevel: getAttributeValue(node, 'data-trust-level') || undefined,
@@ -132,9 +135,11 @@ function supplementReferencesFromInlineCitations(html: string, references: Docum
             : 'manual_note',
         sourceId: getAttributeValue(node, 'data-source-id') || refId,
         sourceLabel: label,
+        provider: (getAttributeValue(node, 'data-provider') as DocumentReference['provider']) || undefined,
         sourceType: sourceType as DocumentReference['sourceType'],
         chunkId: getAttributeValue(node, 'data-chunk-id') || undefined,
         trustLevel: (getAttributeValue(node, 'data-trust-level') as DocumentReference['trustLevel']) || 'partial',
+        metadata: undefined,
         citationStatus: 'partial',
       })
       known.add(refId)
@@ -513,6 +518,12 @@ export function buildWorkbenchDocumentArtifact(input: {
       type: ref.sourceType || ref.kind,
       id: ref.sourceId,
       label: ref.sourceLabel || ref.label,
+      provider: ref.provider,
+      sourceId: ref.sourceId,
+      chunkId: ref.chunkId,
+      trustLevel: ref.trustLevel,
+      excerpt: ref.excerpt,
+      metadata: ref.metadata,
     }))
   return {
     id: input.artifactId || input.documentId,

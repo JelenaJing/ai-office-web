@@ -21,6 +21,7 @@ export type {
   KnowledgeLibraryInfo,
   KnowledgeDocumentMeta,
   KnowledgeImportResult,
+  KnowledgeSourceListItem,
   CalendarEvent,
   EmailAccountInput,
   EmailAccountState,

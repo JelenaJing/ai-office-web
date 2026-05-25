@@ -90,7 +90,7 @@ export function buildAcademicWritingOutline(input: {
 }
 
 function refId(ref: DocumentKnowledgeRef): string {
-  return `ref-${ref.kind}-${ref.id}`
+  return `ref-${ref.provider || 'unknown'}-${ref.kind}-${ref.sourceId || ref.id}`
 }
 
 function sourceTypeForRef(ref: DocumentKnowledgeRef): 'knowledge_base' | 'file' | 'policy' | 'literature' | 'manual_note' {
@@ -110,9 +110,11 @@ function buildReference(ref: DocumentKnowledgeRef, citedBlockId: string): Docume
     sourceId: ref.sourceId || ref.id,
     sourceLabel: ref.label,
     excerpt: ref.excerpt,
+    provider: ref.provider,
     sourceType: sourceTypeForRef(ref),
     chunkId: ref.chunkId || `${ref.id}-chunk-1`,
     trustLevel: trustForRef(ref),
+    metadata: ref.metadata,
     citedBlockIds: [citedBlockId],
     citationStatus: ref.citationStatus,
   }
@@ -124,6 +126,7 @@ function fallbackKnowledgeRef(): DocumentKnowledgeRef {
     id: 'manual-policy-source',
     label: '待补充知识库依据',
     excerpt: '未选择知识库时保留依据占位，后续可替换为真实文献、政策或材料来源。',
+    provider: 'remote',
     sourceType: 'manual_note',
     sourceId: 'manual-policy-source',
     chunkId: 'manual-policy-source-chunk-1',
@@ -167,6 +170,7 @@ function renderCitationSpan(input: {
     ` data-ref-id="${escapeHtml(input.reference.id)}"`,
     ` data-ref-label="${escapeHtml(input.reference.label)}"`,
     ` data-source-id="${escapeHtml(input.reference.sourceId)}"`,
+    ` data-provider="${escapeHtml(input.reference.provider || '')}"`,
     ` data-source-type="${escapeHtml(input.reference.sourceType || input.reference.kind)}"`,
     ` data-chunk-id="${escapeHtml(input.reference.chunkId || '')}"`,
     ` data-trust-level="${escapeHtml(input.reference.trustLevel || input.reference.citationStatus || 'unknown')}"`,
@@ -270,9 +274,11 @@ export async function runAcademicWritingWorkflow(input: AcademicWritingInput): P
       text: `[${index + 1}]`,
       renderMode: 'inline',
       sourceId: ref.sourceId,
+      provider: ref.provider,
       sourceType: ref.sourceType,
       chunkId: ref.chunkId,
       trustLevel: ref.trustLevel,
+      metadata: ref.metadata,
     }
   })
 
@@ -288,10 +294,12 @@ export async function runAcademicWritingWorkflow(input: AcademicWritingInput): P
     templateId: `academic.${input.paperType}`,
     knowledgeRefs: refs.map((ref) => ({
       ...ref,
+      provider: ref.provider,
       sourceType: sourceTypeForRef(ref),
       sourceId: ref.sourceId || ref.id,
       chunkId: ref.chunkId || `${ref.id}-chunk-1`,
       trustLevel: trustForRef(ref),
+      metadata: ref.metadata,
     })),
     preferredOutline: outline,
   })
@@ -333,4 +341,3 @@ export async function runAcademicWritingWorkflow(input: AcademicWritingInput): P
     citations: persisted.result.documentArtifact.citations,
   }
 }
-
