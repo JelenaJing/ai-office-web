@@ -143,6 +143,10 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [showDebug, setShowDebug] = useState(false)
   const [generationElapsedMs, setGenerationElapsedMs] = useState(0)
+  // Retemplate state
+  const [retemplateSlug, setRetemplateSlug] = useState('')
+  const [isRetemplating, setIsRetemplating] = useState(false)
+  const [retemplateError, setRetemplateError] = useState('')
 
   const previewRef = useRef<HTMLDivElement | null>(null)
   const loadedArtifactIdRef = useRef<string>('')
@@ -311,6 +315,29 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
     a.click()
     URL.revokeObjectURL(url)
   }, [inputText, job?.artifactId])
+
+  const handleRetemplate = useCallback(async () => {
+    if (!retemplateSlug || !job?.artifactId) return
+    setIsRetemplating(true)
+    setRetemplateError('')
+    setPreviewLoaded(false)
+    try {
+      const res = await fetch(resolveWebApiUrl(`/api/artifacts/${job.artifactId}/html-presentation/retemplate`), {
+        method: 'POST',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ templateSlug: retemplateSlug }),
+      })
+      const data = (await res.json()) as { success?: boolean; previewUrl?: string; error?: string }
+      if (!res.ok || !data.success) throw new Error(data.error ?? '换模板失败')
+      // Force iframe remount with a cache-buster
+      const cacheBuster = `?v=${Date.now()}`
+      setPreview((prev) => prev ? { ...prev, url: resolveWebApiUrl(`/api/artifacts/${job.artifactId!}/file`) + cacheBuster } : prev)
+    } catch (err) {
+      setRetemplateError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setIsRetemplating(false)
+    }
+  }, [job?.artifactId, retemplateSlug])
 
   const handleReset = useCallback(() => {
     setInputText('')
@@ -512,6 +539,33 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
           </div>
         </div>
 
+        {/* Retemplate panel — shown only when templates are available */}
+        {templateOptions.length > 0 ? (
+          <div style={s.retemplateBar}>
+            <span style={s.retemplateLabel}>更换模板：</span>
+            <select
+              value={retemplateSlug}
+              onChange={(e) => setRetemplateSlug(e.target.value)}
+              style={s.retemplateSelect}
+              disabled={isRetemplating}
+            >
+              <option value="">— 选择新模板 —</option>
+              {templateOptions.map((t) => (
+                <option key={t.slug} value={t.slug}>{t.name} ({t.scheme})</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => void handleRetemplate()}
+              disabled={!retemplateSlug || isRetemplating}
+              style={s.retemplateApplyBtn}
+            >
+              {isRetemplating ? '应用中…' : '应用模板'}
+            </button>
+            {retemplateError ? <span style={s.retemplateError}>{retemplateError}</span> : null}
+          </div>
+        ) : null}
+
         {previewError ? (
           <div style={s.inlineErrorBox}>预览加载失败，请点击“在新窗口打开预览”或“下载 HTML”。</div>
         ) : (
@@ -519,7 +573,7 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
             <div style={s.previewFrameWrap}>
               {preview?.url ? (
                 <iframe
-                  key={preview.artifactId}
+                  key={preview.url}
                   title="HTML Presentation Preview"
                   src={preview.url}
                   sandbox="allow-scripts allow-downloads"
@@ -1080,6 +1134,50 @@ const s: Record<string, React.CSSProperties> = {
     border: '1px solid #fecaca',
     color: '#b91c1c',
     fontSize: 14,
+  },
+  retemplateBar: {
+    display: 'flex',
+    alignItems: 'center',
+    flexWrap: 'wrap' as const,
+    gap: 10,
+    padding: '12px 16px',
+    background: '#f1f5f9',
+    borderRadius: 14,
+    marginBottom: 14,
+  },
+  retemplateLabel: {
+    fontSize: 13,
+    fontWeight: 700,
+    color: '#334155',
+    whiteSpace: 'nowrap' as const,
+  },
+  retemplateSelect: {
+    height: 36,
+    padding: '0 10px',
+    borderRadius: 10,
+    border: '1px solid #cbd5e1',
+    background: '#fff',
+    fontSize: 13,
+    color: '#1e293b',
+    minWidth: 180,
+    flex: 1,
+  },
+  retemplateApplyBtn: {
+    height: 36,
+    padding: '0 16px',
+    borderRadius: 10,
+    border: 'none',
+    background: '#0ea5e9',
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: 700,
+    cursor: 'pointer',
+    whiteSpace: 'nowrap' as const,
+  },
+  retemplateError: {
+    fontSize: 12,
+    color: '#dc2626',
+    flex: '0 0 100%',
   },
   debugSection: {
     width: '100%',

@@ -17,7 +17,13 @@ import {
   getHtmlArtifact,
   getHtmlArtifactFilePath,
   getHtmlArtifactSidecarPath,
+  getHtmlArtifactDir,
 } from '../features/artifact-jobs/services/htmlArtifactStore'
+import { retemplateHtmlPresentationFromContentModel } from '../features/artifact-jobs/services/htmlPresentationRetemplateService'
+import {
+  applyHtmlPresentationPatch,
+  generateHtmlPresentationImage,
+} from '../features/artifact-jobs/services/htmlPresentationPatchService'
 import { requireAccountUser } from '../lib/authUser'
 import { saveSkillArtifact } from '../lib/skillArtifact'
 import { assertWorkspaceAccess, WorkspaceAccessError } from '../lib/workspaceAccess'
@@ -174,7 +180,127 @@ router.get('/:artifactId/sidecars/:filename', async (req, res) => {
 // TODO(phase-2): add POST /api/html-ppt/:artifactId/patch to persist local edit patches.
 // Phase 1 only stores patch history in localStorage inside the generated HTML runtime.
 
-// ── GET /api/artifacts/:artifactId ────────────────────────────────────────────
+// ── POST /api/artifacts/:artifactId/html-presentation/retemplate ────────────
+
+router.post('/:artifactId/html-presentation/retemplate', async (req, res) => {
+  const { artifactId } = req.params
+  const { templateSlug } = req.body as { templateSlug?: string }
+  if (!templateSlug) return res.status(400).json({ success: false, error: 'templateSlug is required' })
+
+  const artifact = getHtmlArtifact(artifactId)
+  if (!artifact) return res.status(404).json({ success: false, error: 'Artifact not found', artifactId })
+
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+  if (!assertArtifactOwnership(userId, artifact, res)) return
+
+  const artifactDirPath = getHtmlArtifactDir(artifactId)
+  const contentModelPath = path.join(artifactDirPath, 'content-model.json')
+  if (!fs.existsSync(contentModelPath)) {
+    return res.status(404).json({ success: false, error: 'content-model.json not found for this artifact', artifactId })
+  }
+  const outputHtmlPath = path.join(artifactDirPath, 'index.html')
+
+  try {
+    const result = retemplateHtmlPresentationFromContentModel({
+      contentModelPath,
+      outputHtmlPath,
+      nextTemplateSlug: templateSlug,
+      artifactDir: artifactDirPath,
+    })
+    return res.json({
+      success: true,
+      artifactId,
+      templateSlug: result.templateSlug,
+      tokenUsed: false,
+      previewUrl: `/api/artifacts/${artifactId}/file`,
+      sidecars: result.sidecars,
+    })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return res.status(500).json({ success: false, error: message })
+  }
+})
+
+// ── POST /api/artifacts/:artifactId/html-presentation/patch ─────────────────
+
+router.post('/:artifactId/html-presentation/patch', async (req, res) => {
+  const { artifactId } = req.params
+  const { op, slideId, blockId, text } = req.body as { op?: string; slideId?: string; blockId?: string; text?: string }
+
+  if (op !== 'replace_text') return res.status(400).json({ success: false, error: 'op must be replace_text' })
+  if (!slideId || !blockId || text === undefined) {
+    return res.status(400).json({ success: false, error: 'slideId, blockId, text are required' })
+  }
+
+  const artifact = getHtmlArtifact(artifactId)
+  if (!artifact) return res.status(404).json({ success: false, error: 'Artifact not found', artifactId })
+
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+  if (!assertArtifactOwnership(userId, artifact, res)) return
+
+  const artifactDirPath = getHtmlArtifactDir(artifactId)
+  try {
+    const result = await applyHtmlPresentationPatch(artifactDirPath, { op: 'replace_text', slideId, blockId, text })
+    return res.json({ ...result, artifactId })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return res.status(500).json({ success: false, error: message })
+  }
+})
+
+// ── POST /api/artifacts/:artifactId/html-presentation/image ─────────────────
+
+router.post('/:artifactId/html-presentation/image', async (req, res) => {
+  const { artifactId } = req.params
+  const { slideId, blockId, imagePrompt } = req.body as { slideId?: string; blockId?: string; imagePrompt?: string }
+
+  if (!slideId || !blockId || !imagePrompt) {
+    return res.status(400).json({ success: false, error: 'slideId, blockId, imagePrompt are required' })
+  }
+
+  const artifact = getHtmlArtifact(artifactId)
+  if (!artifact) return res.status(404).json({ success: false, error: 'Artifact not found', artifactId })
+
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+  if (!assertArtifactOwnership(userId, artifact, res)) return
+
+  const artifactDirPath = getHtmlArtifactDir(artifactId)
+  try {
+    const result = await generateHtmlPresentationImage(artifactDirPath, { slideId, blockId, imagePrompt })
+    return res.json({ ...result, artifactId })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return res.status(500).json({ success: false, error: message })
+  }
+})
+
+// ── GET /api/artifacts/:artifactId/assets/:filename ──────────────────────────
+
+router.get('/:artifactId/assets/:filename', async (req, res) => {
+  const { artifactId, filename } = req.params
+  // Block path traversal
+  if (filename.includes('/') || filename.includes('..')) {
+    return res.status(400).json({ success: false, error: 'Invalid filename' })
+  }
+  const artifact = getHtmlArtifact(artifactId)
+  if (!artifact) return res.status(404).json({ success: false, error: 'Artifact not found', artifactId })
+
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+  if (!assertArtifactOwnership(userId, artifact, res)) return
+
+  const filePath = path.join(getHtmlArtifactDir(artifactId), 'assets', filename)
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ success: false, error: 'Asset not found', filename })
+  }
+  res.setHeader('Cache-Control', 'public, max-age=86400')
+  return res.sendFile(filePath)
+})
+
+
 
 router.get('/:artifactId', async (req, res) => {
   const artifact = getArtifact(req.params.artifactId)

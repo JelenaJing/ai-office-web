@@ -35,6 +35,9 @@ function artifactDir(artifactId: string): string {
   return path.join(ARTIFACTS_ROOT, safeSegment(artifactId))
 }
 
+export function getHtmlArtifactDir(artifactId: string): string {
+  return artifactDir(artifactId)
+}
 export function createHtmlArtifact(input: {
   userId: string
   jobId: string

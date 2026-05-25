@@ -75,7 +75,12 @@ function pad(value: number, size = 3): string {
   return String(value).padStart(size, '0')
 }
 
-function escapeHtml(value: string): string {
+function truncate(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value
+  return `${value.slice(0, Math.max(0, maxLength - 1)).trim()}…`
+}
+
+export function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -84,8 +89,15 @@ function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;')
 }
 
-function escapeAttribute(value: string): string {
+export function escapeAttribute(value: string): string {
   return escapeHtml(value).replace(/\n/g, '&#10;')
+}
+
+export function createPlaceholderDataUri(title: string, prompt: string): string {
+  const safeTitle = truncate(title || 'Image Placeholder', 48)
+  const safePrompt = truncate(prompt || 'Visual planned for this slide', 96)
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540" role="img" aria-label="${escapeAttribute(safeTitle)}"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop offset="0%" stop-color="#eaf1fb"/><stop offset="100%" stop-color="#d6e4f6"/></linearGradient></defs><rect width="960" height="540" rx="28" fill="url(#g)"/><rect x="40" y="40" width="880" height="460" rx="24" fill="none" stroke="#9fb7d8" stroke-dasharray="14 10" stroke-width="3"/><text x="60" y="106" fill="#244367" font-family="Arial, sans-serif" font-size="34" font-weight="700">${escapeHtml(safeTitle)}</text><text x="60" y="156" fill="#55728f" font-family="Arial, sans-serif" font-size="20">${escapeHtml(safePrompt)}</text><g transform="translate(60 220)" fill="none" stroke="#87a6ca" stroke-width="10"><rect width="320" height="190" rx="18"/><path d="M18 164l68-72 58 48 52-68 124 92"/><circle cx="242" cy="54" r="26"/></g><text x="60" y="468" fill="#6d88a3" font-family="Arial, sans-serif" font-size="18">SVG placeholder · phase 1 fallback</text></svg>`
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
 }
 
 function stripTags(value: string): string {
@@ -126,11 +138,6 @@ function stripNonCanonicalManagedAttrs(html: string): string {
 
     return `<${tagName}${cleanedAttrs}>`
   })
-}
-
-function truncate(value: string, maxLength: number): string {
-  if (value.length <= maxLength) return value
-  return `${value.slice(0, Math.max(0, maxLength - 1)).trim()}…`
 }
 
 function ensureOutputAssetsDir(outputDir: string): void {
@@ -195,26 +202,22 @@ function buildVisualPrompt(templateProfile: TemplateProfileRecord, slide: Conten
   ].join(', ')
 }
 
-function createPlaceholderDataUri(title: string, prompt: string): string {
-  const safeTitle = truncate(title || 'Image Placeholder', 48)
-  const safePrompt = truncate(prompt || 'Visual planned for this slide', 96)
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540" role="img" aria-label="${escapeAttribute(safeTitle)}"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop offset="0%" stop-color="#eaf1fb"/><stop offset="100%" stop-color="#d6e4f6"/></linearGradient></defs><rect width="960" height="540" rx="28" fill="url(#g)"/><rect x="40" y="40" width="880" height="460" rx="24" fill="none" stroke="#9fb7d8" stroke-dasharray="14 10" stroke-width="3"/><text x="60" y="106" fill="#244367" font-family="Arial, sans-serif" font-size="34" font-weight="700">${escapeHtml(safeTitle)}</text><text x="60" y="156" fill="#55728f" font-family="Arial, sans-serif" font-size="20">${escapeHtml(safePrompt)}</text><g transform="translate(60 220)" fill="none" stroke="#87a6ca" stroke-width="10"><rect width="320" height="190" rx="18"/><path d="M18 164l68-72 58 48 52-68 124 92"/><circle cx="242" cy="54" r="26"/></g><text x="60" y="468" fill="#6d88a3" font-family="Arial, sans-serif" font-size="18">SVG placeholder · phase 1 fallback</text></svg>`
-  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
-}
-
 function appendBeforeClosingTag(html: string, closingTag: string, fragment: string): string {
   const marker = new RegExp(`</${closingTag}>\\s*$`, 'i')
   if (marker.test(html)) return html.replace(marker, `${fragment}\n</${closingTag}>`)
   return `${html}\n${fragment}`
 }
 
-function injectSharedStyles(html: string): string {
+export function injectSharedStyles(html: string): string {
   const styleBlock = `
 <style id="aios-html-ppt-enhancements">
   .slide[data-slide-id] { position: relative; }
   [data-block-id][data-block-type="text"] { cursor: text; transition: outline-color 160ms ease, box-shadow 160ms ease; }
   [data-block-id][data-block-type="text"]:hover { outline: 2px dashed rgba(37, 99, 235, 0.25); outline-offset: 4px; }
   [data-block-id][data-block-type="text"].aios-edit-selected { outline: 2px solid rgba(37, 99, 235, 0.85); outline-offset: 4px; box-shadow: 0 0 0 6px rgba(37, 99, 235, 0.12); }
+  [data-block-id][data-block-type="image"] { cursor: pointer; transition: outline-color 160ms ease, box-shadow 160ms ease; }
+  [data-block-id][data-block-type="image"]:hover { outline: 2px dashed rgba(245, 158, 11, 0.35); outline-offset: 4px; }
+  [data-block-id][data-block-type="image"].aios-image-selected { outline: 2px solid rgba(245, 158, 11, 0.9); outline-offset: 4px; box-shadow: 0 0 0 6px rgba(245, 158, 11, 0.12); }
   .aios-visual-slot { position: absolute; right: clamp(18px, 2.5vw, 40px); bottom: clamp(18px, 2.5vw, 40px); width: min(30vw, 360px); max-height: min(34vh, 260px); display: flex; align-items: flex-end; justify-content: center; pointer-events: none; z-index: 0; }
   .aios-visual-slot img { width: 100%; height: auto; max-height: 100%; object-fit: contain; border-radius: 16px; box-shadow: 0 16px 40px rgba(15, 23, 42, 0.12); background: rgba(255,255,255,0.65); }
   .aios-inline-editor { position: fixed; right: 20px; bottom: 20px; width: min(420px, calc(100vw - 32px)); background: rgba(15, 23, 42, 0.96); color: #fff; border-radius: 16px; box-shadow: 0 22px 60px rgba(15, 23, 42, 0.35); padding: 14px; z-index: 99999; display: none; font-family: system-ui, -apple-system, sans-serif; }
@@ -225,112 +228,214 @@ function injectSharedStyles(html: string): string {
   .aios-inline-editor button { height: 38px; padding: 0 14px; border-radius: 10px; border: none; cursor: pointer; font: inherit; font-weight: 700; }
   .aios-inline-editor__cancel { background: rgba(255,255,255,0.16); color: #fff; }
   .aios-inline-editor__apply { background: #3b82f6; color: #fff; }
+  .aios-image-editor { position: fixed; right: 20px; bottom: 88px; width: min(420px, calc(100vw - 32px)); background: rgba(15, 23, 42, 0.96); color: #fff; border-radius: 16px; box-shadow: 0 22px 60px rgba(15, 23, 42, 0.35); padding: 14px; z-index: 99998; display: none; font-family: system-ui, -apple-system, sans-serif; }
+  .aios-image-editor.open { display: block; }
+  .aios-image-editor__title { font-size: 13px; font-weight: 700; letter-spacing: 0.04em; margin: 0 0 8px; color: rgba(255,255,255,0.78); }
+  .aios-image-editor__prompt-row { display: flex; gap: 8px; }
+  .aios-image-editor__prompt-row input { flex: 1; height: 38px; padding: 0 12px; border-radius: 10px; border: 1px solid rgba(148, 163, 184, 0.36); background: rgba(255,255,255,0.08); color: #fff; font: inherit; }
+  .aios-image-editor__actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 12px; }
+  .aios-image-editor button { height: 38px; padding: 0 14px; border-radius: 10px; border: none; cursor: pointer; font: inherit; font-weight: 700; }
+  .aios-image-editor__cancel { background: rgba(255,255,255,0.16); color: #fff; }
+  .aios-image-editor__regen { background: #f59e0b; color: #000; }
+  .aios-image-editor__status { font-size: 12px; color: rgba(255,255,255,0.6); margin-top: 6px; min-height: 18px; }
 </style>`
 
-  if (/<style[\s\S]*<\/style>/i.test(html)) {
-    return html.replace(/<\/head>/i, `${styleBlock}\n</head>`)
-  }
   if (/<\/head>/i.test(html)) {
     return html.replace(/<\/head>/i, `${styleBlock}\n</head>`)
   }
   return html.replace(/<body/i, `${styleBlock}\n<body`)
 }
 
-function injectEditRuntime(html: string, deckId: string): string {
+export function injectEditRuntime(html: string, deckId: string): string {
   const scriptBlock = `
 <script id="aios-html-ppt-edit-runtime">
   (function () {
     const deckId = ${JSON.stringify(deckId)};
     const storageKey = 'aios-html-ppt-patches:' + deckId;
-    const editor = document.createElement('div');
-    editor.className = 'aios-inline-editor';
-    editor.innerHTML = '<div class="aios-inline-editor__title">局部替换文本</div><textarea aria-label="Edit slide text"></textarea><div class="aios-inline-editor__actions"><button type="button" class="aios-inline-editor__cancel">取消</button><button type="button" class="aios-inline-editor__apply">确认替换</button></div>';
-    document.body.appendChild(editor);
-    const textarea = editor.querySelector('textarea');
-    const cancelBtn = editor.querySelector('.aios-inline-editor__cancel');
-    const applyBtn = editor.querySelector('.aios-inline-editor__apply');
-    let activeEl = null;
 
-    function loadPatches() {
+    // Detect artifactId from URL so runtime can POST patches to server.
+    // Pattern: /api/artifacts/<artifactId>/file
+    function detectArtifactId() {
       try {
-        const value = localStorage.getItem(storageKey);
-        return value ? JSON.parse(value) : [];
-      } catch {
-        return [];
-      }
+        const m = window.location.pathname.match(/\\/api\\/artifacts\\/([^/]+)\\/file/);
+        return m ? m[1] : null;
+      } catch { return null; }
+    }
+    const artifactId = detectArtifactId();
+
+    function getBaseUrl() {
+      return window.parent !== window ? window.parent.location.origin : window.location.origin;
     }
 
-    function savePatches(nextPatches) {
-      localStorage.setItem(storageKey, JSON.stringify(nextPatches));
+    // ── localStorage helpers ──
+    function loadPatches() {
+      try { return JSON.parse(localStorage.getItem(storageKey) || '[]'); } catch { return []; }
     }
-
+    function savePatches(next) {
+      localStorage.setItem(storageKey, JSON.stringify(next));
+    }
     function applySavedPatches() {
-      const patches = loadPatches();
-      patches.forEach((patch) => {
-        const selector = '[data-slide-id="' + patch.slideId + '"] [data-block-id="' + patch.blockId + '"]';
-        const target = document.querySelector(selector);
-        if (target && typeof patch.text === 'string') target.textContent = patch.text;
+      loadPatches().forEach(function(p) {
+        const sel = '[data-slide-id="' + p.slideId + '"] [data-block-id="' + p.blockId + '"]';
+        const el = document.querySelector(sel);
+        if (el && typeof p.text === 'string') el.textContent = p.text;
       });
     }
 
-    function clearSelection() {
-      if (activeEl) activeEl.classList.remove('aios-edit-selected');
-      activeEl = null;
-      editor.classList.remove('open');
+    // ── server POST helpers (fire-and-forget) ──
+    function postTextPatch(patch) {
+      if (!artifactId) return;
+      try {
+        fetch(getBaseUrl() + '/api/artifacts/' + artifactId + '/html-presentation/patch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ op: 'replace_text', slideId: patch.slideId, blockId: patch.blockId, text: patch.text }),
+        }).catch(function(){});
+      } catch {}
     }
 
-    function openEditor(target) {
-      if (activeEl) activeEl.classList.remove('aios-edit-selected');
-      activeEl = target;
-      activeEl.classList.add('aios-edit-selected');
+    function postImageRegen(slideId, blockId, imagePrompt, imgEl, statusEl) {
+      if (!artifactId) {
+        if (statusEl) statusEl.textContent = '未检测到 artifactId，跳过服务端更新';
+        return;
+      }
+      if (statusEl) statusEl.textContent = '正在生成图片…';
+      fetch(getBaseUrl() + '/api/artifacts/' + artifactId + '/html-presentation/image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ slideId, blockId, imagePrompt }),
+      })
+        .then(function(r) { return r.ok ? r.json() : Promise.reject(r.status); })
+        .then(function(data) {
+          if (data && data.assetDataUri && imgEl) {
+            imgEl.src = data.assetDataUri;
+            if (imgEl.hasAttribute('data-image-prompt')) imgEl.setAttribute('data-image-prompt', imagePrompt);
+          }
+          if (statusEl) statusEl.textContent = data && data.placeholderUsed ? '已使用 SVG 占位图' : '图片已更新';
+        })
+        .catch(function(err) { if (statusEl) statusEl.textContent = '图片生成失败: ' + err; });
+    }
+
+    // ── Text editor ──
+    const textEditor = document.createElement('div');
+    textEditor.className = 'aios-inline-editor';
+    textEditor.innerHTML = '<div class="aios-inline-editor__title">局部替换文本</div><textarea aria-label="Edit slide text"></textarea><div class="aios-inline-editor__actions"><button type="button" class="aios-inline-editor__cancel">取消</button><button type="button" class="aios-inline-editor__apply">确认替换</button></div>';
+    document.body.appendChild(textEditor);
+    const textarea = textEditor.querySelector('textarea');
+    const cancelTextBtn = textEditor.querySelector('.aios-inline-editor__cancel');
+    const applyTextBtn = textEditor.querySelector('.aios-inline-editor__apply');
+    let activeTextEl = null;
+
+    function clearTextEditor() {
+      if (activeTextEl) activeTextEl.classList.remove('aios-edit-selected');
+      activeTextEl = null;
+      textEditor.classList.remove('open');
+    }
+    function openTextEditor(target) {
+      clearImageEditor();
+      if (activeTextEl) activeTextEl.classList.remove('aios-edit-selected');
+      activeTextEl = target;
+      activeTextEl.classList.add('aios-edit-selected');
       textarea.value = target.textContent || '';
-      editor.classList.add('open');
-      setTimeout(() => textarea.focus(), 0);
+      textEditor.classList.add('open');
+      setTimeout(function() { textarea.focus(); }, 0);
     }
-
-    function commitEdit() {
-      if (!activeEl) return;
-      const slide = activeEl.closest('[data-slide-id]');
+    function commitTextEdit() {
+      if (!activeTextEl) return;
+      const slide = activeTextEl.closest('[data-slide-id]');
       const patch = {
         op: 'replace_text',
         slideId: slide ? slide.getAttribute('data-slide-id') : '',
-        blockId: activeEl.getAttribute('data-block-id') || '',
+        blockId: activeTextEl.getAttribute('data-block-id') || '',
         text: textarea.value,
         createdAt: new Date().toISOString(),
       };
-      activeEl.textContent = textarea.value;
+      activeTextEl.textContent = textarea.value;
       const patches = loadPatches();
-      patches.push(patch);
+      const idx = patches.findIndex(function(p) { return p.slideId === patch.slideId && p.blockId === patch.blockId; });
+      if (idx >= 0) patches[idx] = patch; else patches.push(patch);
       savePatches(patches);
-      // TODO(phase-2): POST patch payload to /api/html-ppt/:artifactId/patch after server persistence is introduced.
-      clearSelection();
+      postTextPatch(patch);
+      clearTextEditor();
     }
 
-    document.addEventListener('click', (event) => {
-      const target = event.target instanceof Element
-        ? event.target.closest('[data-block-id][data-block-type="text"]')
-        : null;
-      if (target instanceof HTMLElement) {
-        event.preventDefault();
-        event.stopPropagation();
-        openEditor(target);
-        return;
-      }
-      if (!editor.contains(event.target)) clearSelection();
+    cancelTextBtn.addEventListener('click', function() { clearTextEditor(); });
+    applyTextBtn.addEventListener('click', function() { commitTextEdit(); });
+    textarea.addEventListener('keydown', function(e) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); commitTextEdit(); }
+      if (e.key === 'Escape') { e.preventDefault(); clearTextEditor(); }
     });
 
-    cancelBtn.addEventListener('click', () => clearSelection());
-    applyBtn.addEventListener('click', () => commitEdit());
-    textarea.addEventListener('keydown', (event) => {
-      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-        event.preventDefault();
-        commitEdit();
-      }
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        clearSelection();
-      }
+    // ── Image editor ──
+    const imageEditor = document.createElement('div');
+    imageEditor.className = 'aios-image-editor';
+    imageEditor.innerHTML = '<div class="aios-image-editor__title">替换 / 重新生成图片</div><div class="aios-image-editor__prompt-row"><input type="text" placeholder="图片描述 (image prompt)…" class="aios-image-editor__prompt-input"></div><div class="aios-image-editor__status"></div><div class="aios-image-editor__actions"><button type="button" class="aios-image-editor__cancel">取消</button><button type="button" class="aios-image-editor__regen">重新生成</button></div>';
+    document.body.appendChild(imageEditor);
+    const imgPromptInput = imageEditor.querySelector('.aios-image-editor__prompt-input');
+    const imgStatus = imageEditor.querySelector('.aios-image-editor__status');
+    const cancelImgBtn = imageEditor.querySelector('.aios-image-editor__cancel');
+    const regenImgBtn = imageEditor.querySelector('.aios-image-editor__regen');
+    let activeImgEl = null;
+    let activeImgBlock = null;
+
+    function clearImageEditor() {
+      if (activeImgBlock) activeImgBlock.classList.remove('aios-image-selected');
+      activeImgEl = null;
+      activeImgBlock = null;
+      imageEditor.classList.remove('open');
+    }
+    function openImageEditor(block) {
+      clearTextEditor();
+      if (activeImgBlock) activeImgBlock.classList.remove('aios-image-selected');
+      activeImgBlock = block;
+      activeImgBlock.classList.add('aios-image-selected');
+      activeImgEl = block.tagName.toLowerCase() === 'img' ? block : block.querySelector('img');
+      const existingPrompt = block.getAttribute('data-image-prompt') || (activeImgEl && activeImgEl.getAttribute('data-image-prompt')) || '';
+      imgPromptInput.value = existingPrompt;
+      imgStatus.textContent = '';
+      imageEditor.classList.add('open');
+      setTimeout(function() { imgPromptInput.focus(); }, 0);
+    }
+    function commitImageRegen() {
+      if (!activeImgBlock) return;
+      const slide = activeImgBlock.closest('[data-slide-id]');
+      const slideId = slide ? slide.getAttribute('data-slide-id') : '';
+      const blockId = activeImgBlock.getAttribute('data-block-id') || '';
+      const prompt = imgPromptInput.value.trim();
+      if (!prompt) { imgStatus.textContent = '请输入图片描述'; return; }
+      postImageRegen(slideId, blockId, prompt, activeImgEl, imgStatus);
+    }
+
+    cancelImgBtn.addEventListener('click', function() { clearImageEditor(); });
+    regenImgBtn.addEventListener('click', function() { commitImageRegen(); });
+    imgPromptInput.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') { e.preventDefault(); commitImageRegen(); }
+      if (e.key === 'Escape') { e.preventDefault(); clearImageEditor(); }
     });
+
+    // ── Unified click dispatcher ──
+    document.addEventListener('click', function(event) {
+      const target = event.target instanceof Element ? event.target : null;
+      if (!target) return;
+      const imgBlock = target.closest('[data-block-id][data-block-type="image"]');
+      if (imgBlock instanceof HTMLElement) {
+        event.preventDefault();
+        event.stopPropagation();
+        openImageEditor(imgBlock);
+        return;
+      }
+      const textBlock = target.closest('[data-block-id][data-block-type="text"]');
+      if (textBlock instanceof HTMLElement) {
+        event.preventDefault();
+        event.stopPropagation();
+        openTextEditor(textBlock);
+        return;
+      }
+      if (!textEditor.contains(event.target)) clearTextEditor();
+      if (!imageEditor.contains(event.target)) clearImageEditor();
+    }, true);
 
     applySavedPatches();
   })();
