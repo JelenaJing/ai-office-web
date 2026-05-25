@@ -264,7 +264,7 @@ export function injectEditRuntime(html: string, deckId: string): string {
     const artifactId = detectArtifactId();
 
     function getBaseUrl() {
-      return window.parent !== window ? window.parent.location.origin : window.location.origin;
+      return window.location.origin;
     }
 
     // ── localStorage helpers ──
@@ -272,7 +272,7 @@ export function injectEditRuntime(html: string, deckId: string): string {
       try { return JSON.parse(localStorage.getItem(storageKey) || '[]'); } catch { return []; }
     }
     function savePatches(next) {
-      localStorage.setItem(storageKey, JSON.stringify(next));
+      try { localStorage.setItem(storageKey, JSON.stringify(next)); } catch {}
     }
     function applySavedPatches() {
       loadPatches().forEach(function(p) {
@@ -282,9 +282,24 @@ export function injectEditRuntime(html: string, deckId: string): string {
       });
     }
 
-    // ── server POST helpers (fire-and-forget) ──
+    // ── server writeback helpers ──
+    const pendingImageRequests = Object.create(null);
+
+    function postToParent(message) {
+      if (window.parent && window.parent !== window) {
+        try {
+          window.parent.postMessage(message, '*');
+          return true;
+        } catch {}
+      }
+      return false;
+    }
+
     function postTextPatch(patch) {
       if (!artifactId) return;
+      if (postToParent({ type: 'aios-html-ppt:patch', artifactId: artifactId, storageKey: storageKey, patch: patch })) {
+        return;
+      }
       try {
         fetch(getBaseUrl() + '/api/artifacts/' + artifactId + '/html-presentation/patch', {
           method: 'POST',
@@ -295,12 +310,24 @@ export function injectEditRuntime(html: string, deckId: string): string {
       } catch {}
     }
 
-    function postImageRegen(slideId, blockId, imagePrompt, imgEl, statusEl) {
+    function postImageRegen(slideId, blockId, imagePrompt, imgEl, statusEl, blockEl) {
       if (!artifactId) {
         if (statusEl) statusEl.textContent = '未检测到 artifactId，跳过服务端更新';
         return;
       }
       if (statusEl) statusEl.textContent = '正在生成图片…';
+
+      const requestId = 'img-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+      pendingImageRequests[requestId] = { imgEl: imgEl, statusEl: statusEl, imagePrompt: imagePrompt, blockEl: blockEl };
+      if (postToParent({
+        type: 'aios-html-ppt:image',
+        artifactId: artifactId,
+        requestId: requestId,
+        payload: { slideId: slideId, blockId: blockId, imagePrompt: imagePrompt },
+      })) {
+        return;
+      }
+
       fetch(getBaseUrl() + '/api/artifacts/' + artifactId + '/html-presentation/image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -309,14 +336,41 @@ export function injectEditRuntime(html: string, deckId: string): string {
       })
         .then(function(r) { return r.ok ? r.json() : Promise.reject(r.status); })
         .then(function(data) {
-          if (data && data.assetDataUri && imgEl) {
-            imgEl.src = data.assetDataUri;
-            if (imgEl.hasAttribute('data-image-prompt')) imgEl.setAttribute('data-image-prompt', imagePrompt);
+          if (data && data.assetDataUri) {
+            if (imgEl) {
+              imgEl.src = data.assetDataUri;
+              if (imgEl.hasAttribute('data-image-prompt')) imgEl.setAttribute('data-image-prompt', imagePrompt);
+            }
+            if (blockEl && blockEl.hasAttribute && blockEl.hasAttribute('data-image-prompt')) {
+              blockEl.setAttribute('data-image-prompt', imagePrompt);
+            }
           }
           if (statusEl) statusEl.textContent = data && data.placeholderUsed ? '已使用 SVG 占位图' : '图片已更新';
         })
         .catch(function(err) { if (statusEl) statusEl.textContent = '图片生成失败: ' + err; });
     }
+
+    window.addEventListener('message', function(event) {
+      const data = event.data || {};
+      if (data.type !== 'aios-html-ppt:image-result' || !data.requestId) return;
+      const pending = pendingImageRequests[data.requestId];
+      if (!pending) return;
+      delete pendingImageRequests[data.requestId];
+      if (!data.success) {
+        if (pending.statusEl) pending.statusEl.textContent = '图片生成失败: ' + (data.error || 'unknown error');
+        return;
+      }
+      if (data.assetDataUri) {
+        if (pending.imgEl) {
+          pending.imgEl.src = data.assetDataUri;
+          if (pending.imgEl.hasAttribute('data-image-prompt')) pending.imgEl.setAttribute('data-image-prompt', pending.imagePrompt);
+        }
+        if (pending.blockEl && pending.blockEl.hasAttribute && pending.blockEl.hasAttribute('data-image-prompt')) {
+          pending.blockEl.setAttribute('data-image-prompt', pending.imagePrompt);
+        }
+      }
+      if (pending.statusEl) pending.statusEl.textContent = data.placeholderUsed ? '已使用 SVG 占位图' : '图片已更新';
+    });
 
     // ── Text editor ──
     const textEditor = document.createElement('div');
@@ -405,7 +459,7 @@ export function injectEditRuntime(html: string, deckId: string): string {
       const blockId = activeImgBlock.getAttribute('data-block-id') || '';
       const prompt = imgPromptInput.value.trim();
       if (!prompt) { imgStatus.textContent = '请输入图片描述'; return; }
-      postImageRegen(slideId, blockId, prompt, activeImgEl, imgStatus);
+      postImageRegen(slideId, blockId, prompt, activeImgEl, imgStatus, activeImgBlock);
     }
 
     cancelImgBtn.addEventListener('click', function() { clearImageEditor(); });

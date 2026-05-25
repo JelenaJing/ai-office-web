@@ -5,12 +5,12 @@ import {
   injectSharedStyles,
   injectEditRuntime,
   type ContentModelRecord,
-} from './htmlPresentationPostProcess.js'
+} from './htmlPresentationPostProcess'
 import {
   resolveTemplateSelection,
   type HtmlPresentationJobOptions,
   type TemplateProfileRecord,
-} from './htmlPresentationTemplates.js'
+} from './htmlPresentationTemplates'
 
 export interface RetemplateResult {
   outputPath: string
@@ -95,5 +95,4 @@ export function retemplateHtmlPresentationFromContentModel(input: {
     },
   }
 }
-
 

@@ -7,7 +7,7 @@ import {
   escapeAttribute,
   createPlaceholderDataUri,
   type ContentModelRecord,
-} from './htmlPresentationPostProcess.js'
+} from './htmlPresentationPostProcess'
 
 // ---------------------------------------------------------------------------
 // Image service integration (optional — falls back to SVG placeholder)
@@ -22,7 +22,7 @@ async function loadImageService() {
   if (_imageServiceFns !== null) return _imageServiceFns
   try {
     // Dynamic import to avoid hard dependency when image service is absent
-    const mod = await import('../../image/services/index.js')
+    const mod = await import('../../image/services')
     _imageServiceFns = {
       isImageServiceConfigured: mod.isImageServiceConfigured as () => boolean,
       generateImagePng: mod.generateImagePng as (input: { prompt: string }) => Promise<{ png: Buffer }>,

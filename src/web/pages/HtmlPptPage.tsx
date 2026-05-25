@@ -149,11 +149,105 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
   const [retemplateError, setRetemplateError] = useState('')
 
   const previewRef = useRef<HTMLDivElement | null>(null)
+  const previewIframeRef = useRef<HTMLIFrameElement | null>(null)
   const loadedArtifactIdRef = useRef<string>('')
   const generationStartedAtRef = useRef<number | null>(null)
 
   useEffect(() => {
     syncPreviewAuthCookie()
+  }, [])
+
+  useEffect(() => {
+    const handleMessage = async (event: MessageEvent) => {
+      const data = event.data as
+        | {
+            type?: string
+            artifactId?: string
+            storageKey?: string
+            requestId?: string
+            patch?: { op?: string; slideId?: string; blockId?: string; text?: string; createdAt?: string }
+            payload?: { slideId?: string; blockId?: string; imagePrompt?: string }
+          }
+        | null
+      if (!data?.type || !data.artifactId) return
+
+      if (data.type === 'aios-html-ppt:patch' && data.patch) {
+        const patch = data.patch
+        if (!patch.slideId || !patch.blockId || typeof patch.text !== 'string') return
+
+        if (data.storageKey) {
+          try {
+            const current = JSON.parse(localStorage.getItem(data.storageKey) || '[]') as Array<Record<string, unknown>>
+            const nextPatch = {
+              op: patch.op || 'replace_text',
+              slideId: patch.slideId,
+              blockId: patch.blockId,
+              text: patch.text,
+              createdAt: patch.createdAt || new Date().toISOString(),
+            }
+            const existingIndex = current.findIndex((item) => item.slideId === patch.slideId && item.blockId === patch.blockId)
+            if (existingIndex >= 0) current[existingIndex] = nextPatch
+            else current.push(nextPatch)
+            localStorage.setItem(data.storageKey, JSON.stringify(current))
+          } catch {
+            // ignore storage failures in parent page
+          }
+        }
+
+        try {
+          await fetch(resolveWebApiUrl(`/api/artifacts/${data.artifactId}/html-presentation/patch`), {
+            method: 'POST',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({
+              op: 'replace_text',
+              slideId: patch.slideId,
+              blockId: patch.blockId,
+              text: patch.text,
+            }),
+          })
+        } catch {
+          // runtime already updated DOM locally; server writeback is best-effort here
+        }
+        return
+      }
+
+      if (data.type === 'aios-html-ppt:image' && data.payload && data.requestId) {
+        const payload = data.payload
+        if (!payload.slideId || !payload.blockId || !payload.imagePrompt) return
+        let responsePayload: Record<string, unknown>
+        try {
+          const response = await fetch(resolveWebApiUrl(`/api/artifacts/${data.artifactId}/html-presentation/image`), {
+            method: 'POST',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify(payload),
+          })
+          const json = await response.json().catch(() => ({}))
+          responsePayload = {
+            type: 'aios-html-ppt:image-result',
+            requestId: data.requestId,
+            ...(typeof json === 'object' && json ? json : {}),
+          }
+        } catch (error) {
+          responsePayload = {
+            type: 'aios-html-ppt:image-result',
+            requestId: data.requestId,
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+          }
+        }
+
+        const targetWindow =
+          event.source && typeof event.source === 'object' && 'postMessage' in event.source
+            ? event.source
+            : previewIframeRef.current?.contentWindow
+        if (targetWindow && typeof targetWindow.postMessage === 'function') {
+          targetWindow.postMessage(responsePayload, '*')
+        }
+      }
+    }
+
+    window.addEventListener('message', handleMessage)
+    return () => window.removeEventListener('message', handleMessage)
   }, [])
 
   useEffect(() => {
@@ -573,6 +667,7 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
             <div style={s.previewFrameWrap}>
               {preview?.url ? (
                 <iframe
+                  ref={previewIframeRef}
                   key={preview.url}
                   title="HTML Presentation Preview"
                   src={preview.url}
