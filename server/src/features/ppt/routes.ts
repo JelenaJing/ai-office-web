@@ -1,6 +1,8 @@
+import fs from 'fs'
 import { createRequire } from 'module'
 import { Router } from 'express'
 import { requireAccountIdentity } from '../../lib/authUser'
+import { getArtifact, getArtifactFilePath } from '../../artifacts/ArtifactStore'
 import {
   createDeckTask,
   getDeck,
@@ -15,6 +17,8 @@ import {
 import { createDeckFromPrompt, exportDeckWithBuiltin, retemplateDeck } from './services/deckRuntime'
 import { editSlideWithMinimaxPptxGenerator, exportDeckWithMinimaxPptxGenerator, runMinimaxPptxGenerator } from './services/minimaxPptxGeneratorRunner'
 import { runSlidevDeckGenerator, editSlidevSlide, exportSlidevDeckArtifacts } from './services/slidevDeckRunner'
+import { generateSlidevHtmlPreview } from './services/slidevHtmlPreview'
+import { compileDeckToSlidevMarkdown } from './services/slidevMarkdownCompiler'
 import type { WebDeckDocument, WebDeckSlide, WebDeckTaskResult, PptEngine, PptOutputMode } from './types'
 import { assertWorkspaceAccess, WorkspaceAccessError } from '../../lib/workspaceAccess'
 
@@ -117,6 +121,10 @@ function resolveRequestedOutputMode(body: unknown): PptOutputMode | null {
 function resolveDeckEngine(deckId: string, requested: unknown): PptEngine {
   if (requested === 'builtin' || requested === 'minimax_pptx_generator' || requested === 'slidev') return requested
   return getDeckRuntimeMeta(deckId)?.engine || resolvePptEngine().engine
+}
+
+function resolveSlidevPreviewRoute(deckId: string): string {
+  return `/api/ppt/decks/${encodeURIComponent(deckId)}/slidev-preview`
 }
 
 function wrapMinimaxEditError(message: string): string {
@@ -495,6 +503,72 @@ router.get('/decks/:deckId', (req, res) => {
   res.json({ success: true, deck })
 })
 
+router.get('/decks/:deckId/slidev-preview', async (req, res) => {
+  const user = await requireAccountIdentity(req, res)
+  if (!user) return
+
+  const deck = getDeck(req.params.deckId)
+  if (!deck) {
+    console.info(`[ppt-slidev-preview] deckId=${req.params.deckId}`)
+    console.info('[ppt-slidev-preview] error=deck not found')
+    res.status(404).json({ success: false, error: 'DeckDocument 不存在或已过期' })
+    return
+  }
+
+  const runtimeMeta = getDeckRuntimeMeta(deck.deckId)
+  if (!runtimeMeta) {
+    console.info(`[ppt-slidev-preview] deckId=${deck.deckId}`)
+    console.info('[ppt-slidev-preview] error=runtime meta missing')
+    res.status(404).json({ success: false, error: '当前 deck 缺少运行时元数据，无法预览。' })
+    return
+  }
+
+  if (runtimeMeta.userId !== user.id) {
+    console.info(`[ppt-slidev-preview] deckId=${deck.deckId}`)
+    console.info('[ppt-slidev-preview] error=forbidden')
+    res.status(403).json({ success: false, error: '无权预览该 deck' })
+    return
+  }
+
+  if (runtimeMeta.engine !== 'slidev') {
+    console.info(`[ppt-slidev-preview] deckId=${deck.deckId}`)
+    console.info('[ppt-slidev-preview] error=not slidev deck')
+    res.status(400).json({ success: false, error: '当前 deck 不是 Slidev 模式' })
+    return
+  }
+
+  const previewUrl = runtimeMeta.previewUrl || resolveSlidevPreviewRoute(deck.deckId)
+  const artifactId = runtimeMeta.htmlArtifactId || ''
+  console.info(`[ppt-slidev-preview] previewUrl=${previewUrl}`)
+  console.info(`[ppt-slidev-preview] artifactId=${artifactId || 'n/a'}`)
+  console.info(`[ppt-slidev-preview] deckId=${deck.deckId}`)
+
+  res.setHeader('Content-Type', 'text/html; charset=utf-8')
+  res.setHeader('X-Content-Type-Options', 'nosniff')
+
+  if (artifactId) {
+    const artifact = getArtifact(artifactId)
+    const htmlExport = artifact?.exports.find((entry) => entry.format === 'html') || artifact?.exports[0]
+    const filePath = htmlExport ? getArtifactFilePath(artifactId, htmlExport.filename) : ''
+    if (filePath && fs.existsSync(filePath)) {
+      console.info('[ppt-slidev-preview] contentType=text/html; charset=utf-8')
+      res.sendFile(filePath)
+      return
+    }
+  }
+
+  try {
+    const slidevMarkdown = compileDeckToSlidevMarkdown(deck)
+    const html = generateSlidevHtmlPreview({ title: deck.title, slidevMarkdown })
+    console.info('[ppt-slidev-preview] contentType=text/html; charset=utf-8')
+    res.send(html)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.info(`[ppt-slidev-preview] error=${message}`)
+    res.status(500).json({ success: false, error: message })
+  }
+})
+
 router.post('/decks/:deckId/retemplate', async (req, res) => {
   const user = await requireAccountIdentity(req, res)
   if (!user) return
@@ -641,6 +715,7 @@ router.post('/decks/:deckId/slides/:slideId/edit', async (req, res) => {
         exportUrl: result.exportUrl,
         previewUrl: result.previewUrl,
         slidevMarkdown: result.slidevMarkdown,
+        htmlArtifactId: result.htmlArtifactId,
         changedSlideIds: result.changedSlideIds,
         unchangedSlideIds: result.unchangedSlideIds,
         message: result.message,

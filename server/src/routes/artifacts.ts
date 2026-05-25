@@ -34,6 +34,16 @@ function sendWorkspaceError(res: import('express').Response, error: unknown): vo
   res.status(500).json({ success: false, error: message })
 }
 
+function assertArtifactOwnership(
+  userId: string,
+  artifact: { userId: string },
+  res: import('express').Response,
+): boolean {
+  if (artifact.userId === userId) return true
+  res.status(403).json({ success: false, error: '无权访问该 artifact。' })
+  return false
+}
+
 // ── Content-Type map ──────────────────────────────────────────────────────────
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -122,12 +132,7 @@ router.get('/:artifactId', async (req, res) => {
   // Ownership check
   const userId = await requireAccountUser(req, res)
   if (!userId) return
-  try {
-    assertWorkspaceAccess(userId, artifact.workspaceId, 'member')
-  } catch (error) {
-    sendWorkspaceError(res, error)
-    return
-  }
+  if (!assertArtifactOwnership(userId, artifact, res)) return
   return res.json({ artifact })
 })
 
@@ -144,12 +149,7 @@ router.get('/:artifactId/download', async (req, res) => {
   // Ownership check — reject cross-user downloads
   const userId = await requireAccountUser(req, res)
   if (!userId) return
-  try {
-    assertWorkspaceAccess(userId, artifact.workspaceId, 'member')
-  } catch (error) {
-    sendWorkspaceError(res, error)
-    return
-  }
+  if (!assertArtifactOwnership(userId, artifact, res)) return
 
   const requestedFilename = typeof req.query.filename === 'string' ? req.query.filename : ''
   const requestedFormat = typeof req.query.format === 'string' ? req.query.format : ''
@@ -186,12 +186,7 @@ router.get('/:artifactId/preview', async (req, res) => {
   }
   const userId = await requireAccountUser(req, res)
   if (!userId) return
-  try {
-    assertWorkspaceAccess(userId, artifact.workspaceId, 'member')
-  } catch (error) {
-    sendWorkspaceError(res, error)
-    return
-  }
+  if (!assertArtifactOwnership(userId, artifact, res)) return
 
   const exportEntry = artifact.exports[0]
   if (!exportEntry) {
@@ -231,12 +226,7 @@ router.get('/:artifactId/relationships', async (req, res) => {
   }
   const userId = await requireAccountUser(req, res)
   if (!userId) return
-  try {
-    assertWorkspaceAccess(userId, artifact.workspaceId, 'member')
-  } catch (error) {
-    sendWorkspaceError(res, error)
-    return
-  }
+  if (!assertArtifactOwnership(userId, artifact, res)) return
   return res.json({
     artifactId,
     sourceRefs: artifact.sourceRefs ?? [],
@@ -267,12 +257,7 @@ router.patch('/:artifactId', async (req, res) => {
   }
   const userId = await requireAccountUser(req, res)
   if (!userId) return
-  try {
-    assertWorkspaceAccess(userId, artifact.workspaceId, 'editor')
-  } catch (error) {
-    sendWorkspaceError(res, error)
-    return
-  }
+  if (!assertArtifactOwnership(userId, artifact, res)) return
   const title = typeof req.body?.title === 'string' ? req.body.title.trim() : undefined
   if (!title) {
     return res.status(400).json({ message: 'title 不能为空' })
@@ -289,12 +274,7 @@ router.delete('/:artifactId', async (req, res) => {
   }
   const userId = await requireAccountUser(req, res)
   if (!userId) return
-  try {
-    assertWorkspaceAccess(userId, artifact.workspaceId, 'editor')
-  } catch (error) {
-    sendWorkspaceError(res, error)
-    return
-  }
+  if (!assertArtifactOwnership(userId, artifact, res)) return
   deleteArtifact(artifactId)
   return res.json({ success: true, artifactId })
 })

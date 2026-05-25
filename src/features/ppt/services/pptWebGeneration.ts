@@ -1,4 +1,5 @@
 import type { SkillResult } from '../../../platform'
+import { resolveWebApiUrl } from '../../../runtime/apiBase'
 
 function readAuthToken(): string | null {
   if (typeof window === 'undefined') return null
@@ -7,6 +8,112 @@ function readAuthToken(): string | null {
     ?? window.localStorage.getItem('aios_itoken')
     ?? window.localStorage.getItem('ai_office_internal_token')
   )
+}
+
+function authHeaders(): Record<string, string> {
+  const token = readAuthToken()
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
+function extractResponseError(
+  status: number,
+  fallbackMessage: string,
+  payload?: Record<string, unknown> | null,
+): string {
+  return (
+    (typeof payload?.message === 'string' && payload.message.trim())
+    || (typeof payload?.error === 'string' && payload.error.trim())
+    || `${fallbackMessage} (${status})`
+  )
+}
+
+export interface ProtectedTextFetchResult {
+  success: boolean
+  status: number
+  contentType: string
+  text?: string
+  error?: string
+  json?: Record<string, unknown>
+}
+
+export async function fetchProtectedTextResource(url: string): Promise<ProtectedTextFetchResult> {
+  const response = await fetch(resolveWebApiUrl(url), { headers: authHeaders() })
+  const contentType = (response.headers.get('content-type') || '').toLowerCase()
+  const isJson = contentType.includes('application/json')
+
+  if (isJson) {
+    const payload = await response.json().catch(() => null) as Record<string, unknown> | null
+    return {
+      success: false,
+      status: response.status,
+      contentType,
+      error: extractResponseError(response.status, '服务器返回了 JSON 响应，无法作为预览内容', payload),
+      json: payload || undefined,
+    }
+  }
+
+  const text = await response.text().catch(() => '')
+  if (!response.ok) {
+    return {
+      success: false,
+      status: response.status,
+      contentType,
+      error: text.trim() || `资源加载失败 (${response.status})`,
+      text,
+    }
+  }
+
+  return {
+    success: true,
+    status: response.status,
+    contentType,
+    text,
+  }
+}
+
+export async function downloadProtectedResource(url: string, filename: string): Promise<void> {
+  const response = await fetch(resolveWebApiUrl(url), { headers: authHeaders() })
+  const contentType = (response.headers.get('content-type') || '').toLowerCase()
+  const isJson = contentType.includes('application/json')
+
+  if (isJson) {
+    const payload = await response.json().catch(() => null) as Record<string, unknown> | null
+    throw new Error(extractResponseError(response.status, '下载失败', payload))
+  }
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => '')
+    throw new Error(text.trim() || `下载失败 (${response.status})`)
+  }
+
+  const blob = await response.blob()
+  const objectUrl = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = objectUrl
+  anchor.download = filename
+  document.body.appendChild(anchor)
+  anchor.click()
+  document.body.removeChild(anchor)
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000)
+}
+
+export async function openProtectedHtmlPreview(url: string): Promise<void> {
+  const result = await fetchProtectedTextResource(url)
+  if (!result.success || !result.text) {
+    throw new Error(result.error || '预览加载失败')
+  }
+  if (!result.contentType.includes('text/html')) {
+    throw new Error(`预览接口返回了非 HTML 内容：${result.contentType || 'unknown'}`)
+  }
+
+  const blob = new Blob([result.text], { type: 'text/html;charset=utf-8' })
+  const objectUrl = URL.createObjectURL(blob)
+  const opened = window.open(objectUrl, '_blank', 'noopener,noreferrer')
+  if (!opened) {
+    URL.revokeObjectURL(objectUrl)
+    throw new Error('浏览器拦截了预览窗口，请允许弹窗后重试。')
+  }
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
 }
 
 function pickObject(value: unknown): Record<string, unknown> | null {
@@ -140,9 +247,8 @@ export async function runWebPptxCreate(input: {
 }): Promise<WebPptCreateResult> {
   const MAX_POLL_ATTEMPTS = 60
   const POLL_INTERVAL_MS = 1500
-  const token = readAuthToken()
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (token) headers.Authorization = `Bearer ${token}`
+  Object.assign(headers, authHeaders())
 
   try {
     console.log('[ppt-web] start request', {
@@ -294,6 +400,7 @@ export interface WebPptSlideEditResult {
   exportUrl?: string
   previewUrl?: string
   slidevMarkdown?: string
+  htmlArtifactId?: string
   changedSlideIds?: string[]
   unchangedSlideIds?: string[]
   message?: string
@@ -313,9 +420,8 @@ export async function editWebPptSlide(input: {
   engine?: 'builtin' | 'minimax_pptx_generator' | 'slidev'
   allowFallback?: boolean
 }): Promise<WebPptSlideEditResult> {
-  const token = readAuthToken()
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (token) headers.Authorization = `Bearer ${token}`
+  Object.assign(headers, authHeaders())
 
   try {
     const response = await fetch(`/api/ppt/decks/${encodeURIComponent(input.deckId)}/slides/${encodeURIComponent(input.slideId)}/edit`, {
@@ -366,6 +472,7 @@ export interface WebPptDeckExportResult {
   exportUrl?: string
   previewUrl?: string
   slidevMarkdown?: string
+  htmlArtifactId?: string
   format?: string
   deck?: Record<string, unknown>
   slides?: Array<Record<string, unknown>>
@@ -379,9 +486,8 @@ export async function exportWebPptDeck(input: {
   engine?: 'builtin' | 'minimax_pptx_generator' | 'slidev'
   format?: 'pptx' | 'md' | 'html' | 'pdf' | 'png'
 }): Promise<WebPptDeckExportResult> {
-  const token = readAuthToken()
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (token) headers.Authorization = `Bearer ${token}`
+  Object.assign(headers, authHeaders())
 
   try {
     const response = await fetch(`/api/ppt/decks/${encodeURIComponent(input.deckId)}/export`, {
@@ -405,6 +511,7 @@ export async function exportWebPptDeck(input: {
       exportUrl: payload.exportUrl,
       previewUrl: payload.previewUrl,
       slidevMarkdown: payload.slidevMarkdown,
+      htmlArtifactId: payload.htmlArtifactId,
       format: body.format,
       deck: payload.deck,
       slides: payload.slides,
@@ -426,9 +533,8 @@ export async function retemplateWebPptDeck(input: {
   deckId: string
   templateId: string
 }): Promise<WebPptDeckRetemplateResult> {
-  const token = readAuthToken()
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (token) headers.Authorization = `Bearer ${token}`
+  Object.assign(headers, authHeaders())
 
   try {
     const response = await fetch(`/api/ppt/decks/${encodeURIComponent(input.deckId)}/retemplate`, {

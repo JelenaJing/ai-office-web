@@ -19,7 +19,13 @@ export async function downloadFromButton(
   await expect(button).toBeVisible()
   await expect(button).toBeEnabled()
   const protectedDownloadResponse = page.waitForResponse((response) =>
-    response.url().includes('/api/artifacts/') && response.url().includes('/download') && response.ok(),
+    response.ok() && (
+      (response.url().includes('/api/artifacts/') && response.url().includes('/download'))
+      || (response.url().includes('/api/ppt/decks/') && (
+        response.url().includes('/slidev-preview')
+        || response.url().includes('/export')
+      ))
+    ),
     { timeout: 60_000 },
   ).catch(() => null)
   const [download] = await Promise.all([

@@ -11,6 +11,7 @@ import { createHmac } from 'node:crypto'
 import { writeFile } from 'node:fs/promises'
 import { test, expect, type Page } from '@playwright/test'
 import * as net from 'net'
+import { downloadFromButton } from './helpers/download'
 
 const APP_URL = 'http://127.0.0.1:5173/index.web.html'
 const SERVER_URL = 'http://127.0.0.1:3001'
@@ -201,12 +202,29 @@ test('Flow B: Slidev 网页演示 — generate 5-slide web deck', async ({ page 
 
 test('Flow B: Slidev 网页演示 — iframe or markdown preview shown', async ({ page }) => {
   await openPptWorkbench(page)
+  const previewResponsePromise = page.waitForResponse((response) =>
+    response.url().includes('/api/ppt/decks/')
+    && response.url().includes('/slidev-preview')
+    && response.status() === 200,
+    { timeout: 90_000 },
+  )
   await generatePptWithEngine(page, 'slidev', '生成一份 5 页 AI Office 技术分享')
 
-  // Either an iframe preview or Slidev markdown is visible
-  const hasIframe = await page.locator('iframe[title*="Slidev"]').isVisible({ timeout: 5000 }).catch(() => false)
-  const hasSlidevLabel = await page.getByText(/Slidev|网页演示/).isVisible({ timeout: 2000 }).catch(() => false)
-  expect(hasIframe || hasSlidevLabel).toBe(true)
+  const previewResponse = await previewResponsePromise
+  expect(previewResponse.headers()['content-type'] || '').toContain('text/html')
+
+  const previewIframe = page.locator('iframe[title*="Slidev"]')
+  await expect(previewIframe).toBeVisible({ timeout: 15_000 })
+  const previewFrame = page.frameLocator('iframe[title*="Slidev"]')
+  await expect(previewFrame.locator('body')).toContainText(/AI Office 技术分享|目录/, { timeout: 15_000 })
+  await expect(previewFrame.locator('body')).not.toContainText('NO_WORKSPACE')
+  await expect(previewFrame.locator('body')).not.toContainText('"success": false')
+
+  const [popup] = await Promise.all([
+    page.waitForEvent('popup', { timeout: 15_000 }),
+    page.getByRole('button', { name: '全屏预览' }).click(),
+  ])
+  await expect(popup.locator('body')).toContainText(/AI Office 技术分享|目录/, { timeout: 15_000 })
 })
 
 test('Flow B: Slidev 网页演示 — edit slide 3', async ({ page }) => {
@@ -220,8 +238,20 @@ test('Flow B: Slidev 网页演示 — edit slide 3', async ({ page }) => {
     await expect(page.getByText(/当前正在修改：第 3 页|本次只会修改第 3 页/).first()).toBeVisible({ timeout: 5000 })
     const editInput = page.locator('textarea[placeholder*="修改当前页"]').last()
     await editInput.fill('把当前页改成时间线')
+    const refreshPreviewPromise = page.waitForResponse((response) =>
+      response.url().includes('/api/ppt/decks/')
+      && response.url().includes('/slidev-preview')
+      && response.status() === 200,
+      { timeout: 30_000 },
+    )
     await page.locator('button').filter({ hasText: '发送' }).last().click()
     await expect(page.getByText(/已修改 Slidev 第 3 页|只会修改第 3 页|时间线/).first()).toBeVisible({ timeout: 30_000 })
+    const refreshPreview = await refreshPreviewPromise
+    expect(refreshPreview.headers()['content-type'] || '').toContain('text/html')
+    const previewFrame = page.frameLocator('iframe[title*="Slidev"]')
+    await expect(previewFrame.locator('body')).toContainText(/阶段 1|时间线|背景介绍/, { timeout: 15_000 })
+    await expect(previewFrame.locator('body')).not.toContainText('NO_WORKSPACE')
+    await expect(previewFrame.locator('body')).not.toContainText('"success": false')
   })
 
   await writeFile(SCREENSHOTS.slidevPageEdit, await page.screenshot()).catch(() => {})
@@ -231,11 +261,21 @@ test('Flow B: Slidev 网页演示 — download Markdown and HTML artifacts', asy
   await openPptWorkbench(page)
   await generatePptWithEngine(page, 'slidev', '生成一份 5 页 AI Office 技术分享')
 
-  await expect(page.locator('button').filter({ hasText: '下载 Markdown' })).toBeVisible({ timeout: 5000 })
-  const htmlLink = page.locator('a').filter({ hasText: '下载 HTML' })
-  await expect(htmlLink).toBeVisible({ timeout: 5000 })
-  const href = await htmlLink.first().getAttribute('href')
-  expect(href).toContain('/api/artifacts/')
+  const markdown = await downloadFromButton(page, page.getByRole('button', { name: '下载 Markdown' }), {
+    extension: '.md',
+    minBytes: 100,
+    contains: /AI Office|技术分享|目录/,
+  })
+  expect(markdown.text || '').not.toContain('NO_WORKSPACE')
+  expect(markdown.text || '').not.toContain('"success": false')
+
+  const html = await downloadFromButton(page, page.getByRole('button', { name: '下载 HTML' }), {
+    extension: '.html',
+    minBytes: 100,
+    contains: /Slidev Preview|AI Office|目录/,
+  })
+  expect(html.text || '').not.toContain('NO_WORKSPACE')
+  expect(html.text || '').not.toContain('"success": false')
 })
 
 // ─── API-level checks ─────────────────────────────────────────────────────────

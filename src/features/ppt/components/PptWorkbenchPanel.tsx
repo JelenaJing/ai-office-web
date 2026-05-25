@@ -1,10 +1,11 @@
-import React from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import styled from 'styled-components'
 import type { PptAiMessage, PptSlidePreview, PptTaskStatus } from '../../../contexts/GenerationWorkbenchContext'
 import PptAiEditPanel from './PptAiEditPanel'
 import PptEditorShell from './PptEditorShell'
 import PptSlideNavigator from './PptSlideNavigator'
 import type { PptTemplateOption } from '../services/pptTemplates'
+import { fetchProtectedTextResource } from '../services/pptWebGeneration'
 
 const EmptyShell = styled.div`
   flex: 1;
@@ -57,11 +58,15 @@ interface PptWorkbenchPanelProps {
   pptEditingSlideId: string | null
   pptSlideEditStatus: 'idle' | 'editing' | 'applying' | 'error'
   templateBusy?: boolean
+  pptDeckId?: string | null
   pptOutputMode?: 'editable_pptx' | 'web_deck'
   pptPreviewUrl?: string
   pptDownloadUrl?: string | null
   pptSlidevMarkdown?: string
+  pptHtmlArtifactId?: string | null
   onDownloadPpt: () => void
+  onDownloadSlidevHtml?: () => void
+  onOpenSlidevPreview?: () => void
   onExportSlidev?: (format: 'pdf' | 'png' | 'pptx') => void
   onTemplateChange: (templateId: string) => void
   onSelectSlide: (index: number) => void
@@ -86,11 +91,15 @@ export default function PptWorkbenchPanel({
   pptEditingSlideId,
   pptSlideEditStatus,
   templateBusy,
+  pptDeckId,
   pptOutputMode,
   pptPreviewUrl,
   pptDownloadUrl,
   pptSlidevMarkdown,
+  pptHtmlArtifactId,
   onDownloadPpt,
+  onDownloadSlidevHtml,
+  onOpenSlidevPreview,
   onExportSlidev,
   onTemplateChange,
   onSelectSlide,
@@ -98,6 +107,64 @@ export default function PptWorkbenchPanel({
   onSaveDeck,
   onAiEditSlide,
 }: PptWorkbenchPanelProps) {
+  const [slidevPreviewHtml, setSlidevPreviewHtml] = useState('')
+  const [slidevPreviewError, setSlidevPreviewError] = useState<string | null>(null)
+  const [slidevPreviewLoading, setSlidevPreviewLoading] = useState(false)
+  const slidevPreviewSourceUrl = useMemo(() => (
+    pptDeckId ? `/api/ppt/decks/${encodeURIComponent(pptDeckId)}/slidev-preview` : (pptPreviewUrl || '')
+  ), [pptDeckId, pptPreviewUrl])
+
+  useEffect(() => {
+    if (pptOutputMode !== 'web_deck') {
+      setSlidevPreviewHtml('')
+      setSlidevPreviewError(null)
+      setSlidevPreviewLoading(false)
+      return
+    }
+    if (!slidevPreviewSourceUrl) {
+      setSlidevPreviewHtml('')
+      setSlidevPreviewError('当前缺少可用的 Slidev HTML 预览地址。')
+      setSlidevPreviewLoading(false)
+      return
+    }
+
+    let cancelled = false
+    setSlidevPreviewLoading(true)
+    setSlidevPreviewError(null)
+    console.info(`[ppt-slidev-preview] previewUrl=${slidevPreviewSourceUrl}`)
+    console.info(`[ppt-slidev-preview] artifactId=${pptHtmlArtifactId || 'n/a'}`)
+    console.info(`[ppt-slidev-preview] deckId=${pptDeckId || 'n/a'}`)
+
+    void fetchProtectedTextResource(slidevPreviewSourceUrl)
+      .then((result) => {
+        if (cancelled) return
+        console.info(`[ppt-slidev-preview] contentType=${result.contentType || 'unknown'}`)
+        if (result.success && result.text && result.contentType.includes('text/html')) {
+          setSlidevPreviewHtml(result.text)
+          setSlidevPreviewError(null)
+          return
+        }
+        const message = result.error || `预览接口返回了非 HTML 内容：${result.contentType || 'unknown'}`
+        console.info(`[ppt-slidev-preview] error=${message}`)
+        setSlidevPreviewHtml('')
+        setSlidevPreviewError(message)
+      })
+      .catch((error) => {
+        if (cancelled) return
+        const message = error instanceof Error ? error.message : 'Slidev 预览加载失败'
+        console.info(`[ppt-slidev-preview] error=${message}`)
+        setSlidevPreviewHtml('')
+        setSlidevPreviewError(message)
+      })
+      .finally(() => {
+        if (!cancelled) setSlidevPreviewLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [pptDeckId, pptHtmlArtifactId, pptOutputMode, pptSlidevMarkdown, slidevPreviewSourceUrl])
+
   if (taskStatus !== 'completed' && liveSlides.length === 0) {
     return (
       <EmptyShell>
@@ -112,7 +179,7 @@ export default function PptWorkbenchPanel({
   const activeSlide = liveSlides[activeSlideIndex] ?? null
   const activeMessages = activeSlide?.id ? pptEditMessages[activeSlide.id] || [] : []
 
-  if (pptOutputMode === 'web_deck' && pptPreviewUrl) {
+  if (pptOutputMode === 'web_deck') {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', minHeight: 0, background: '#f5f7fa' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px', background: '#fff', borderBottom: '1px solid #e4e9f0', fontSize: 13, color: '#2d3a4a' }}>
@@ -127,21 +194,22 @@ export default function PptWorkbenchPanel({
           >
             下载 Markdown
           </button>
-          <a
-            href={pptPreviewUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ padding: '4px 12px', borderRadius: 4, background: '#3367d6', color: '#fff', fontSize: 13, textDecoration: 'none', cursor: 'pointer' }}
+          <button
+            type="button"
+            onClick={onOpenSlidevPreview}
+            disabled={!slidevPreviewSourceUrl}
+            style={{ padding: '4px 12px', borderRadius: 4, background: '#3367d6', color: '#fff', fontSize: 13, border: 'none', cursor: slidevPreviewSourceUrl ? 'pointer' : 'not-allowed', opacity: slidevPreviewSourceUrl ? 1 : 0.55 }}
           >
             全屏预览
-          </a>
-          <a
-            href={pptPreviewUrl}
-            download
-            style={{ padding: '4px 12px', borderRadius: 4, background: '#fff', color: '#3367d6', fontSize: 13, textDecoration: 'none', border: '1px solid #3367d6', cursor: 'pointer' }}
+          </button>
+          <button
+            type="button"
+            onClick={onDownloadSlidevHtml}
+            disabled={!slidevPreviewSourceUrl}
+            style={{ padding: '4px 12px', borderRadius: 4, background: '#fff', color: '#3367d6', fontSize: 13, border: '1px solid #3367d6', cursor: slidevPreviewSourceUrl ? 'pointer' : 'not-allowed', opacity: slidevPreviewSourceUrl ? 1 : 0.55 }}
           >
             下载 HTML
-          </a>
+          </button>
           <button
             type="button"
             disabled
@@ -169,12 +237,32 @@ export default function PptWorkbenchPanel({
             slideEditStatus={pptSlideEditStatus}
             onSelectSlide={onSelectSlide}
           />
-          <iframe
-            src={pptPreviewUrl}
-            title={`Slidev 预览：${title}`}
-            style={{ flex: 1, border: 'none', background: '#fff' }}
-            sandbox=""
-          />
+          <div style={{ minWidth: 0, minHeight: 0, background: '#fff', overflow: 'auto', padding: 16 }}>
+            {slidevPreviewHtml ? (
+              <iframe
+                srcDoc={slidevPreviewHtml}
+                title={`Slidev 预览：${title}`}
+                style={{ width: '100%', height: '100%', minHeight: 520, border: 'none', background: '#fff' }}
+                sandbox=""
+              />
+            ) : (
+              <div style={{ display: 'grid', gap: 12, minHeight: '100%', alignContent: 'start' }}>
+                <div style={{ border: '1px solid #dbe4ee', borderRadius: 12, background: '#f8fbff', padding: 16, color: '#31485f' }}>
+                  <div style={{ fontWeight: 700, marginBottom: 8 }}>
+                    {slidevPreviewLoading ? '正在加载 Slidev HTML 预览…' : slidevPreviewError ? 'Slidev 预览加载失败' : 'Slidev HTML 预览暂不可用'}
+                  </div>
+                  <div style={{ fontSize: 13, lineHeight: 1.7, color: '#5b7084' }}>
+                    {slidevPreviewError || '当前将回退显示 Markdown 预览。'}
+                  </div>
+                </div>
+                {pptSlidevMarkdown ? (
+                  <pre style={{ margin: 0, fontSize: 12, color: '#334155', background: '#f8fafc', borderRadius: 12, padding: 16, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                    {pptSlidevMarkdown}
+                  </pre>
+                ) : null}
+              </div>
+            )}
+          </div>
           <div style={{ minWidth: 0, borderLeft: '1px solid #e4e9f0', background: '#fff', display: 'grid', gridTemplateRows: 'minmax(0, 1fr) auto' }}>
             <PptAiEditPanel
               slide={activeSlide}

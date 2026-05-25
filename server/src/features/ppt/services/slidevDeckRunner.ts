@@ -70,6 +70,10 @@ function toSafeArtifactName(title: string): string {
   return title.replace(/[^\w\u4e00-\u9fa5\-]+/g, '_').slice(0, 60) || 'presentation'
 }
 
+function slidevPreviewUrl(deckId: string): string {
+  return `/api/ppt/decks/${encodeURIComponent(deckId)}/slidev-preview`
+}
+
 function saveSlidevArtifacts(input: SaveSlidevArtifactsInput): SaveSlidevArtifactsResult {
   const safeName = toSafeArtifactName(input.deck.title)
   const markdownArtifact = saveSkillArtifact({
@@ -111,7 +115,7 @@ function saveSlidevArtifacts(input: SaveSlidevArtifactsInput): SaveSlidevArtifac
     artifact: markdownArtifact,
     htmlArtifact,
     exportUrl: markdownArtifact.exports?.[0]?.url || `/api/ppt/decks/${input.deck.deckId}/download`,
-    previewUrl: htmlArtifact.exports?.[0]?.url || `/api/artifacts/${htmlArtifact.id}/download`,
+    previewUrl: slidevPreviewUrl(input.deck.deckId),
     markdownArtifactId: markdownArtifact.id,
     htmlArtifactId: htmlArtifact.id,
   }

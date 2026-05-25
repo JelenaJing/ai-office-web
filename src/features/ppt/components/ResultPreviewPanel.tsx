@@ -35,7 +35,13 @@ import { platformApi } from '../../../platform'
 import { artifactDownloadFilename, artifactHasExport } from '../../../utils/artifactDisplay'
 import { webMigrationLabel } from '../../../platform/webMigration'
 import { buildNearbySlidesContext, mergeDeckIntoLiveSlides, replaceSlideInPreviews } from '../services/webDeckSlides'
-import { editWebPptSlide, exportWebPptDeck, retemplateWebPptDeck } from '../services/pptWebGeneration'
+import {
+  downloadProtectedResource,
+  editWebPptSlide,
+  exportWebPptDeck,
+  openProtectedHtmlPreview,
+  retemplateWebPptDeck,
+} from '../services/pptWebGeneration'
 import { buildPptTemplateOptions, resolvePptTemplateId, resolvePptTemplateLabel } from '../services/pptTemplates'
 
 const Shell = styled.section`
@@ -687,6 +693,7 @@ export default function ResultPreviewPanel() {
   const pptOutputMode = workbench.sessions.ppt.pptOutputMode
   const pptPreviewUrl = workbench.sessions.ppt.pptPreviewUrl
   const pptSlidevMarkdown = workbench.sessions.ppt.pptSlidevMarkdown
+  const slidevPreviewUrl = pptDeckId ? `/api/ppt/decks/${encodeURIComponent(pptDeckId)}/slidev-preview` : pptPreviewUrl
   const pptSlides = workbench.sessions.ppt.pptSlides
   const pptLiveSlides = workbench.sessions.ppt.pptLiveSlides
   const pptTotalSlides = workbench.sessions.ppt.pptTotalSlides
@@ -874,33 +881,13 @@ export default function ResultPreviewPanel() {
     return normalized.toLowerCase().endsWith('.pptx') ? normalized : `${normalized}.pptx`
   }
 
-  const readWebAuthToken = () => {
-    if (typeof window === 'undefined') return null
-    return (
-      window.localStorage.getItem('aios_auth_token')
-      ?? window.localStorage.getItem('aios_itoken')
-      ?? window.localStorage.getItem('ai_office_internal_token')
-    )
+  const ensureSlidevFilename = (name: string | null | undefined, suffix: '.slidev.md' | '.slidev.html') => {
+    const stem = sanitizeFileStem(String(name || '').trim() || '演示文稿') || '演示文稿'
+    return stem.toLowerCase().endsWith(suffix) ? stem : `${stem}${suffix}`
   }
 
   const downloadProtectedUrl = async (url: string, filename: string) => {
-    const token = readWebAuthToken()
-    const headers: Record<string, string> = {}
-    if (token) headers.Authorization = `Bearer ${token}`
-    const response = await fetch(url, { headers })
-    if (!response.ok) {
-      const body = await response.json().catch(() => null) as { message?: string; error?: string } | null
-      throw new Error(body?.message || body?.error || `下载失败 (${response.status})`)
-    }
-    const blob = await response.blob()
-    const objectUrl = URL.createObjectURL(blob)
-    const anchor = document.createElement('a')
-    anchor.href = objectUrl
-    anchor.download = filename
-    document.body.appendChild(anchor)
-    anchor.click()
-    document.body.removeChild(anchor)
-    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000)
+    await downloadProtectedResource(url, filename)
   }
 
   const handleOpenPath = async (targetPath: string, successMessage: string, failurePrefix: string) => {
@@ -976,6 +963,8 @@ export default function ResultPreviewPanel() {
         pptLiveSlides: nextSlides,
         pptArtifactId: exported.artifact?.id || session.pptArtifactId,
         pptDownloadUrl: exported.exportUrl || session.pptDownloadUrl,
+        pptPreviewUrl: exported.previewUrl || session.pptPreviewUrl,
+        pptSlidevMarkdown: exported.slidevMarkdown || session.pptSlidevMarkdown,
         resultAssetId: exported.artifact?.id || session.resultAssetId,
         resultPath: exported.exportUrl || session.resultPath,
         resultTitle: exported.artifact?.title || session.resultTitle,
@@ -989,6 +978,12 @@ export default function ResultPreviewPanel() {
     }
     if (isWebShim()) {
       try {
+        if (pptEngine === 'slidev') {
+          const filename = ensureSlidevFilename(workbench.resultTitle, '.slidev.md')
+          await downloadProtectedUrl(pptxPath, filename)
+          setPreviewMessage(`已下载 ${filename}`)
+          return
+        }
         const artifactId = isWebArtifactId(String(workbench.resultAssetId || ''))
           ? String(workbench.resultAssetId)
           : (isWebArtifactId(pptxPath) ? pptxPath : '')
@@ -1393,6 +1388,67 @@ export default function ResultPreviewPanel() {
     }))
     setPreviewMessage(result.message || '已保存')
   }, [effectivePptSlides, mergeDeckIntoLiveSlides, pptDeckDocumentId, pptDeckId, pptDirty, pptEngine, workbench])
+
+  const handleDownloadSlidevHtml = useCallback(async () => {
+    const deckId = pptDeckId || pptDeckDocumentId
+    if (!deckId) {
+      setPreviewMessage('当前没有可下载的 Slidev deck。')
+      return
+    }
+
+    let downloadUrl = slidevPreviewUrl
+    if (pptDirty || !downloadUrl) {
+      const result = await exportWebPptDeck({ deckId, engine: 'slidev', format: 'html' })
+      if (!result.success) {
+        setPreviewMessage(result.error || 'Slidev HTML 下载失败')
+        return
+      }
+      const nextSlides = result.deck ? mergeDeckIntoLiveSlides(result, effectivePptSlides) : effectivePptSlides
+      downloadUrl = result.exportUrl || result.previewUrl || slidevPreviewUrl
+      workbench.setModeSession('ppt', (session) => ({
+        ...session,
+        pptSlides: nextSlides,
+        pptLiveSlides: nextSlides,
+        pptDownloadUrl: result.exportUrl || session.pptDownloadUrl,
+        pptPreviewUrl: result.previewUrl || session.pptPreviewUrl,
+        pptSlidevMarkdown: result.slidevMarkdown || session.pptSlidevMarkdown,
+        pptDirty: false,
+      }))
+    }
+
+    if (!downloadUrl) {
+      setPreviewMessage('当前没有可下载的 Slidev HTML 预览。')
+      return
+    }
+
+    try {
+      const filename = ensureSlidevFilename(workbench.resultTitle, '.slidev.html')
+      await downloadProtectedUrl(downloadUrl, filename)
+      setPreviewMessage(`已下载 ${filename}`)
+    } catch (error) {
+      setPreviewMessage(error instanceof Error ? error.message : 'Slidev HTML 下载失败')
+    }
+  }, [
+    effectivePptSlides,
+    mergeDeckIntoLiveSlides,
+    pptDeckDocumentId,
+    pptDeckId,
+    pptDirty,
+    slidevPreviewUrl,
+    workbench,
+  ])
+
+  const handleOpenSlidevPreview = useCallback(async () => {
+    if (!slidevPreviewUrl) {
+      setPreviewMessage('当前没有可打开的 Slidev HTML 预览。')
+      return
+    }
+    try {
+      await openProtectedHtmlPreview(slidevPreviewUrl)
+    } catch (error) {
+      setPreviewMessage(error instanceof Error ? error.message : 'Slidev 预览打开失败')
+    }
+  }, [slidevPreviewUrl])
 
   const handleExportSlidev = useCallback(async (format: 'pdf' | 'png' | 'pptx') => {
     const deckId = pptDeckId || pptDeckDocumentId
@@ -2294,11 +2350,14 @@ export default function ResultPreviewPanel() {
           pptEditingSlideId={pptEditingSlideId}
           pptSlideEditStatus={pptSlideEditStatus}
           templateBusy={pptSkillBusy || pptTaskStatus === 'applying_template'}
+          pptDeckId={pptDeckId}
           pptOutputMode={pptOutputMode || undefined}
           pptPreviewUrl={pptPreviewUrl || undefined}
           pptDownloadUrl={pptDownloadUrl}
           pptSlidevMarkdown={pptSlidevMarkdown || undefined}
           onDownloadPpt={() => void handleDownloadPptx()}
+          onDownloadSlidevHtml={() => void handleDownloadSlidevHtml()}
+          onOpenSlidevPreview={() => void handleOpenSlidevPreview()}
           onExportSlidev={(format) => void handleExportSlidev(format)}
           onTemplateChange={(templateId) => void handleRetemplatePptDeck(templateId)}
           onSelectSlide={handlePptSelectSlide}
