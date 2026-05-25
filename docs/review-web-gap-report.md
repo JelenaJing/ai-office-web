@@ -105,9 +105,10 @@ Report-only items listed above.
 
 ## Remaining gaps after this round
 
-- Real vector retrieval/ranking remains a follow-up; this round keeps knowledge references mockable/upgradeable and uses selected sources.
+- Real knowledge retrieval remains follow-up in this report baseline; remote knowledge-base deep chunk retrieval/vector ranking still remains a remaining gap.
 - Full citation style formatting (APA/GB/T/Chicago) remains follow-up.
-- PPT, email, image, daily, and skill P1 work remains follow-up unless additional time is available after P0 validation.
+- PPT P1 deck/template residue, entry/router adjustments, and handoff/research scaffolding currently present in the web worktree remain out of scope for this round and should stay unsubmitted until completed separately.
+- Email, image, daily, and skill P1 work remains follow-up unless additional time is available after P0 validation.
 
 ## Risks
 
