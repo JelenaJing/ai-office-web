@@ -331,7 +331,7 @@ export default function WebExcelAnalysisPanel() {
             数据分析
           </CardTitle>
           <CardSubtitle>
-            选择已上传的 xlsx / csv 文件，生成 Markdown 分析报告并保存到生成记录。
+            选择已上传的 xlsx / csv 文件，由服务器生成分析摘要、Markdown 报告和 SVG 图表。
           </CardSubtitle>
         </CardHeader>
 
@@ -388,8 +388,7 @@ export default function WebExcelAnalysisPanel() {
               </PrimaryBtn>
 
               <HintBox>
-                分析结果将保存为 <strong>表格分析</strong> 类型，可在资源中心 › 生成记录下载
-                <code>analysis.md</code>。
+                分析结果将保存为 <strong>data_analysis</strong> 产物；前端只展示服务器返回的摘要和图表图片。
               </HintBox>
             </>
           )}
