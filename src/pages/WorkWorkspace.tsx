@@ -96,11 +96,11 @@ export default function WorkWorkspace({ onGoToWorkspace, onNavigate }: WorkWorks
         />
         <SceneFeatureRow
           icon={<Presentation size={24} />}
-          title="PPT 生成"
-          description="根据主题、资料和模板生成演示文稿，支持 Skill 模板"
+          title="演示文稿生成"
+          description="根据主题和提纲生成 HTML 演示文稿（由 OpenCode + html-ppt-beautiful 驱动）"
           accent="orange"
           actionLabel="进入"
-          onClick={() => go(enterPptGenerationMode)}
+          onClick={() => onNavigate('html-ppt')}
         />
       </FeatureList>
     </Page>

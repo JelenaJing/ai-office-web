@@ -32,9 +32,25 @@ export interface AccountIdentity {
 
 function bearerToken(req: Request): string | null {
   const auth = req.headers['authorization']
-  if (!auth?.startsWith('Bearer ')) return null
-  const token = auth.slice(7).trim()
-  return token || null
+  if (auth?.startsWith('Bearer ')) {
+    const token = auth.slice(7).trim()
+    if (token) return token
+  }
+  const cookieHeader = req.headers.cookie
+  if (!cookieHeader) return null
+  const cookieMap = new Map<string, string>()
+  for (const part of cookieHeader.split(';')) {
+    const [rawKey, ...rawValue] = part.split('=')
+    const key = rawKey?.trim()
+    if (!key) continue
+    cookieMap.set(key, decodeURIComponent(rawValue.join('=').trim()))
+  }
+  return (
+    cookieMap.get('aios_auth_token')
+    ?? cookieMap.get('aios_itoken')
+    ?? cookieMap.get('ai_office_internal_token')
+    ?? null
+  )
 }
 
 function fallbackIdentity(): AccountIdentity {

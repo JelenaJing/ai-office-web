@@ -4,7 +4,7 @@ import { Briefcase, BookOpen, Heart, FolderOpen, Settings, User, Home, MessageCi
 import { PRODUCT_FEATURES } from '../../config/productFeatures'
 
 // 'workspace' is kept for internal use (tool launch state), but is not a nav item
-export type PrimarySection = 'home' | 'work' | 'research' | 'study' | 'life' | 'resource' | 'chat' | 'contacts' | 'workspace' | 'settings' | 'account' | 'skill-center' | 'calendar' | 'aios'
+export type PrimarySection = 'home' | 'work' | 'research' | 'study' | 'life' | 'resource' | 'chat' | 'contacts' | 'workspace' | 'settings' | 'account' | 'skill-center' | 'calendar' | 'aios' | 'html-ppt'
 
 interface PrimaryNavProps {
   section: PrimarySection

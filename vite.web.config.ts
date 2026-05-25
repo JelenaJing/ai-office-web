@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'node:path'
+import { viteWatchIgnored } from './vite.watch-ignored'
 
 /**
  * Vite config for the browser (Web) build.
@@ -29,6 +30,9 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 5173,
     open: '/index.web.html',
+    watch: {
+      ignored: viteWatchIgnored,
+    },
     proxy: {
       '/api': {
         target: 'http://localhost:3001',

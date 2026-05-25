@@ -208,7 +208,7 @@ function ArtifactsTab() {
         <div style={{ fontSize: 36, marginBottom: 8 }}>✨</div>
         <div style={{ fontSize: 15, fontWeight: 600, color: '#304255' }}>暂无生成记录</div>
         <div style={{ fontSize: 13, color: '#8094a8', maxWidth: 280 }}>
-          生成的文稿、表格分析结果会显示在这里，可以直接下载使用。
+          生成的文稿、PPT、表格分析等会显示在这里（保留 7 天），也可在「我的文件」长期查看。
         </div>
       </PlaceholderWrap>
     )
@@ -332,7 +332,7 @@ export default function ResourceWorkspace(_props: ResourceWorkspaceProps) {
     <Page>
       <PageHeader>
         <PageTitle>资源中心</PageTitle>
-        <PageSubtitle>管理你的上传文件、AI 生成结果和知识库资料</PageSubtitle>
+        <PageSubtitle>管理上传文件与 AI 生成结果。生成记录保留 7 天；DOCX/PPT 等成品会同步到「我的文件」。</PageSubtitle>
       </PageHeader>
 
       <TabBar>

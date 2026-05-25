@@ -223,6 +223,74 @@ export function buildNearbySlidesContext(slides: PptSlidePreview[], activeIndex:
     }))
 }
 
+function stripLeadingFrontmatter(markdown: string): string {
+  return String(markdown || '').trim().replace(/^---\n[\s\S]*?\n---\n?/, '').trim()
+}
+
+function extractSlidevSlideChunks(markdown: string): string[] {
+  const content = String(markdown || '').trim()
+  if (!content) return []
+  const withoutGlobalFrontmatter = stripLeadingFrontmatter(content)
+  const officialChunks = Array.from(
+    withoutGlobalFrontmatter.matchAll(/(?:^|\n)---\n[\s\S]*?\n---\n([\s\S]*?)(?=\n---\n[\s\S]*?\n---\n|$)/g),
+  )
+    .map((match) => match[1].trim())
+    .filter(Boolean)
+  if (officialChunks.length > 0) return officialChunks
+  return withoutGlobalFrontmatter.split(/\n---\n/g).map((chunk) => stripLeadingFrontmatter(chunk)).filter(Boolean)
+}
+
+function extractSlideTitleFromMarkdown(block: string, index: number): string {
+  const heading = block.match(/^#{1,2}\s+(.+)$/m)?.[1]?.trim()
+  if (heading) return heading
+  const firstLine = block.split('\n').map((line) => line.trim()).find((line) => line && !line.startsWith('<!--'))
+  return firstLine?.slice(0, 48) || `第 ${index + 1} 页`
+}
+
+export function parseSlidevMarkdownToPreviews(markdown: string, deckTitle?: string): PptSlidePreview[] {
+  const normalized = String(markdown || '').replace(/\r\n/g, '\n').trim()
+  if (!normalized) return []
+
+  const contentParts = extractSlidevSlideChunks(normalized)
+
+  if (contentParts.length === 0) {
+    return [{
+      id: 'slide-1',
+      index: 0,
+      type: 'content',
+      title: deckTitle || extractSlideTitleFromMarkdown(normalized, 0),
+      heading: deckTitle || '演示文稿',
+      items: [],
+      bullets: [],
+      layout: 'content',
+      previewImageUrl: null,
+      raw: { layout: 'content' },
+      imagePath: null,
+      imageLoading: false,
+      isGenerating: false,
+    }]
+  }
+
+  return contentParts.map((block, index) => {
+    const title = extractSlideTitleFromMarkdown(block, index)
+    return {
+      id: `slide-${index + 1}`,
+      index,
+      type: index === 0 ? 'cover' : 'content',
+      title,
+      heading: title,
+      items: [],
+      bullets: [],
+      layout: index === 0 ? 'cover' : 'content',
+      previewImageUrl: null,
+      raw: { layout: index === 0 ? 'cover' : 'content', markdown: block },
+      imagePath: null,
+      imageLoading: false,
+      isGenerating: false,
+    }
+  })
+}
+
 export function createMinimalPptLiveSlides(title: string, message?: string): PptSlidePreview[] {
   const text = message || 'PPT 已生成，可下载查看完整文件。'
   return [

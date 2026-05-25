@@ -15,16 +15,77 @@ function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
+export function sanitizePptUserMessage(message: string): string {
+  const text = message.trim()
+  if (!text) return '操作失败，请稍后重试'
+  if (/deckdocument|deck document/i.test(text)) {
+    return '演示文稿预览已过期，正在尝试恢复…'
+  }
+  if (/任务不存在|已过期/i.test(text)) {
+    return '生成任务已过期，请重新生成 PPT'
+  }
+  return text
+}
+
 function extractResponseError(
   status: number,
   fallbackMessage: string,
   payload?: Record<string, unknown> | null,
 ): string {
-  return (
+  const raw = (
     (typeof payload?.message === 'string' && payload.message.trim())
     || (typeof payload?.error === 'string' && payload.error.trim())
     || `${fallbackMessage} (${status})`
   )
+  if (/deckdocument/i.test(raw)) {
+    return '演示文稿预览已过期，正在尝试恢复…'
+  }
+  return raw
+}
+
+export async function rebuildSlidevPreview(input: {
+  deckId: string
+  workspacePath?: string
+  title?: string
+  slidevMarkdown: string
+}): Promise<{
+  success: boolean
+  previewUrl?: string
+  slidevAppUrl?: string
+  slidevPreviewMode?: 'official' | 'fallback'
+  error?: string
+}> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  Object.assign(headers, authHeaders())
+  try {
+    const response = await fetch(`/api/ppt/decks/${encodeURIComponent(input.deckId)}/slidev-rebuild-preview`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        slidevMarkdown: input.slidevMarkdown,
+        workspacePath: input.workspacePath,
+        title: input.title,
+      }),
+    })
+    const body = await response.json().catch(() => ({ error: `HTTP ${response.status}` })) as Record<string, unknown>
+    if (!response.ok || body.success === false) {
+      return {
+        success: false,
+        error: extractResponseError(response.status, '预览恢复失败', body),
+      }
+    }
+    return {
+      success: true,
+      previewUrl: pickString(body.previewUrl),
+      slidevAppUrl: pickString(body.slidevAppUrl),
+      slidevPreviewMode: body.slidevPreviewMode === 'official' ? 'official' : 'fallback',
+    }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : '预览恢复失败',
+    }
+  }
 }
 
 export interface ProtectedTextFetchResult {
@@ -97,6 +158,17 @@ export async function downloadProtectedResource(url: string, filename: string): 
   window.setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000)
 }
 
+export function createHtmlBlobUrl(html: string): string {
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
+  return URL.createObjectURL(blob)
+}
+
+export function revokeHtmlBlobUrl(url: string): void {
+  if (url.startsWith('blob:')) {
+    URL.revokeObjectURL(url)
+  }
+}
+
 export async function openProtectedHtmlPreview(url: string): Promise<void> {
   const result = await fetchProtectedTextResource(url)
   if (!result.success || !result.text) {
@@ -106,8 +178,7 @@ export async function openProtectedHtmlPreview(url: string): Promise<void> {
     throw new Error(`预览接口返回了非 HTML 内容：${result.contentType || 'unknown'}`)
   }
 
-  const blob = new Blob([result.text], { type: 'text/html;charset=utf-8' })
-  const objectUrl = URL.createObjectURL(blob)
+  const objectUrl = createHtmlBlobUrl(result.text)
   const opened = window.open(objectUrl, '_blank', 'noopener,noreferrer')
   if (!opened) {
     URL.revokeObjectURL(objectUrl)
@@ -219,7 +290,14 @@ export interface WebPptCreateResult extends SkillResult {
 function validateCompletedCreatePayload(payload: WebPptDeckPayload | undefined, fallbackArtifact?: SkillResult['artifact']): string | null {
   if (!payload) return 'PPT 任务已完成，但缺少结果数据。'
   if (!payload.deckId) return 'PPT 任务已完成，但缺少 deckId。'
-  if (!payload.deck || !Array.isArray(payload.deck.slides) || payload.deck.slides.length === 0) {
+  const deckSlides = Array.isArray(payload.deck?.slides) ? payload.deck.slides : []
+  const directSlides = Array.isArray(payload.slides) ? payload.slides : []
+  const slideCount = deckSlides.length > 0 ? deckSlides.length : directSlides.length
+  if (payload.engine === 'slidev') {
+    if (slideCount === 0 && !payload.slidevMarkdown?.trim()) {
+      return 'PPT 任务已完成，但缺少 Slidev Markdown 或 slides。'
+    }
+  } else if (slideCount === 0) {
     return 'PPT 任务已完成，但缺少有效的 deck/slides。'
   }
   const artifactId = payload.artifact?.id || fallbackArtifact?.id
@@ -254,7 +332,8 @@ export async function runWebPptxCreate(input: {
   outputMode?: 'editable_pptx' | 'web_deck'
   onProgress?: (update: WebPptTaskProgressUpdate) => void
 }): Promise<WebPptCreateResult> {
-  const MAX_POLL_ATTEMPTS = 60
+  const isSlidevJob = input.engine === 'slidev'
+  const MAX_POLL_ATTEMPTS = isSlidevJob ? 120 : 60
   const POLL_INTERVAL_MS = 1500
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   Object.assign(headers, authHeaders())
@@ -331,17 +410,15 @@ export async function runWebPptxCreate(input: {
         status: pollBody.status ?? `http-${pollResp.status}`,
         progress: pollBody.progress ?? null,
       })
-      if (pollBody.status === 'running' && pollBody.result) {
-        const partialPayload = parseWebPptDeckPayload(pollBody.result)
-        if (partialPayload?.deckId) {
-          input.onProgress?.({
-            taskId: startBody.taskId,
-            status: pollBody.status,
-            progress: pollBody.progress ?? 0,
-            message: pollBody.message || '正在生成…',
-            data: partialPayload,
-          })
-        }
+      if (pollBody.status === 'running') {
+        const partialPayload = pollBody.result ? parseWebPptDeckPayload(pollBody.result) : null
+        input.onProgress?.({
+          taskId: startBody.taskId,
+          status: pollBody.status,
+          progress: pollBody.progress ?? 0,
+          message: pollBody.message || '正在生成…',
+          data: partialPayload?.deckId ? partialPayload : undefined,
+        })
       }
       if (!pollResp.ok || !pollBody.success) {
         const message = pollBody.error || pollBody.message || `PPT 任务查询失败 (${pollResp.status})`

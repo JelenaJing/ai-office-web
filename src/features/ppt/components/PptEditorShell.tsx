@@ -14,20 +14,25 @@ const Shell = styled.div`
   background: #f3f6fb;
 `
 
-const Body = styled.div`
+const Body = styled.div<{ $hideNavigator?: boolean }>`
   position: relative;
   min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-columns: 168px minmax(0, 1fr);
+  grid-template-columns: ${({ $hideNavigator }) => (
+    $hideNavigator ? 'minmax(0, 1fr)' : '168px minmax(0, 1fr)'
+  )};
   overflow: hidden;
 
   @media (max-width: 980px) {
-    grid-template-columns: 148px minmax(0, 1fr);
+    grid-template-columns: ${({ $hideNavigator }) => (
+      $hideNavigator ? 'minmax(0, 1fr)' : '148px minmax(0, 1fr)'
+    )};
   }
 `
 
 const CenterPane = styled.div`
+  position: relative;
   min-width: 0;
   min-height: 0;
   display: flex;
@@ -42,10 +47,11 @@ interface PptEditorShellProps {
   statusMessage?: string | null
   previewContent?: React.ReactNode
   pipelineContent?: React.ReactNode
-  selectionBar?: React.ReactNode
+  floatingOverlay?: React.ReactNode
   downloadLabel?: string
   toolbarExtraActions?: React.ReactNode
   compactMode?: boolean
+  hideNavigator?: boolean
   onSelectSlide: (index: number) => void
   onDownload: () => void
 }
@@ -57,10 +63,11 @@ export default function PptEditorShell({
   statusMessage,
   previewContent,
   pipelineContent,
-  selectionBar,
+  floatingOverlay,
   downloadLabel,
   toolbarExtraActions,
   compactMode = false,
+  hideNavigator = false,
   onSelectSlide,
   onDownload,
 }: PptEditorShellProps) {
@@ -73,17 +80,19 @@ export default function PptEditorShell({
         extraActions={toolbarExtraActions}
         onDownload={onDownload}
       />
-      <Body>
-        <PptSlideNavigator
-          slides={slides}
-          activeIndex={activeSlideIndex}
-          compact={compactMode}
-          onSelectSlide={onSelectSlide}
-        />
+      <Body $hideNavigator={hideNavigator}>
+        {!hideNavigator ? (
+          <PptSlideNavigator
+            slides={slides}
+            activeIndex={activeSlideIndex}
+            compact={compactMode}
+            onSelectSlide={onSelectSlide}
+          />
+        ) : null}
         <CenterPane>
           {pipelineContent}
           {previewContent}
-          {selectionBar}
+          {floatingOverlay}
         </CenterPane>
       </Body>
     </Shell>

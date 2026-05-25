@@ -13,6 +13,7 @@ import { Router } from 'express'
 import path from 'path'
 import fs from 'fs'
 import { deleteArtifact, getArtifact, getArtifactFilePath, listArtifactsByUser, updateArtifact } from '../artifacts/ArtifactStore'
+import { getHtmlArtifact, getHtmlArtifactFilePath } from '../features/artifact-jobs/services/htmlArtifactStore'
 import { requireAccountUser } from '../lib/authUser'
 import { saveSkillArtifact } from '../lib/skillArtifact'
 import { assertWorkspaceAccess, WorkspaceAccessError } from '../lib/workspaceAccess'
@@ -120,6 +121,28 @@ router.post('/', async (req, res) => {
     const message = error instanceof Error ? error.message : String(error)
     return res.status(400).json({ success: false, error: message })
   }
+})
+
+router.get('/:artifactId/file', async (req, res) => {
+  const { artifactId } = req.params
+  const artifact = getHtmlArtifact(artifactId)
+  if (!artifact) {
+    return res.status(404).json({ message: 'Artifact file not found', artifactId })
+  }
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+  if (!assertArtifactOwnership(userId, artifact, res)) return
+
+  const filePath = getHtmlArtifactFilePath(artifactId)
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ message: 'Artifact file missing on disk', artifactId })
+  }
+
+  res.setHeader('Cache-Control', 'no-store')
+  res.setHeader('Content-Type', 'text/html; charset=utf-8')
+  res.setHeader('Content-Disposition', 'inline; filename="index.html"')
+  res.setHeader('X-Content-Type-Options', 'nosniff')
+  return res.sendFile(filePath)
 })
 
 // ── GET /api/artifacts/:artifactId ────────────────────────────────────────────

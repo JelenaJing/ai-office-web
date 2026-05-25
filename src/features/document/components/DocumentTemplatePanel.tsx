@@ -69,7 +69,7 @@ export function DocumentTemplatePanel({
   return (
     <Panel data-testid="document-template-panel">
       <Title>模板选择</Title>
-      <Description>当前模板会直接作为 `templateId` 传入 `/api/documents/start`。</Description>
+      <Description>选择一份常用模板作为当前文稿起点，生成时会自动套用对应结构。</Description>
       <TemplateGrid>
         {templates.map((template) => (
           <TemplateCard

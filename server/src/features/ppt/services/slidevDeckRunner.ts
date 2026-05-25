@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto'
 import { saveSkillArtifact } from '../../../lib/skillArtifact'
-import { buildSlidePlanFromPrompt } from './simplePptx'
+import { buildSlidevPlanFromPrompt } from './slidevPlanBuilder'
 import { buildDeckDocument, PPT_PARTIAL_MISSING } from './deckRuntime'
 import { withDeckPreviewImages } from './deckRenderer'
 import { compileDeckToSlidevMarkdown } from './slidevMarkdownCompiler'
@@ -35,7 +35,7 @@ function resolveSlidevPreviewBundle(input: {
 } {
   const htmlPreview = generateSlidevHtmlPreview({
     title: input.title,
-    slidevMarkdown: input.slidevMarkdown,
+    slidevMarkdown: compileDeckToSlidevMarkdown(input.deck, { mode: 'preview' }),
     deck: input.deck,
   })
   const fallbackPreviewUrl = slidevPreviewUrl(input.deckId)
@@ -562,40 +562,15 @@ export async function runSlidevDeckGenerator(input: RunSlidevDeckInput): Promise
       diagnostics: { chain: 'slidev-deck-runner', partialMissing: [...PPT_PARTIAL_MISSING] },
     })
   } else {
-    try {
-      const { isLlmConfigured } = await import('../../../modules/ai-gateway')
-      if (!isLlmConfigured()) throw new Error('LLM not configured')
-      const plan = await buildSlidePlanFromPrompt(title, input.prompt)
-      deck = decorateSlidevDeck(buildDeckDocument({
-        deckId,
-        plan,
-        templateId: 'slidev_default',
-        source: input.source || 'topic',
-        sourceId: input.sourceId,
-        chain: 'slidev-deck-runner',
-      }))
-    } catch {
-      console.info('[ppt-runtime] slidev=deterministic-fallback')
-      const det = buildDeterministicSlidevDeck(title, input.prompt)
-      deck = decorateSlidevDeck({
-        deckId,
-        title: det.title,
-        source: input.source || 'topic',
-        templateId: 'slidev_default',
-        templateManifest: {
-          templateId: 'slidev_default',
-          inventoryStatus: 'available',
-          layouts: ['cover', 'toc-list', 'title-bullets'],
-          tokenUsed: false,
-        },
-        sourceRefs: [{ type: 'topic', id: `topic:${title}`, label: title }],
-        artifactRefs: [],
-        slides: det.slides,
-        createdAt: now,
-        updatedAt: now,
-        diagnostics: { chain: 'slidev-deck-runner', partialMissing: [...PPT_PARTIAL_MISSING] },
-      })
-    }
+    const plan = await buildSlidevPlanFromPrompt(title, input.prompt)
+    deck = decorateSlidevDeck(buildDeckDocument({
+      deckId,
+      plan,
+      templateId: 'slidev_default',
+      source: input.source || 'topic',
+      sourceId: input.sourceId,
+      chain: 'slidev-deck-runner',
+    }))
   }
 
   if (input.isCancelled?.()) {
@@ -612,7 +587,7 @@ export async function runSlidevDeckGenerator(input: RunSlidevDeckInput): Promise
   })
 
   emit('正在编译 Slidev Markdown…', 55)
-  const slidevMarkdown = compileDeckToSlidevMarkdown(deck)
+  const slidevMarkdown = compileDeckToSlidevMarkdown(deck, { mode: 'official' })
   input.onPartial?.({
     deckId: deck.deckId,
     deck,
@@ -777,7 +752,7 @@ export async function editSlidevSlide(input: {
     updatedAt: new Date().toISOString(),
   }
 
-  const slidevMarkdown = compileDeckToSlidevMarkdown(nextDeck)
+  const slidevMarkdown = compileDeckToSlidevMarkdown(nextDeck, { mode: 'official' })
   const previewBundle = resolveSlidevPreviewBundle({
     deckId: input.deckId,
     title: nextDeck.title,
@@ -840,8 +815,12 @@ export function exportSlidevDeckArtifacts(input: {
   message: string
 } {
   const normalizedDeck = decorateSlidevDeck(input.deck)
-  const slidevMarkdown = compileDeckToSlidevMarkdown(normalizedDeck)
-  const htmlPreview = generateSlidevHtmlPreview({ title: normalizedDeck.title, slidevMarkdown, deck: normalizedDeck })
+  const slidevMarkdown = compileDeckToSlidevMarkdown(normalizedDeck, { mode: 'official' })
+  const htmlPreview = generateSlidevHtmlPreview({
+    title: normalizedDeck.title,
+    slidevMarkdown: compileDeckToSlidevMarkdown(normalizedDeck, { mode: 'preview' }),
+    deck: normalizedDeck,
+  })
   const exported = saveSlidevArtifacts({
     userId: input.userId,
     username: input.username,

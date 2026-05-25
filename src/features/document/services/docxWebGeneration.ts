@@ -260,7 +260,7 @@ export async function exportAndDownloadCurrentDocument(input: {
 
 export function webDocxSuccessMessage(artifact: Artifact): string {
   const name = artifact.exports?.[0]?.filename || artifact.title || '文稿'
-  return `已保存到资源中心 › 生成记录（${name}）`
+  return `已保存到资源中心 › 我的文件（${name}）`
 }
 
 export function getDefaultGeneratorSkill(): WebDocumentSkillManifest {

@@ -1,82 +1,5 @@
 import type { WebDeckDocument, WebDeckSlide } from '../types'
 
-const SLIDEV_PREVIEW_BRIDGE_SCRIPT = `<script>
-(function () {
-  var SOURCE = 'aioffice-slidev-preview';
-  function post(payload) {
-    try { window.parent.postMessage(Object.assign({ source: SOURCE }, payload), '*'); } catch (e) {}
-  }
-  var slides = Array.prototype.slice.call(document.querySelectorAll('section.slide[data-slide-index]'));
-  var activeIndex = 0;
-  var selectionEnabled = false;
-  var highlightEl = null;
-  function clearHighlight() {
-    if (highlightEl) { highlightEl.classList.remove('ppt-select-highlight'); highlightEl = null; }
-  }
-  function showSlide(index) {
-    if (!slides.length) return;
-    activeIndex = Math.max(0, Math.min(index, slides.length - 1));
-    slides.forEach(function (slide, i) { slide.style.display = i === activeIndex ? 'flex' : 'none'; });
-    var current = slides[activeIndex];
-    post({ type: 'ppt-slide-active', slideIndex: activeIndex, slideId: current ? current.getAttribute('data-slide-id') || undefined : undefined });
-  }
-  function buildSelector(el) {
-    var parts = [];
-    var node = el;
-    while (node && node !== document.body && parts.length < 6) {
-      var tag = node.tagName ? node.tagName.toLowerCase() : 'div';
-      var id = node.id ? '#' + node.id : '';
-      var cls = node.classList && node.classList.length ? '.' + Array.prototype.slice.call(node.classList).slice(0, 2).join('.') : '';
-      parts.unshift(tag + id + cls);
-      node = node.parentElement;
-    }
-    return parts.join(' > ');
-  }
-  function onPointerMove(event) {
-    if (!selectionEnabled) return;
-    var target = event.target;
-    if (!(target instanceof Element)) return;
-    var slide = target.closest('section.slide');
-    if (!slide || Number(slide.getAttribute('data-slide-index')) !== activeIndex) return;
-    if (target.closest('.slide-footer, .speaker-notes')) return;
-    clearHighlight();
-    highlightEl = target;
-    target.classList.add('ppt-select-highlight');
-  }
-  function onClick(event) {
-    if (!selectionEnabled) return;
-    var target = event.target;
-    if (!(target instanceof Element)) return;
-    var slide = target.closest('section.slide');
-    if (!slide) return;
-    event.preventDefault();
-    event.stopPropagation();
-    post({
-      type: 'ppt-element-selected',
-      slideIndex: Number(slide.getAttribute('data-slide-index')),
-      slideId: slide.getAttribute('data-slide-id') || undefined,
-      selector: buildSelector(target),
-      tagName: target.tagName.toLowerCase(),
-      textPreview: (target.textContent || '').trim().slice(0, 240),
-    });
-  }
-  window.addEventListener('message', function (event) {
-    var data = event.data;
-    if (!data || data.source !== 'aioffice-slidev-parent') return;
-    if (data.type === 'ppt-set-slide' || data.type === 'ppt-scroll-to-slide') showSlide(Number(data.slideIndex) || 0);
-    if (data.type === 'ppt-selection-mode') {
-      selectionEnabled = Boolean(data.enabled);
-      document.body.classList.toggle('ppt-selection-active', selectionEnabled);
-      if (!selectionEnabled) clearHighlight();
-    }
-  });
-  document.addEventListener('pointermove', onPointerMove, true);
-  document.addEventListener('click', onClick, true);
-  showSlide(0);
-  post({ type: 'ppt-preview-ready', slideCount: slides.length });
-})();
-</script>`
-
 interface ParsedFallbackSlide {
   title: string
   body: string[]
@@ -97,13 +20,25 @@ function sanitizeInlineSvg(svg: string): string {
     .replace(/javascript:/gi, '')
 }
 
-function normalizeLines(markdown: string): ParsedFallbackSlide[] {
+function stripLeadingFrontmatter(markdown: string): string {
+  return String(markdown || '').trim().replace(/^---\n[\s\S]*?\n---\n?/, '').trim()
+}
+
+function extractSlideChunks(markdown: string): string[] {
   const content = String(markdown || '').trim()
-  if (!content) return [{ title: '演示文稿', body: [] }]
-  const withoutFrontmatter = content.startsWith('---')
-    ? content.replace(/^---\n[\s\S]*?\n---\n?/, '')
-    : content
-  const chunks = withoutFrontmatter.split(/\n---\n/g).map((chunk) => chunk.trim()).filter(Boolean)
+  if (!content) return []
+  const withoutGlobalFrontmatter = stripLeadingFrontmatter(content)
+  const officialChunks = Array.from(
+    withoutGlobalFrontmatter.matchAll(/(?:^|\n)---\n[\s\S]*?\n---\n([\s\S]*?)(?=\n---\n[\s\S]*?\n---\n|$)/g),
+  )
+    .map((match) => match[1].trim())
+    .filter(Boolean)
+  if (officialChunks.length > 0) return officialChunks
+  return withoutGlobalFrontmatter.split(/\n---\n/g).map((chunk) => stripLeadingFrontmatter(chunk)).filter(Boolean)
+}
+
+function normalizeLines(markdown: string): ParsedFallbackSlide[] {
+  const chunks = extractSlideChunks(markdown)
   if (chunks.length === 0) return [{ title: '演示文稿', body: [] }]
   return chunks.map((chunk) => {
     const lines = chunk
@@ -461,7 +396,13 @@ export function generateSlidevHtmlPreview(input: {
     display: none;
     justify-content: center;
   }
-  .slide[data-slide-active="true"] {
+  .slide:first-child {
+    display: flex;
+  }
+  .slides:has(.slide:target) .slide:first-child {
+    display: none;
+  }
+  .slide:target {
     display: flex;
   }
   body.ppt-selection-active * {
@@ -797,7 +738,6 @@ export function generateSlidevHtmlPreview(input: {
       ${slideHtml}
     </main>
   </div>
-  ${SLIDEV_PREVIEW_BRIDGE_SCRIPT}
 </body>
 </html>`
 }

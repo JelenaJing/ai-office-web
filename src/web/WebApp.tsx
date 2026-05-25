@@ -2,6 +2,8 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import LoginGate from '../components/LoginGate'
 import RegisterPage from './pages/RegisterPage'
 import AiosHomePage from './pages/AiosHomePage'
+import ArtifactLabPage from './pages/ArtifactLabPage'
+import HtmlPptPage from './pages/HtmlPptPage'
 import RequireAuth from './components/RequireAuth'
 
 export default function WebApp() {
@@ -15,6 +17,22 @@ export default function WebApp() {
           element={
             <RequireAuth>
               <AiosHomePage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/artifacts/lab"
+          element={
+            <RequireAuth>
+              <ArtifactLabPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/ppt"
+          element={
+            <RequireAuth>
+              <HtmlPptPage />
             </RequireAuth>
           }
         />

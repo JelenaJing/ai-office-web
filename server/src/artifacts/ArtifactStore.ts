@@ -218,3 +218,28 @@ export function listArtifactsByUser(userId: string): Artifact[] {
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
   )
 }
+
+/** Default retention for workspace generation records (7 days). */
+export const DEFAULT_ARTIFACT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000
+
+/** Delete generation records older than retentionMs. Returns count removed. */
+export function purgeExpiredArtifacts(retentionMs = DEFAULT_ARTIFACT_RETENTION_MS): number {
+  const cutoff = Date.now() - retentionMs
+  const index = readArtifactIndex()
+  let purged = 0
+
+  for (const entry of index.artifacts) {
+    const artifact = getArtifact(entry.artifactId)
+    if (!artifact) {
+      deleteArtifact(entry.artifactId)
+      purged += 1
+      continue
+    }
+    const createdAt = new Date(artifact.createdAt).getTime()
+    if (!Number.isFinite(createdAt) || createdAt < cutoff) {
+      if (deleteArtifact(entry.artifactId)) purged += 1
+    }
+  }
+
+  return purged
+}

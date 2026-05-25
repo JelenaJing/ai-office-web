@@ -78,11 +78,11 @@ const Shell = styled.div`
   position: relative;
 `
 
-const Body = styled.div`
+const Body = styled.div<{ $aiOpen: boolean }>`
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr) 300px;
+  grid-template-columns: 200px minmax(0, 1fr) ${({ $aiOpen }) => ($aiOpen ? 'minmax(280px, 320px)' : '0px')};
   overflow: hidden;
   position: relative;
 `
@@ -91,12 +91,46 @@ const LeftPane = styled.aside`
   min-width: 0;
   min-height: 0;
   overflow: auto;
-  padding: 16px 14px;
+  padding: 12px 10px;
   border-right: 1px solid #d8e3ef;
   background: #f7fafc;
   display: grid;
   align-content: start;
-  gap: 12px;
+  gap: 10px;
+`
+
+const AiPanelWrap = styled.div<{ $open: boolean }>`
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-left: ${({ $open }) => ($open ? '1px solid #d8e3ef' : 'none')};
+  display: ${({ $open }) => ($open ? 'flex' : 'none')};
+  flex-direction: column;
+`
+
+const AiPanelToggle = styled.button<{ $open: boolean }>`
+  position: absolute;
+  right: ${({ $open }) => ($open ? 'min(320px, 28vw)' : '0')};
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 12;
+  width: 28px;
+  height: 72px;
+  border: 1px solid #d0dce9;
+  border-right: ${({ $open }) => ($open ? 'none' : '1px solid #d0dce9')};
+  border-radius: 10px 0 0 10px;
+  background: #ffffff;
+  color: #3b5f7d;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+  writing-mode: vertical-rl;
+  letter-spacing: 0.08em;
+  box-shadow: -4px 0 16px rgba(15, 23, 42, 0.06);
+
+  &:hover {
+    background: #f4f9ff;
+  }
 `
 
 const CenterPane = styled.div`
@@ -117,6 +151,12 @@ const SidebarSection = styled.section`
   display: grid;
   align-content: start;
   gap: 10px;
+`
+
+const SidebarBody = styled.div`
+  padding: 0 16px 16px;
+  display: grid;
+  gap: 12px;
 `
 
 const SidebarHeader = styled.div`
@@ -153,6 +193,32 @@ const SidebarCollapsedHint = styled.div`
   line-height: 1.6;
 `
 
+const ScenarioCard = styled.div`
+  border: 1px solid #d8e3ef;
+  border-radius: 14px;
+  background: #f8fbff;
+  overflow: hidden;
+`
+
+const ScenarioToggle = styled.button`
+  width: 100%;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 0;
+  background: transparent;
+  color: #2c4b67;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+
+  &:hover {
+    background: #eff6fd;
+  }
+`
+
 const StatusBar = styled.div<{ $tone?: 'ok' | 'err' }>`
   padding: 8px 18px;
   border-top: 1px solid #d8e3ef;
@@ -160,65 +226,6 @@ const StatusBar = styled.div<{ $tone?: 'ok' | 'err' }>`
   color: ${({ $tone }) => ($tone === 'err' ? '#b91c1c' : $tone === 'ok' ? '#15803d' : '#516679')};
   font-size: 12px;
   flex-shrink: 0;
-`
-
-const PromptDock = styled.div`
-  flex-shrink: 0;
-  padding: 12px 18px 16px;
-  border-top: 1px solid #d8e3ef;
-  background: rgba(255, 255, 255, 0.96);
-  display: grid;
-  gap: 10px;
-`
-
-const PromptHint = styled.div`
-  font-size: 12px;
-  color: #627789;
-`
-
-const PromptRow = styled.div`
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: end;
-`
-
-const PromptInput = styled.textarea`
-  width: 100%;
-  min-height: 72px;
-  max-height: 140px;
-  padding: 12px 14px;
-  border-radius: 14px;
-  border: 1px solid #d4deea;
-  resize: vertical;
-  font-size: 14px;
-  line-height: 1.7;
-  font-family: inherit;
-  background: #f9fbfd;
-
-  &:focus {
-    outline: none;
-    border-color: #7aaee0;
-    background: #fff;
-  }
-`
-
-const PromptSubmit = styled.button`
-  height: 44px;
-  padding: 0 18px;
-  border-radius: 12px;
-  border: 1px solid #77a9df;
-  background: linear-gradient(180deg, #6aa4e2 0%, #4b8fd7 100%);
-  color: #fff;
-  font-size: 14px;
-  font-weight: 800;
-  cursor: pointer;
-  white-space: nowrap;
-
-  &:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
 `
 
 const hiddenInputStyles = {
@@ -523,6 +530,8 @@ export default function DocumentWorkbench() {
     academic: false,
     knowledge: false,
   })
+  const [leftToolsOpen, setLeftToolsOpen] = useState(false)
+  const [aiPanelOpen, setAiPanelOpen] = useState(true)
 
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
   const importDocxInputRef = useRef<HTMLInputElement | null>(null)
@@ -530,7 +539,6 @@ export default function DocumentWorkbench() {
   const outlinePanelRef = useRef<HTMLElement | null>(null)
   const templatePanelRef = useRef<HTMLElement | null>(null)
   const knowledgePanelRef = useRef<HTMLElement | null>(null)
-  const academicPanelRef = useRef<HTMLElement | null>(null)
 
   useEffect(() => {
     let disposed = false
@@ -2017,57 +2025,6 @@ export default function DocumentWorkbench() {
     setExportError(null)
   }, [editorState])
 
-  const promptDockActionLabel = hasActiveDocument
-    ? editorState.selectedText.trim()
-      ? '改写选中内容'
-      : editorState.selectedSectionId
-        ? '改写当前章节'
-        : '发送给 AI'
-    : '生成文稿'
-
-  const handlePromptDockSubmit = useCallback(async () => {
-    const prompt = generationPrompt.trim()
-    if (!prompt) {
-      setStatusMessage('请先输入文稿需求或修改指令')
-      setStatusTone('err')
-      return
-    }
-    if (isUndoInstruction(prompt)) {
-      if (commandUndoStack.length > 0) {
-        handleUndoLastCommand()
-        setGenerationPrompt('')
-      } else {
-        setStatusMessage('当前没有可撤销的指令操作')
-        setStatusTone('err')
-      }
-      return
-    }
-    // Try command engine first whenever the editor already contains a document-like draft
-    if (hasActiveDocument) {
-      const handled = await handleCommandSubmit(prompt)
-      if (handled) {
-        setGenerationPrompt('')
-        return
-      }
-      // Fall through to legacy path
-      if (editorState.documentId && editorState.selectedText.trim()) {
-        await handleAiSubmit(prompt, 'selection')
-        setGenerationPrompt('')
-        return
-      }
-      if (editorState.documentId && editorState.selectedSectionId) {
-        await handleAiSubmit(prompt, 'section')
-        setGenerationPrompt('')
-        return
-      }
-      setStatusMessage('当前草稿已存在内容。请使用明确的块级指令，或先保存 / 生成服务端文稿后再执行常规 AI 改写。')
-      setStatusTone('err')
-      return
-    }
-    await handleGenerate(prompt)
-    setGenerationPrompt('')
-  }, [commandUndoStack.length, editorState.documentId, editorState.selectedSectionId, editorState.selectedText, generationPrompt, handleAiSubmit, handleCommandSubmit, handleGenerate, handleUndoLastCommand, hasActiveDocument])
-
   const toggleSidebarPanel = useCallback((key: SidebarPanelKey) => {
     setSidebarOpen((prev) => ({ ...prev, [key]: !prev[key] }))
   }, [])
@@ -2076,6 +2033,36 @@ export default function DocumentWorkbench() {
     setSidebarOpen((prev) => ({ ...prev, [key]: true }))
     window.setTimeout(() => ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0)
   }, [])
+
+  const openAcademicScenario = useCallback(() => {
+    setLeftToolsOpen(true)
+    setSidebarOpen((prev) => ({ ...prev, template: true, academic: true }))
+    window.setTimeout(() => templatePanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0)
+  }, [])
+
+  const handleNewDocument = useCallback(() => {
+    if (editorState.dirty) {
+      const confirmed = typeof window !== 'undefined'
+        ? window.confirm('当前文稿尚未保存，确定新建空白文稿吗？')
+        : true
+      if (!confirmed) return
+    }
+    setEditorState(createEmptyEditorState(defaultEngine))
+    setGenerationPrompt('')
+    setAttachments([])
+    setSectionHistory({})
+    setModifiedSectionIds([])
+    setArtifactFilename(null)
+    setExportError(null)
+    setStatusMessage('已新建空白文稿，可直接在中间编辑区开始写作')
+    setStatusTone('ok')
+  }, [defaultEngine, editorState.dirty])
+
+  useEffect(() => {
+    const handler = () => handleNewDocument()
+    window.addEventListener('workspace-new-document', handler)
+    return () => window.removeEventListener('workspace-new-document', handler)
+  }, [handleNewDocument])
 
   return (
     <Shell data-testid="document-workbench">
@@ -2090,7 +2077,7 @@ export default function DocumentWorkbench() {
         exportError={exportError}
         onOpenOutline={() => outlinePanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
         onOpenTemplate={() => openSidebarPanel('template', templatePanelRef)}
-        onOpenAcademicWriting={() => openSidebarPanel('academic', academicPanelRef)}
+        onOpenAcademicWriting={openAcademicScenario}
         onOpenKnowledge={() => openSidebarPanel('knowledge', knowledgePanelRef)}
         onImportDocx={handleImportDocx}
         onDownloadDocx={() => void handleDownloadDocx()}
@@ -2103,7 +2090,7 @@ export default function DocumentWorkbench() {
         regenerateDisabled={!editorState.documentId}
       />
 
-      <Body>
+      <Body $aiOpen={aiPanelOpen}>
         <LeftPane>
           <SidebarCard>
             <SidebarSection ref={outlinePanelRef}>
@@ -2120,38 +2107,51 @@ export default function DocumentWorkbench() {
           </SidebarCard>
 
           <SidebarCard>
+            <SidebarSection>
+              <SidebarToggle type="button" onClick={() => setLeftToolsOpen((value) => !value)} aria-expanded={leftToolsOpen}>
+                <span>更多工具</span>
+                <span>{leftToolsOpen ? '收起' : '模板 / 知识库'}</span>
+              </SidebarToggle>
+              {!leftToolsOpen ? (
+                <SidebarCollapsedHint>模板、知识库与附件已收起，需要时再展开。</SidebarCollapsedHint>
+              ) : null}
+            </SidebarSection>
+          </SidebarCard>
+
+          {leftToolsOpen ? (
+            <>
+          <SidebarCard>
             <SidebarSection ref={templatePanelRef}>
               <SidebarToggle type="button" onClick={() => toggleSidebarPanel('template')} aria-expanded={sidebarOpen.template}>
                 <span>模板</span>
                 <span>{sidebarOpen.template ? '收起' : activeTemplateLabel}</span>
               </SidebarToggle>
               {sidebarOpen.template ? (
-                <DocumentTemplatePanel
-                  templates={templates}
-                  selectedTemplateId={selectedTemplateId}
-                  onSelectTemplate={(id) => {
-                    setSelectedTemplateId(id)
-                  }}
-                />
-              ) : <SidebarCollapsedHint>从“更多”或此处展开后切换模板。</SidebarCollapsedHint>}
-            </SidebarSection>
-          </SidebarCard>
-
-          <SidebarCard>
-            <SidebarSection ref={academicPanelRef}>
-              <SidebarToggle type="button" onClick={() => toggleSidebarPanel('academic')} aria-expanded={sidebarOpen.academic}>
-                <span>学术写作</span>
-                <span>{sidebarOpen.academic ? '收起' : '论文 / 研究报告'}</span>
-              </SidebarToggle>
-              {sidebarOpen.academic ? (
-                <div style={{ padding: '0 16px 16px' }}>
-                  <AcademicWritingPanel
-                    disabled={busy}
-                    selectedKnowledgeIds={workspaceKbIds}
-                    attachments={attachments}
-                    onGenerate={handleAcademicWritingGenerate}
+                <SidebarBody>
+                  <DocumentTemplatePanel
+                    templates={templates}
+                    selectedTemplateId={selectedTemplateId}
+                    onSelectTemplate={(id) => {
+                      setSelectedTemplateId(id)
+                    }}
                   />
-                </div>
+                  <ScenarioCard>
+                    <ScenarioToggle type="button" onClick={() => toggleSidebarPanel('academic')} aria-expanded={sidebarOpen.academic}>
+                      <span>更多场景</span>
+                      <span>{sidebarOpen.academic ? '收起' : '学术写作'}</span>
+                    </ScenarioToggle>
+                    {sidebarOpen.academic ? (
+                      <div style={{ padding: '0 14px 14px' }}>
+                        <AcademicWritingPanel
+                          disabled={busy}
+                          selectedKnowledgeIds={workspaceKbIds}
+                          attachments={attachments}
+                          onGenerate={handleAcademicWritingGenerate}
+                        />
+                      </div>
+                    ) : <SidebarCollapsedHint>论文、研究报告等场景已收纳到这里，需要时再展开。</SidebarCollapsedHint>}
+                  </ScenarioCard>
+                </SidebarBody>
               ) : <SidebarCollapsedHint>入口已收口到折叠项，不默认占用写作区。</SidebarCollapsedHint>}
             </SidebarSection>
           </SidebarCard>
@@ -2163,7 +2163,7 @@ export default function DocumentWorkbench() {
                 <span>{sidebarOpen.knowledge ? '收起' : `${workspaceKbIds.length + attachments.length} 个来源`}</span>
               </SidebarToggle>
               {sidebarOpen.knowledge ? (
-                <>
+                <SidebarBody>
                   <DocumentKnowledgePanel
                     sources={knowledgeSources.filter((source) => source.provider === 'remote')}
                     selectedKnowledgeIds={workspaceKbIds}
@@ -2171,19 +2171,19 @@ export default function DocumentWorkbench() {
                       setKbPickerOpen(true)
                     }}
                   />
-                  <div style={{ padding: '0 16px 16px' }}>
-                    <DocumentAttachmentPanel
-                      attachments={attachments}
-                      onAddAttachment={() => {
-                        handleUploadAttachment()
-                      }}
-                      onRemoveAttachment={(fileId) => setAttachments((prev) => prev.filter((item) => item.id !== fileId))}
-                    />
-                  </div>
-                </>
-              ) : <SidebarCollapsedHint>选择知识库或上传材料后，可通过底部指令“给第一段找知识库依据”。</SidebarCollapsedHint>}
+                  <DocumentAttachmentPanel
+                    attachments={attachments}
+                    onAddAttachment={() => {
+                      handleUploadAttachment()
+                    }}
+                    onRemoveAttachment={(fileId) => setAttachments((prev) => prev.filter((item) => item.id !== fileId))}
+                  />
+                </SidebarBody>
+              ) : <SidebarCollapsedHint>展开后即可选择知识库、上传附件，并在 AI 助手里直接加引用。</SidebarCollapsedHint>}
             </SidebarSection>
           </SidebarCard>
+            </>
+          ) : null}
         </LeftPane>
 
         <CenterPane>
@@ -2197,6 +2197,16 @@ export default function DocumentWorkbench() {
           />
         </CenterPane>
 
+        <AiPanelToggle
+          type="button"
+          $open={aiPanelOpen}
+          onClick={() => setAiPanelOpen((value) => !value)}
+          aria-label={aiPanelOpen ? '收起 AI 助手' : '展开 AI 助手'}
+        >
+          {aiPanelOpen ? '收起助手' : 'AI 助手'}
+        </AiPanelToggle>
+
+        <AiPanelWrap $open={aiPanelOpen}>
         <DocumentAiEditPanel
           selectedSectionId={editorState.selectedSectionId}
           selectedSectionLabel={selectedSection?.title || '未选择章节'}
@@ -2218,6 +2228,8 @@ export default function DocumentWorkbench() {
           canUndoLastAiEdit={Boolean(lastAiSnapshot)}
           lastCommandOp={lastCommandOp}
           canUndoLastCommand={commandUndoStack.length > 0}
+          promptValue={generationPrompt}
+          onPromptChange={setGenerationPrompt}
           onUndoLastAiEdit={handleUndoLastAiEdit}
           onUndoLastCommand={handleUndoLastCommand}
           onContinueWriting={handleContinueWriting}
@@ -2238,31 +2250,8 @@ export default function DocumentWorkbench() {
             if (!handled) await handleAiSubmit(instruction, scope)
           }}
         />
+        </AiPanelWrap>
       </Body>
-
-      <PromptDock>
-        <PromptHint>
-          可以直接在正文区写作，也可以在下方输入需求，让 AI 帮你生成或改写文稿。
-        </PromptHint>
-        <PromptRow>
-          <PromptInput
-            value={generationPrompt}
-            data-testid="document-generation-prompt"
-            onChange={(event) => setGenerationPrompt(event.target.value)}
-            placeholder={hasActiveDocument
-              ? '例如：把当前章节改得更正式，或补充一段总结。'
-              : '例如：生成一份学院年度工作总结，包含主要成绩、问题分析、下一年度计划。'}
-          />
-          <PromptSubmit
-            type="button"
-            data-testid="document-generate-button"
-            disabled={busy || !generationPrompt.trim()}
-            onClick={() => void handlePromptDockSubmit()}
-          >
-            {busy ? '处理中…' : promptDockActionLabel}
-          </PromptSubmit>
-        </PromptRow>
-      </PromptDock>
 
       {statusMessage ? <StatusBar $tone={statusTone}>{statusMessage}</StatusBar> : null}
 

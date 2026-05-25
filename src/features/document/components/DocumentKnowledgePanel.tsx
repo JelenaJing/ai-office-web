@@ -101,7 +101,7 @@ export function DocumentKnowledgePanel({
       <div style={{ display: 'grid', gap: 10 }}>
         <div style={{ display: 'grid', gap: 6 }}>
           <Title>远端知识库</Title>
-          <Description>引用检索统一走 `/api/knowledge/search`，这里选择的是远端知识库文档，不再只传部门分区。</Description>
+          <Description>选择知识库材料后，AI 生成、改写和补充引用时会优先使用这些内容。</Description>
         </div>
         <div>
           <ActionButton type="button" onClick={onOpenKnowledgePicker}>
@@ -137,7 +137,7 @@ export function DocumentAttachmentPanel({
       <div style={{ display: 'grid', gap: 10 }}>
         <div style={{ display: 'grid', gap: 6 }}>
           <Title>工作区附件</Title>
-          <Description>可附加 DOCX、PDF、TXT、Markdown 等材料，作为当前文稿的 workspace-backed 引用输入。</Description>
+          <Description>上传当前工作区里的 DOCX、PDF、TXT 或 Markdown 材料，生成和改写时会一起作为参考。</Description>
         </div>
         <div>
           <ActionButton type="button" onClick={onAddAttachment}>

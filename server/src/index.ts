@@ -22,6 +22,8 @@ import reportRouter from './features/report/routes'
 import chatRouter from './features/chat/routes'
 import communicationRouter from './features/communication/routes'
 import skillCenterRouter from './features/skill-center/routes'
+import artifactJobsRouter from './features/artifact-jobs/routes'
+import aiosSkillsRouter from './features/skills/routes'
 import integrationsRouter from './features/integrations/routes/contentHandoff'
 import {
   globalRateLimit,
@@ -37,6 +39,8 @@ import {
 } from './lib/accountCenter'
 import { requireAccountIdentity } from './lib/authUser'
 import { bootstrapWorkspaceForUser } from './lib/workspaceAccess'
+import { purgeExpiredArtifacts } from './artifacts/ArtifactStore'
+import { purgeExpiredHtmlArtifacts } from './features/artifact-jobs/services/htmlArtifactStore'
 import { getEmailAccount, maskAccount } from './features/email/services/emailStore'
 
 const app = express()
@@ -102,6 +106,8 @@ app.use('/api', timeoutMiddleware(REQUEST_TIMEOUT_MS))
 
 app.use('/api/account-center', accountCenterRouter)
 app.use('/api/auth', authRateLimit, authRouter)
+app.use('/api/artifact-jobs', artifactJobsRouter)
+app.use('/api/aios-skills', aiosSkillsRouter)
 app.use('/api/artifacts', artifactsRouter)
 app.use('/api/workspaces', workspacesRouter)
 app.use('/api/files', filesRouter)
@@ -192,7 +198,24 @@ app.use('/api', async (req, res) => {
   }
 })
 
+function runArtifactRetentionCleanup(): void {
+  try {
+    const workspacePurged = purgeExpiredArtifacts()
+    const htmlPurged = purgeExpiredHtmlArtifacts()
+    if (workspacePurged > 0 || htmlPurged > 0) {
+      console.info(`[artifact-retention] purged workspace=${workspacePurged} html=${htmlPurged}`)
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.warn(`[artifact-retention] cleanup failed: ${message}`)
+  }
+}
+
+const ARTIFACT_RETENTION_INTERVAL_MS = 6 * 60 * 60 * 1000
+
 app.listen(PORT, '0.0.0.0', () => {
+  runArtifactRetentionCleanup()
+  setInterval(runArtifactRetentionCleanup, ARTIFACT_RETENTION_INTERVAL_MS)
   console.log(`\n🚀 AIOS server running on http://0.0.0.0:${PORT}`)
   console.log(`   AccountCenter proxy → ${AC_URL}\n`)
   const pptEngine = process.env.PPT_ENGINE === 'builtin' ? 'builtin' : 'minimax_pptx_generator'

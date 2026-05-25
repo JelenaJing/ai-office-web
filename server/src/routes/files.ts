@@ -21,24 +21,17 @@ import { requireAccountUser } from '../lib/authUser'
 import { workspaceDir } from '../lib/workspaceStore'
 import { uploadRateLimit } from '../middleware/rateLimit'
 import { assertWorkspaceAccess, WorkspaceAccessError } from '../lib/workspaceAccess'
-import { listUserFilesInWorkspace, readFilesIndex, resolveUserFile, type UserFileEntry } from '../lib/userFiles'
+import {
+  listUserFilesInWorkspace,
+  readFilesIndex,
+  resolveUserFile,
+  USER_FILE_MIME_BY_EXT,
+  type UserFileEntry,
+} from '../lib/userFiles'
 
 const router = Router()
 
-// ── Allowed file types ────────────────────────────────────────────────────────
-
-const ALLOWED_EXTS: Record<string, string> = {
-  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  pdf: 'application/pdf',
-  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  csv: 'text/csv',
-  txt: 'text/plain',
-  md: 'text/markdown',
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-}
+const ALLOWED_EXTS = USER_FILE_MIME_BY_EXT
 
 // ── File metadata types ───────────────────────────────────────────────────────
 
@@ -55,7 +48,7 @@ function filesDir(userId: string, wsId: string): string {
   return path.join(workspaceDir(userId, wsId), 'files')
 }
 
-function writeFilesIndex(
+function writeFilesIndexLocal(
   userId: string,
   wsId: string,
   index: ReturnType<typeof readFilesIndex>,
@@ -162,7 +155,7 @@ router.post('/upload', uploadRateLimit, upload.single('file'), async (req, res) 
 
   const index = readFilesIndex(userId, access.workspaceId)
   index.files.unshift(entry)
-  writeFilesIndex(userId, access.workspaceId, index)
+  writeFilesIndexLocal(userId, access.workspaceId, index)
 
   return res.json({
     success: true,
@@ -234,7 +227,7 @@ router.delete('/:fileId', async (req, res) => {
   }
 
   index.files.splice(idx, 1)
-  writeFilesIndex(userId, resolved.workspaceId, index)
+  writeFilesIndexLocal(userId, resolved.workspaceId, index)
 
   return res.json({ success: true })
 })

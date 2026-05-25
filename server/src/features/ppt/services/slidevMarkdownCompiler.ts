@@ -188,13 +188,51 @@ ${sanitizeInlineSvg(visual.svg)}
   </div>`
 }
 
-function appendVisual(lines: string[], slide: WebDeckSlide): void {
+export type SlidevMarkdownCompileMode = 'official' | 'preview'
+
+function appendVisual(lines: string[], slide: WebDeckSlide, mode: SlidevMarkdownCompileMode): void {
+  if (mode === 'official') {
+    const visual = slide.visual
+    if (visual?.imageUrl) {
+      const alt = escapeMarkdown(visual.alt || visual.title || slide.title || 'slide image')
+      lines.push('')
+      lines.push(`![${alt}](${visual.imageUrl})`)
+    }
+    return
+  }
   lines.push('')
   lines.push(buildVisualBlock(slide))
 }
 
-function buildSlideMarkdown(slide: WebDeckSlide): string {
+function resolveSlidevSlideFrontmatter(slide: WebDeckSlide): string[] {
+  const lines = ['---']
+  if (slide.type === 'cover') {
+    lines.push('layout: cover')
+    lines.push('class: text-center')
+  } else if (slide.type === 'summary') {
+    lines.push('layout: center')
+    lines.push('class: text-center')
+  } else if (slide.layout === 'two-column' || (slide.columns && slide.columns.length > 0)) {
+    lines.push('layout: two-cols')
+  } else if (slide.type === 'toc') {
+    lines.push('layout: intro')
+  } else {
+    lines.push('layout: default')
+  }
+  lines.push('---')
+  return lines
+}
+
+function buildSlideMarkdown(
+  slide: WebDeckSlide,
+  mode: SlidevMarkdownCompileMode,
+  includeFrontmatter = mode === 'official',
+): string {
   const lines: string[] = []
+  if (mode === 'official' && includeFrontmatter) {
+    lines.push(...resolveSlidevSlideFrontmatter(slide))
+    lines.push('')
+  }
   const title = escapeMarkdown(slide.title || '未命名页面').trim() || '未命名页面'
   const layout = slide.layout || slide.layoutId || ''
 
@@ -206,7 +244,9 @@ function buildSlideMarkdown(slide: WebDeckSlide): string {
 
   if (slide.type === 'toc') {
     lines.push('')
-    lines.push('## 本页结构')
+    if (mode !== 'official') {
+      lines.push('## 本页结构')
+    }
     appendBullets(lines, slide.items || [])
   } else if (slide.table) {
     lines.push('')
@@ -236,13 +276,34 @@ function buildSlideMarkdown(slide: WebDeckSlide): string {
     appendBullets(lines, slide.items || [])
   }
 
-  appendVisual(lines, slide)
+  appendVisual(lines, slide, mode)
   appendCodeBlocks(lines, slide)
   appendSpeakerNotes(lines, slide)
   return lines.join('\n').trim()
 }
 
-function buildSlidevFrontmatter(deck: WebDeckDocument): string {
+function buildSlidevFrontmatter(
+  deck: WebDeckDocument,
+  mode: SlidevMarkdownCompileMode,
+  firstSlide?: WebDeckSlide,
+): string {
+  if (mode === 'official') {
+    const firstSlideFrontmatter = firstSlide
+      ? resolveSlidevSlideFrontmatter(firstSlide).slice(1, -1)
+      : []
+    return [
+      '---',
+      'theme: seriph',
+      `title: '${escapeYamlValue(deck.title || '演示文稿')}'`,
+      'transition: slide-left',
+      'fonts:',
+      '  provider: none',
+      '  sans: Inter, PingFang SC, Microsoft YaHei, sans-serif',
+      ...firstSlideFrontmatter,
+      'mdc: true',
+      '---',
+    ].join('\n')
+  }
   return [
     '---',
     'theme: default',
@@ -258,8 +319,11 @@ function buildSlidevFrontmatter(deck: WebDeckDocument): string {
  * Compiles a WebDeckDocument into safe Slidev Markdown.
  * It never emits Vue components, never executes user input, and escapes HTML.
  */
-export function compileDeckToSlidevMarkdown(deck: WebDeckDocument): string {
-  const frontmatter = buildSlidevFrontmatter(deck)
+export function compileDeckToSlidevMarkdown(
+  deck: WebDeckDocument,
+  options?: { mode?: SlidevMarkdownCompileMode },
+): string {
+  const mode: SlidevMarkdownCompileMode = options?.mode === 'preview' ? 'preview' : 'official'
   const slides = deck.slides.length > 0
     ? deck.slides
     : [{
@@ -278,6 +342,12 @@ export function compileDeckToSlidevMarkdown(deck: WebDeckDocument): string {
         },
       }]
 
-  const body = slides.map(buildSlideMarkdown).join('\n\n---\n\n')
+  const frontmatter = buildSlidevFrontmatter(deck, mode, slides[0])
+  const body = mode === 'official'
+    ? [
+        buildSlideMarkdown(slides[0], mode, false),
+        ...slides.slice(1).map((slide) => buildSlideMarkdown(slide, mode, true)),
+      ].join('\n\n')
+    : slides.map((slide) => buildSlideMarkdown(slide, mode)).join('\n\n---\n\n')
   return `${frontmatter}\n\n${body}\n`
 }

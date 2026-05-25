@@ -18,7 +18,18 @@ import {
 import { createDeckFromPrompt, exportDeckWithBuiltin, retemplateDeck } from './services/deckRuntime'
 import { editSlideWithMinimaxPptxGenerator, exportDeckWithMinimaxPptxGenerator, runMinimaxPptxGenerator } from './services/minimaxPptxGeneratorRunner'
 import { runSlidevDeckGenerator, editSlidevSlide, exportSlidevDeckArtifacts, type SlidevDeckPartialSnapshot } from './services/slidevDeckRunner'
-import { serveOfficialSlidevAsset } from './services/slidevOfficialRunner'
+import { resolveSlidevOfficialAppIndexPath, serveOfficialSlidevAsset } from './services/slidevOfficialRunner'
+import {
+  cleanupTempExportFile,
+  ensureOfficialSlidevDist,
+  exportOfficialSlidevPdf,
+  zipOfficialSlidevDist,
+} from './services/slidevOfficialExport'
+import {
+  loadSlidevMarkdownFromArtifacts,
+  rebuildOfficialSlidevPreview,
+  renderFallbackSlidevHtmlFromMarkdown,
+} from './services/slidevPreviewRestore'
 import { generateSlidevHtmlPreview } from './services/slidevHtmlPreview'
 import { compileDeckToSlidevMarkdown } from './services/slidevMarkdownCompiler'
 import type { WebDeckDocument, WebDeckSlide, WebDeckTaskResult, PptEngine, PptOutputMode } from './types'
@@ -166,6 +177,24 @@ function resolveDeckEngine(deckId: string, requested: unknown): PptEngine {
 
 function resolveSlidevPreviewRoute(deckId: string): string {
   return `/api/ppt/decks/${encodeURIComponent(deckId)}/slidev-preview`
+}
+
+function canUserAccessSlidevDeck(userId: string, deckId: string): boolean {
+  if (loadSlidevMarkdownFromArtifacts(deckId, userId)) return true
+  const runtimeMeta = getDeckRuntimeMeta(deckId)
+  if (!runtimeMeta) return false
+  return runtimeMeta.userId === userId
+}
+
+function resolveOfficialSlidevPreviewUrl(deckId: string): string | null {
+  const runtimeMeta = getDeckRuntimeMeta(deckId)
+  if (runtimeMeta?.slidevAppUrl?.includes('/slidev-access/')) {
+    return runtimeMeta.slidevAppUrl
+  }
+  if (runtimeMeta?.slidevPreviewAccessToken && resolveSlidevOfficialAppIndexPath(deckId)) {
+    return `/api/ppt/decks/${encodeURIComponent(deckId)}/slidev-access/${encodeURIComponent(runtimeMeta.slidevPreviewAccessToken)}/`
+  }
+  return null
 }
 
 function wrapMinimaxEditError(message: string): string {
@@ -601,7 +630,12 @@ router.use('/decks/:deckId/slidev-access/:accessToken', (req, res) => {
   const deckId = req.params.deckId
   const accessToken = req.params.accessToken
   const runtimeMeta = getDeckRuntimeMeta(deckId)
-  if (!runtimeMeta || runtimeMeta.engine !== 'slidev') {
+  const distReady = Boolean(resolveSlidevOfficialAppIndexPath(deckId))
+  const canServeOfficial = (
+    (runtimeMeta?.engine === 'slidev' && runtimeMeta.slidevPreviewAccessToken)
+    || distReady
+  )
+  if (!canServeOfficial) {
     res.status(404).json({ success: false, error: 'Slidev 预览不存在' })
     return
   }
@@ -610,7 +644,7 @@ router.use('/decks/:deckId/slidev-access/:accessToken', (req, res) => {
   const served = serveOfficialSlidevAsset({
     deckId,
     accessToken,
-    runtimeToken: runtimeMeta.slidevPreviewAccessToken,
+    runtimeToken: runtimeMeta?.slidevPreviewAccessToken || accessToken,
     relativePath,
   })
   if (!served.ok) {
@@ -624,68 +658,197 @@ router.use('/decks/:deckId/slidev-access/:accessToken', (req, res) => {
   res.sendFile(path.resolve(served.filePath))
 })
 
+router.get('/decks/:deckId/slidev-official.zip', async (req, res) => {
+  const user = await requireAccountIdentity(req, res)
+  if (!user) return
+
+  const deckId = req.params.deckId
+  if (!canUserAccessSlidevDeck(user.id, deckId)) {
+    res.status(403).json({ success: false, error: '无权下载该演示文稿' })
+    return
+  }
+
+  const deck = getDeck(deckId)
+  const slidevMarkdown = deck
+    ? compileDeckToSlidevMarkdown(deck, { mode: 'official' })
+    : (loadSlidevMarkdownFromArtifacts(deckId, user.id) || '')
+  if (!slidevMarkdown.trim()) {
+    res.status(404).json({ success: false, error: '未找到 Slidev 内容' })
+    return
+  }
+
+  const runtimeMeta = getDeckRuntimeMeta(deckId)
+  const ensured = ensureOfficialSlidevDist({
+    deckId,
+    slidevMarkdown,
+    accessToken: runtimeMeta?.slidevPreviewAccessToken,
+  })
+  if (!ensured.success) {
+    res.status(500).json({ success: false, error: ensured.error || 'Slidev 官方构建失败' })
+    return
+  }
+
+  if (ensured.appUrl && ensured.accessToken && runtimeMeta) {
+    saveDeckRuntimeMeta({
+      ...runtimeMeta,
+      slidevAppUrl: ensured.appUrl,
+      slidevPreviewAccessToken: ensured.accessToken,
+      previewUrl: ensured.appUrl,
+      slidevPreviewMode: 'official',
+      updatedAt: new Date().toISOString(),
+    })
+  }
+
+  const zipped = zipOfficialSlidevDist(deckId)
+  if (!zipped.success || !zipped.zipPath) {
+    res.status(500).json({ success: false, error: zipped.error || 'ZIP 打包失败' })
+    return
+  }
+
+  const title = deck?.title || '演示文稿'
+  const filename = `${title.replace(/[^\w\u4e00-\u9fff-]+/g, '_') || 'slidev'}.slidev.zip`
+  res.setHeader('Content-Type', 'application/zip')
+  res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`)
+  res.sendFile(path.resolve(zipped.zipPath), (error) => {
+    cleanupTempExportFile(zipped.zipPath)
+    if (error && !res.headersSent) {
+      res.status(500).json({ success: false, error: 'ZIP 下载失败' })
+    }
+  })
+})
+
+router.get('/decks/:deckId/slidev-official.pdf', async (req, res) => {
+  const user = await requireAccountIdentity(req, res)
+  if (!user) return
+
+  const deckId = req.params.deckId
+  if (!canUserAccessSlidevDeck(user.id, deckId)) {
+    res.status(403).json({ success: false, error: '无权导出该演示文稿' })
+    return
+  }
+
+  const deck = getDeck(deckId)
+  const slidevMarkdown = deck
+    ? compileDeckToSlidevMarkdown(deck, { mode: 'official' })
+    : (loadSlidevMarkdownFromArtifacts(deckId, user.id) || '')
+  if (!slidevMarkdown.trim()) {
+    res.status(404).json({ success: false, error: '未找到 Slidev 内容' })
+    return
+  }
+
+  const runtimeMeta = getDeckRuntimeMeta(deckId)
+  const exported = exportOfficialSlidevPdf({
+    deckId,
+    slidevMarkdown,
+    accessToken: runtimeMeta?.slidevPreviewAccessToken,
+  })
+  if (!exported.success || !exported.pdfPath) {
+    res.status(500).json({ success: false, error: exported.error || 'PDF 导出失败' })
+    return
+  }
+
+  const title = deck?.title || '演示文稿'
+  const filename = `${title.replace(/[^\w\u4e00-\u9fff-]+/g, '_') || 'slidev'}.pdf`
+  res.setHeader('Content-Type', 'application/pdf')
+  res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`)
+  res.sendFile(path.resolve(exported.pdfPath), (error) => {
+    cleanupTempExportFile(exported.pdfPath)
+    if (error && !res.headersSent) {
+      res.status(500).json({ success: false, error: 'PDF 下载失败' })
+    }
+  })
+})
+
 router.get('/decks/:deckId/slidev-preview', async (req, res) => {
   const user = await requireAccountIdentity(req, res)
   if (!user) return
 
-  const deck = getDeck(req.params.deckId)
-  if (!deck) {
+  let deck = getDeck(req.params.deckId)
+  const restoredMarkdown = deck
+    ? null
+    : loadSlidevMarkdownFromArtifacts(req.params.deckId, user.id)
+  if (!deck && !restoredMarkdown) {
     console.info(`[ppt-slidev-preview] deckId=${req.params.deckId}`)
     console.info('[ppt-slidev-preview] error=deck not found')
-    res.status(404).json({ success: false, error: 'DeckDocument 不存在或已过期' })
+    res.status(404).json({ success: false, error: '演示文稿预览已过期，请重新生成或刷新页面' })
     return
   }
 
-  const runtimeMeta = getDeckRuntimeMeta(deck.deckId)
-  if (!runtimeMeta) {
-    console.info(`[ppt-slidev-preview] deckId=${deck.deckId}`)
-    console.info('[ppt-slidev-preview] error=runtime meta missing')
-    res.status(404).json({ success: false, error: '当前 deck 缺少运行时元数据，无法预览。' })
+  const deckId = req.params.deckId
+  if (!canUserAccessSlidevDeck(user.id, deckId)) {
+    res.status(403).json({ success: false, error: '无权预览该演示文稿' })
     return
   }
 
-  if (runtimeMeta.userId !== user.id) {
-    console.info(`[ppt-slidev-preview] deckId=${deck.deckId}`)
-    console.info('[ppt-slidev-preview] error=forbidden')
-    res.status(403).json({ success: false, error: '无权预览该 deck' })
+  const officialPreviewUrl = resolveOfficialSlidevPreviewUrl(deckId)
+  if (officialPreviewUrl) {
+    res.redirect(302, officialPreviewUrl)
     return
   }
-
-  if (runtimeMeta.engine !== 'slidev') {
-    console.info(`[ppt-slidev-preview] deckId=${deck.deckId}`)
-    console.info('[ppt-slidev-preview] error=not slidev deck')
-    res.status(400).json({ success: false, error: '当前 deck 不是 Slidev 模式' })
-    return
-  }
-
-  const previewUrl = runtimeMeta.previewUrl || resolveSlidevPreviewRoute(deck.deckId)
-  const artifactId = runtimeMeta.htmlArtifactId || ''
-  console.info(`[ppt-slidev-preview] previewUrl=${previewUrl}`)
-  console.info(`[ppt-slidev-preview] artifactId=${artifactId || 'n/a'}`)
-  console.info(`[ppt-slidev-preview] deckId=${deck.deckId}`)
 
   res.setHeader('Content-Type', 'text/html; charset=utf-8')
   res.setHeader('X-Content-Type-Options', 'nosniff')
 
+  const runtimeMeta = getDeckRuntimeMeta(deckId)
+  const artifactId = runtimeMeta?.htmlArtifactId || ''
   if (artifactId) {
     const artifact = getArtifact(artifactId)
     const htmlExport = artifact?.exports.find((entry) => entry.format === 'html') || artifact?.exports[0]
     const filePath = htmlExport ? getArtifactFilePath(artifactId, htmlExport.filename) : ''
     if (filePath && fs.existsSync(filePath)) {
-      console.info('[ppt-slidev-preview] contentType=text/html; charset=utf-8')
-      res.sendFile(filePath)
+      res.sendFile(path.resolve(filePath))
       return
     }
   }
 
   try {
-    const slidevMarkdown = compileDeckToSlidevMarkdown(deck)
-    const html = generateSlidevHtmlPreview({ title: deck.title, slidevMarkdown })
-    console.info('[ppt-slidev-preview] contentType=text/html; charset=utf-8')
+    const slidevMarkdown = deck
+      ? compileDeckToSlidevMarkdown(deck, { mode: 'preview' })
+      : (restoredMarkdown || '')
+    const title = deck?.title || '演示文稿'
+    const html = renderFallbackSlidevHtmlFromMarkdown({ deckId, title, slidevMarkdown })
     res.send(html)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     console.info(`[ppt-slidev-preview] error=${message}`)
+    res.status(500).json({ success: false, error: '预览渲染失败，请稍后重试' })
+  }
+})
+
+router.post('/decks/:deckId/slidev-rebuild-preview', async (req, res) => {
+  const user = await requireAccountIdentity(req, res)
+  if (!user) return
+
+  const deckId = req.params.deckId
+  const slidevMarkdown = typeof req.body?.slidevMarkdown === 'string' ? req.body.slidevMarkdown.trim() : ''
+  if (!slidevMarkdown) {
+    res.status(400).json({ success: false, error: '缺少 slidevMarkdown，无法重建预览' })
+    return
+  }
+
+  const workspacePath = typeof req.body?.workspacePath === 'string' ? req.body.workspacePath : ''
+  const title = typeof req.body?.title === 'string' ? req.body.title : '演示文稿'
+  const previousMeta = getDeckRuntimeMeta(deckId)
+
+  try {
+    const rebuilt = rebuildOfficialSlidevPreview({
+      deckId,
+      userId: user.id,
+      workspacePath: workspacePath || previousMeta?.workspacePath || '',
+      title,
+      slidevMarkdown,
+      previousMeta,
+    })
+    res.json({
+      success: true,
+      deckId,
+      previewUrl: rebuilt.previewUrl,
+      slidevAppUrl: rebuilt.slidevAppUrl || null,
+      slidevPreviewAccessToken: rebuilt.slidevPreviewAccessToken || null,
+      slidevPreviewMode: rebuilt.slidevPreviewMode,
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
     res.status(500).json({ success: false, error: message })
   }
 })
@@ -987,14 +1150,32 @@ router.post('/decks/:deckId/export', async (req, res) => {
           deck,
         })
         saveDeck(exported.deck)
+
+        const slidevMarkdown = exported.slidevMarkdown
+        const official = isHtml
+          ? ensureOfficialSlidevDist({
+            deckId: deck.deckId,
+            slidevMarkdown,
+            accessToken: runtimeMeta.slidevPreviewAccessToken,
+          })
+          : null
+        const officialPreviewUrl = official?.success && official.appUrl
+          ? official.appUrl
+          : (runtimeMeta.slidevAppUrl || runtimeMeta.previewUrl || exported.previewUrl)
+
         saveDeckRuntimeMeta({
           ...runtimeMeta,
           engine: 'slidev',
           outputMode: 'web_deck',
           skillId: 'web.ppt.slidev',
           artifactId: exported.markdownArtifactId,
-          exportUrl: exported.exportUrl,
-          previewUrl: exported.previewUrl,
+          exportUrl: isHtml
+            ? `/api/ppt/decks/${encodeURIComponent(deck.deckId)}/slidev-official.zip`
+            : exported.exportUrl,
+          previewUrl: officialPreviewUrl,
+          slidevAppUrl: official?.appUrl || runtimeMeta.slidevAppUrl || null,
+          slidevPreviewAccessToken: official?.accessToken || runtimeMeta.slidevPreviewAccessToken || null,
+          slidevPreviewMode: official?.success ? 'official' : (runtimeMeta.slidevPreviewMode || 'fallback'),
           htmlArtifactId: exported.htmlArtifactId,
           updatedAt: new Date().toISOString(),
         })
@@ -1007,12 +1188,14 @@ router.post('/decks/:deckId/export', async (req, res) => {
           deck: exported.deck,
           slides: exported.slides,
           artifact: isHtml ? exported.htmlArtifact : exported.artifact,
-          exportUrl: isHtml ? exported.previewUrl : exported.exportUrl,
-          previewUrl: exported.previewUrl,
+          exportUrl: isHtml
+            ? `/api/ppt/decks/${encodeURIComponent(deck.deckId)}/slidev-official.zip`
+            : exported.exportUrl,
+          previewUrl: officialPreviewUrl,
           slidevMarkdown: exported.slidevMarkdown,
           markdownArtifactId: exported.markdownArtifactId,
           htmlArtifactId: exported.htmlArtifactId,
-          message: isHtml ? 'Slidev HTML preview 已准备' : 'Slidev Markdown 已准备',
+          message: isHtml ? 'Slidev 官方 HTML 包已准备' : 'Slidev Markdown 已准备',
         })
         return
       }
@@ -1042,12 +1225,46 @@ router.post('/decks/:deckId/export', async (req, res) => {
         })
         return
       }
-      if (requestedFormat === 'pdf' || requestedFormat === 'png') {
+      if (requestedFormat === 'pdf') {
+        const slidevMarkdown = compileDeckToSlidevMarkdown(deck, { mode: 'official' })
+        const ensured = ensureOfficialSlidevDist({
+          deckId: deck.deckId,
+          slidevMarkdown,
+          accessToken: runtimeMeta.slidevPreviewAccessToken,
+        })
+        if (!ensured.success) {
+          res.status(500).json({ success: false, error: ensured.error || 'PDF 导出前官方构建失败' })
+          return
+        }
+        if (ensured.appUrl && ensured.accessToken) {
+          saveDeckRuntimeMeta({
+            ...runtimeMeta,
+            slidevAppUrl: ensured.appUrl,
+            slidevPreviewAccessToken: ensured.accessToken,
+            previewUrl: ensured.appUrl,
+            slidevPreviewMode: 'official',
+            updatedAt: new Date().toISOString(),
+          })
+        }
+        res.json({
+          success: true,
+          engine: 'slidev',
+          outputMode: 'web_deck',
+          deckId: deck.deckId,
+          format: 'pdf',
+          exportUrl: `/api/ppt/decks/${encodeURIComponent(deck.deckId)}/slidev-official.pdf`,
+          previewUrl: ensured.appUrl || runtimeMeta.slidevAppUrl || runtimeMeta.previewUrl,
+          slidevMarkdown,
+          message: 'Slidev PDF 已准备，请下载',
+        })
+        return
+      }
+      if (requestedFormat === 'png') {
         const slidevCliEnabled = process.env.SLIDEV_CLI_ENABLED === '1'
         if (!slidevCliEnabled) {
           res.status(501).json({
             success: false,
-            error: `Slidev ${requestedFormat.toUpperCase()} export 未启用，请设置 SLIDEV_CLI_ENABLED=1 并安装 @slidev/cli 与 playwright-chromium。`,
+            error: 'Slidev PNG export 未启用，请设置 SLIDEV_CLI_ENABLED=1 并安装 @slidev/cli 与 playwright-chromium。',
           })
           return
         }
@@ -1055,11 +1272,11 @@ router.post('/decks/:deckId/export', async (req, res) => {
         if (missing) {
           res.status(501).json({
             success: false,
-            error: `Slidev ${requestedFormat.toUpperCase()} export 未启用，请设置 SLIDEV_CLI_ENABLED=1 并安装 @slidev/cli 与 playwright-chromium。缺失依赖：${missing}`,
+            error: `Slidev PNG export 未启用。缺失依赖：${missing}`,
           })
           return
         }
-        res.status(501).json({ success: false, error: `Slidev ${requestedFormat.toUpperCase()} 导出功能尚未实现。` })
+        res.status(501).json({ success: false, error: 'Slidev PNG 导出功能尚未实现。' })
         return
       }
       res.status(400).json({ success: false, error: `不支持的 Slidev export format: ${requestedFormat}` })

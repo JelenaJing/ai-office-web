@@ -4,6 +4,7 @@
 
 import fs from 'fs'
 import path from 'path'
+import { randomUUID } from 'crypto'
 import {
   clientPath,
   parseClientPath,
@@ -12,6 +13,23 @@ import {
 } from './workspaceStore'
 import { assertWorkspaceAccess, bootstrapWorkspaceForUser } from './workspaceAccess'
 
+export const USER_FILE_MIME_BY_EXT: Record<string, string> = {
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  pdf: 'application/pdf',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  csv: 'text/csv',
+  txt: 'text/plain',
+  md: 'text/markdown',
+  html: 'text/html',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+}
+
+/** Extensions mirrored from AI generation into「我的文件」. */
+export const GENERATED_FILE_MIRROR_EXTS = new Set(Object.keys(USER_FILE_MIME_BY_EXT))
+
 export interface UserFileEntry {
   id: string
   name: string
@@ -19,6 +37,8 @@ export interface UserFileEntry {
   mimeType: string
   size: number
   uploadedAt: string
+  sourceArtifactId?: string
+  generated?: boolean
 }
 
 interface FilesIndex {
@@ -27,6 +47,56 @@ interface FilesIndex {
 
 function filesDir(userId: string, wsId: string): string {
   return path.join(workspaceDir(userId, wsId), 'files')
+}
+
+function writeFilesIndex(userId: string, wsId: string, index: FilesIndex): void {
+  const dir = filesDir(userId, wsId)
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(path.join(dir, 'files.json'), JSON.stringify(index, null, 2), 'utf-8')
+}
+
+function sanitizeDisplayFilename(name: string): string {
+  const base = String(name || '未命名')
+    .replace(/[\\/]/g, '_')
+    .replace(/[\x00-\x1f\x7f]/g, '')
+    .trim()
+  return base || '未命名'
+}
+
+/** Register a generated or uploaded binary into the user's「我的文件」index. */
+export function registerUserFile(input: {
+  userId: string
+  workspacePath?: string
+  filename: string
+  content: Buffer
+  sourceArtifactId?: string
+  generated?: boolean
+}): UserFileEntry | null {
+  const access = assertWorkspaceAccess(input.userId, input.workspacePath, 'editor')
+  const displayName = sanitizeDisplayFilename(input.filename)
+  const ext = path.extname(displayName).slice(1).toLowerCase()
+  if (!GENERATED_FILE_MIRROR_EXTS.has(ext)) return null
+
+  const fileId = randomUUID()
+  const fileDir = path.join(filesDir(input.userId, access.workspaceId), fileId)
+  fs.mkdirSync(fileDir, { recursive: true })
+  fs.writeFileSync(path.join(fileDir, 'original'), input.content)
+
+  const entry: UserFileEntry = {
+    id: fileId,
+    name: displayName,
+    ext,
+    mimeType: USER_FILE_MIME_BY_EXT[ext] || 'application/octet-stream',
+    size: input.content.length,
+    uploadedAt: new Date().toISOString(),
+    sourceArtifactId: input.sourceArtifactId,
+    generated: input.generated ?? true,
+  }
+
+  const index = readFilesIndex(input.userId, access.workspaceId)
+  index.files.unshift(entry)
+  writeFilesIndex(input.userId, access.workspaceId, index)
+  return entry
 }
 
 export function readFilesIndex(userId: string, wsId: string): FilesIndex {

@@ -4,11 +4,12 @@ import { useInternalAccount } from '../../contexts/InternalAccountContext'
 
 const APP_ENTRIES = [
   { id: 'writer', name: '文稿助手', icon: '📝' },
-  { id: 'ppt', name: 'PPT 生成', icon: '🖼️' },
+  { id: 'ppt', name: '演示文稿', icon: '🖼️', path: '/ppt' },
   { id: 'email', name: '邮件助手', icon: '📧' },
   { id: 'knowledge', name: '知识库', icon: '📚' },
   { id: 'excel', name: '数据分析', icon: '📊' },
   { id: 'image', name: '图像生成', icon: '🎨' },
+  { id: 'artifact-lab', name: 'HTML Artifact Lab', icon: '🧪', path: '/artifacts/lab' },
 ]
 
 export default function AiosHomePage() {
@@ -28,6 +29,11 @@ export default function AiosHomePage() {
     e.preventDefault()
     // Phase 1 placeholder — agent dispatch will be wired in phase 2.
     setQuery('')
+  }
+
+  function handleAppOpen(app: { path?: string }) {
+    if (!app.path) return
+    navigate(app.path)
   }
 
   return (
@@ -68,7 +74,20 @@ export default function AiosHomePage() {
           <h3 style={s.sectionTitle}>内部应用</h3>
           <div style={s.appsGrid}>
             {APP_ENTRIES.map((app) => (
-              <div key={app.id} style={s.appCard}>
+              <div
+                key={app.id}
+                style={{ ...s.appCard, cursor: app.path ? 'pointer' : 'default' }}
+                onClick={() => handleAppOpen(app)}
+                onKeyDown={(event) => {
+                  if (!app.path) return
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    handleAppOpen(app)
+                  }
+                }}
+                role={app.path ? 'button' : undefined}
+                tabIndex={app.path ? 0 : -1}
+              >
                 <span style={s.appIcon}>{app.icon}</span>
                 <span style={s.appName}>{app.name}</span>
               </div>

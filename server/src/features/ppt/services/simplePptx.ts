@@ -39,7 +39,7 @@ function normalizeTextList(value: unknown): string[] {
   return []
 }
 
-function normalizeGeneratedSlidePlan(value: unknown, fallback: GeneratedSlidePlan, requestedTitle: string): GeneratedSlidePlan {
+export function normalizeGeneratedSlidePlan(value: unknown, fallback: GeneratedSlidePlan, requestedTitle: string): GeneratedSlidePlan {
   const raw = value && typeof value === 'object' ? value as Record<string, unknown> : {}
   const rawSlides = Array.isArray(raw.slides) ? raw.slides : []
   const slides = rawSlides
@@ -72,7 +72,13 @@ function normalizeGeneratedSlidePlan(value: unknown, fallback: GeneratedSlidePla
 export async function buildSlidePlanFromPrompt(
   title: string,
   prompt: string,
+  options?: { engine?: 'slidev' | 'default' },
 ): Promise<GeneratedSlidePlan> {
+  if (options?.engine === 'slidev') {
+    const { buildSlidevPlanFromPrompt } = await import('./slidevPlanBuilder')
+    return buildSlidevPlanFromPrompt(title, prompt)
+  }
+
   const fallback: GeneratedSlidePlan = {
     title: title || '演示文稿',
     slides: [
@@ -87,13 +93,14 @@ export async function buildSlidePlanFromPrompt(
 
   if (!isLlmConfigured() || !prompt.trim()) return fallback
 
+  const systemPrompt = '生成 PPT 结构化 JSON：{ title, slides: [{ type: cover|toc|content|summary, title, subtitle?, items?[] }] }，3-6 页 content，中文。'
+
   try {
     const plan = await invokeLlmJson<GeneratedSlidePlan>(
       [
         {
           role: 'system',
-          content:
-            '生成 PPT 结构化 JSON：{ title, slides: [{ type: cover|toc|content|summary, title, subtitle?, items?[] }] }，3-6 页 content，中文。',
+          content: systemPrompt,
         },
         {
           role: 'user',

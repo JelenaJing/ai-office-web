@@ -66,15 +66,6 @@ const ModifiedBadge = styled.span`
   font-weight: 800;
 `
 
-const TodoBadge = styled.span`
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: #eef3f8;
-  color: #607487;
-  font-size: 11px;
-  font-weight: 700;
-`
-
 interface DocumentOutlinePanelProps {
   outline: DocumentOutlineItem[]
   selectedSectionId: string | null
@@ -91,7 +82,7 @@ export function DocumentOutlinePanel({
   return (
     <Panel data-testid="document-outline-panel">
       <Title>文档目录</Title>
-      <Description>{outline.length > 0 ? `共 ${outline.length} 个章节，可点击定位到中间 A4 文稿页面。` : '生成文稿后自动生成目录。'}</Description>
+      <Description>{outline.length > 0 ? `共 ${outline.length} 个章节，可点击快速定位到中间 A4 编辑区。` : '生成文稿后会自动显示目录。'}</Description>
       <OutlineList>
         {outline.length > 0 ? outline.map((item, index) => (
           <OutlineButton
@@ -107,11 +98,8 @@ export function DocumentOutlinePanel({
               {modifiedSectionIds.includes(item.id) ? <ModifiedBadge>已修改</ModifiedBadge> : null}
             </OutlineMeta>
           </OutlineButton>
-        )) : <div style={{ fontSize: 12, color: '#6b7f92', lineHeight: 1.7 }}>生成文稿后自动生成目录。</div>}
+        )) : <div style={{ fontSize: 12, color: '#6b7f92', lineHeight: 1.7 }}>生成文稿后会自动显示目录。</div>}
       </OutlineList>
-      <Description style={{ marginTop: 10, marginBottom: 0 }}>
-        <TodoBadge>TODO</TodoBadge> 拖拽重排将在后续版本开放。
-      </Description>
     </Panel>
   )
 }

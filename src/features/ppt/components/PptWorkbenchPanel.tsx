@@ -1,53 +1,32 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import styled from 'styled-components'
 import type { PptSlidePreview, PptTaskStatus } from '../../../contexts/GenerationWorkbenchContext'
-import PptCanvasPreview from './PptCanvasPreview'
+import { parseSlidevMarkdownToPreviews } from '../services/webDeckSlides'
 import PptEditorShell from './PptEditorShell'
-import PptGenerationPipeline, {
-  SLIDEV_PIPELINE_STEPS,
-  resolveSlidevPipelineStep,
-} from './PptGenerationPipeline'
+import PptFloatingEditPanel from './PptFloatingEditPanel'
 import { resolveWebApiUrl } from '../../../runtime/apiBase'
 import {
   fetchProtectedTextResource,
+  rebuildSlidevPreview,
 } from '../services/pptWebGeneration'
-import {
-  postToSlidevPreview,
-  subscribeSlidevPreview,
-  type SlidevPreviewOutboundMessage,
-} from '../services/slidevPreviewBridge'
 
-const EmptyShell = styled.div`
-  flex: 1;
-  min-height: 0;
-  display: grid;
-  place-items: center;
-  padding: 28px;
-  background: #f3f6fb;
+const MoreMenuWrap = styled.div`
+  position: relative;
 `
 
-const EmptyCard = styled.div`
-  width: min(440px, 100%);
-  padding: 28px;
-  border-radius: 20px;
+const MoreMenuPanel = styled.div`
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 168px;
+  padding: 6px;
+  border-radius: 10px;
   border: 1px solid #dbe4ee;
   background: #ffffff;
-  text-align: center;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.12);
+  z-index: 20;
   display: grid;
-  gap: 10px;
-  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
-`
-
-const EmptyTitle = styled.div`
-  font-size: 16px;
-  font-weight: 800;
-  color: #15324b;
-`
-
-const EmptyText = styled.div`
-  font-size: 13px;
-  color: #64748b;
-  line-height: 1.8;
+  gap: 4px;
 `
 
 const ToolbarButton = styled.button<{ $tone?: 'primary' | 'warning' | 'muted' }>`
@@ -79,12 +58,8 @@ const ToolbarButton = styled.button<{ $tone?: 'primary' | 'warning' | 'muted' }>
   }
 `
 
-const PipelineWrap = styled.div`
-  padding: 12px 16px 0;
-  flex-shrink: 0;
-`
-
 const SlidevViewport = styled.div`
+  position: relative;
   flex: 1;
   min-width: 0;
   min-height: 0;
@@ -96,6 +71,75 @@ const SlidevViewport = styled.div`
   padding: 16px;
 `
 
+const PreviewStatusOverlay = styled.div`
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  top: 16px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+`
+
+const PreviewStatusLine = styled.div`
+  max-width: min(720px, 100%);
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.72);
+  color: #e2e8f0;
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
+  backdrop-filter: blur(8px);
+`
+
+const PreviewProgressTrack = styled.div`
+  width: min(320px, 70%);
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.2);
+  overflow: hidden;
+`
+
+const PreviewProgressFill = styled.div<{ $value: number }>`
+  height: 100%;
+  width: ${({ $value }) => `${Math.max(0, Math.min(100, $value))}%`};
+  background: linear-gradient(90deg, #3b82f6, #60a5fa);
+  transition: width 0.35s ease;
+`
+
+const SlidevEditFab = styled.button<{ $visible: boolean }>`
+  position: absolute;
+  right: 24px;
+  bottom: 88px;
+  z-index: 4;
+  display: ${({ $visible }) => ($visible ? 'inline-flex' : 'none')};
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: none;
+  background: #2563eb;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(37, 99, 235, 0.45);
+  pointer-events: auto;
+
+  &:hover {
+    background: #1d4ed8;
+  }
+
+  &:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+`
+
 const SlidevFrame = styled.iframe`
   width: min(100%, 1180px);
   height: 100%;
@@ -104,95 +148,30 @@ const SlidevFrame = styled.iframe`
   border-radius: 4px;
   background: #ffffff;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+  color-scheme: normal;
 `
 
-const SlidevFallbackCard = styled.div`
-  width: min(100%, 720px);
+const PreviewStateCard = styled.div`
+  width: min(480px, calc(100% - 32px));
+  padding: 28px 24px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.96);
+  text-align: center;
   display: grid;
-  gap: 14px;
-  align-content: start;
-`
-
-const SlidevInfoCard = styled.div`
-  border: 1px solid #dbe4ee;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.95);
-  padding: 16px;
-  color: #31485f;
-`
-
-const SlidevMarkdownPreview = styled.pre`
-  margin: 0;
-  border-radius: 12px;
-  padding: 16px;
-  background: #0f172a;
-  color: #dbeafe;
-  font-size: 12px;
-  line-height: 1.7;
-  overflow: auto;
-  max-height: 280px;
-  white-space: pre-wrap;
-  word-break: break-word;
-`
-
-const SelectionBar = styled.div`
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
   gap: 8px;
-  padding: 10px 16px 12px;
-  border-top: 1px solid #e2e8f0;
-  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
 `
 
-const SelectionHint = styled.span`
-  flex: 1;
-  min-width: 0;
-  font-size: 12px;
-  color: #475569;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+const PreviewStateTitle = styled.div`
+  font-size: 15px;
+  font-weight: 800;
+  color: #1e3a5f;
 `
 
-const SelectionInput = styled.input`
-  flex: 2;
-  min-width: 0;
-  height: 36px;
-  padding: 0 12px;
-  border-radius: 10px;
-  border: 1px solid #dbe4ee;
+const PreviewStateText = styled.div`
   font-size: 13px;
-`
-
-const SelectionButton = styled.button<{ $primary?: boolean }>`
-  height: 36px;
-  padding: 0 14px;
-  border-radius: 10px;
-  border: 1px solid ${({ $primary }) => ($primary ? '#2563eb' : '#dbe4ee')};
-  background: ${({ $primary }) => ($primary ? '#2563eb' : '#ffffff')};
-  color: ${({ $primary }) => ($primary ? '#ffffff' : '#334155')};
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  white-space: nowrap;
-
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-`
-
-const CanvasStage = styled.div`
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  overflow: auto;
-  padding: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(180deg, #eef4fb 0%, #e7eef7 100%);
+  line-height: 1.7;
+  color: #64748b;
 `
 
 const GENERATING_STATUSES: PptTaskStatus[] = [
@@ -208,6 +187,15 @@ const GENERATING_STATUSES: PptTaskStatus[] = [
   'generating_assets',
 ]
 
+function toUserPreviewMessage(message: string | null | undefined): string {
+  const text = String(message || '').trim()
+  if (!text) return ''
+  if (/deckdocument/i.test(text)) {
+    return '演示文稿预览暂时不可用，请稍候或重新生成'
+  }
+  return text
+}
+
 interface PptWorkbenchPanelProps {
   title: string
   taskStatus: PptTaskStatus
@@ -216,6 +204,7 @@ interface PptWorkbenchPanelProps {
   templateStatusMessage?: string | null
   pptDeckId?: string | null
   pptOutputMode?: 'editable_pptx' | 'web_deck'
+  pptEngine?: 'builtin' | 'minimax_pptx_generator' | 'slidev' | null
   pptPreviewUrl?: string
   pptSlidevMarkdown?: string
   pptHtmlArtifactId?: string | null
@@ -227,6 +216,10 @@ interface PptWorkbenchPanelProps {
   onExportSlidev?: (format: 'pdf' | 'png' | 'pptx') => void
   onSelectSlide: (index: number) => void
   onAiEditSlide: (instruction: string) => Promise<void> | void
+  onGeneratePpt?: (prompt: string) => Promise<void> | void
+  onNewPpt?: () => void
+  onRegeneratePreview?: () => Promise<void> | void
+  onPreviewUrlChange?: (previewUrl: string) => void
 }
 
 export default function PptWorkbenchPanel({
@@ -237,9 +230,9 @@ export default function PptWorkbenchPanel({
   templateStatusMessage,
   pptDeckId,
   pptOutputMode,
+  pptEngine,
   pptPreviewUrl,
   pptSlidevMarkdown,
-  pptHtmlArtifactId,
   generationProgress = 0,
   generationMessage,
   onDownloadPpt,
@@ -248,43 +241,164 @@ export default function PptWorkbenchPanel({
   onExportSlidev,
   onSelectSlide,
   onAiEditSlide,
+  onGeneratePpt,
+  onNewPpt,
+  onRegeneratePreview,
+  onPreviewUrlChange,
 }: PptWorkbenchPanelProps) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
-  const [slidevPreviewHtml, setSlidevPreviewHtml] = useState('')
+  const rebuildAttemptedRef = useRef(false)
+  const [resolvedPreviewUrl, setResolvedPreviewUrl] = useState(pptPreviewUrl || '')
+  const [officialPreviewReady, setOfficialPreviewReady] = useState<boolean | null>(null)
+  const [fallbackPreviewReady, setFallbackPreviewReady] = useState(false)
   const [slidevPreviewError, setSlidevPreviewError] = useState<string | null>(null)
   const [slidevPreviewLoading, setSlidevPreviewLoading] = useState(false)
-  const [selectionMode, setSelectionMode] = useState(false)
-  const [selectedElement, setSelectedElement] = useState<{
+  const selectedElement: {
     slideIndex: number
-    selector: string
     tagName: string
     textPreview: string
-  } | null>(null)
-  const [editInstruction, setEditInstruction] = useState('')
-  const [editBusy, setEditBusy] = useState(false)
+  } | null = null
+  const [promptValue, setPromptValue] = useState('')
+  const [actionBusy, setActionBusy] = useState(false)
+  const [editFabVisible, setEditFabVisible] = useState(false)
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false)
+  const moreMenuRef = useRef<HTMLDivElement | null>(null)
+  const floatingInputRef = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    if (!moreMenuOpen) return
+    const close = (event: MouseEvent) => {
+      if (moreMenuRef.current?.contains(event.target as Node)) return
+      setMoreMenuOpen(false)
+    }
+    window.addEventListener('mousedown', close)
+    return () => window.removeEventListener('mousedown', close)
+  }, [moreMenuOpen])
 
   const isGenerating = GENERATING_STATUSES.includes(taskStatus)
-  const isSlidev = pptOutputMode === 'web_deck'
-  const isOfficialSlidev = Boolean(pptPreviewUrl?.includes('/slidev-access/'))
+  const isSlidevWeb = Boolean(onGeneratePpt)
+  const isSlidev = isSlidevWeb || pptOutputMode === 'web_deck' || pptEngine === 'slidev' || Boolean(pptSlidevMarkdown?.trim())
+  const navigatorSlides = useMemo(() => {
+    if (liveSlides.length > 0) return liveSlides
+    if (isSlidev && pptSlidevMarkdown?.trim()) {
+      return parseSlidevMarkdownToPreviews(pptSlidevMarkdown, title)
+    }
+    return liveSlides
+  }, [isSlidev, liveSlides, pptSlidevMarkdown, title])
+  const hasDeckContent = navigatorSlides.length > 0 || Boolean(pptDeckId) || Boolean(pptSlidevMarkdown?.trim())
+  const floatingMode = hasDeckContent && !isGenerating ? 'edit' : 'generate'
+  const showFloatingPanel = isSlidev && (floatingMode === 'generate' ? isSlidevWeb : hasDeckContent)
+  const centerFloatingInput = floatingMode === 'generate' && !hasDeckContent && !isGenerating
+
+  useEffect(() => {
+    setResolvedPreviewUrl(pptPreviewUrl || '')
+    rebuildAttemptedRef.current = false
+    setOfficialPreviewReady(null)
+  }, [pptPreviewUrl, pptDeckId])
+
+  const isOfficialSlidev = Boolean(resolvedPreviewUrl.includes('/slidev-access/'))
   const officialSlidevAppUrl = useMemo(() => (
-    isOfficialSlidev && pptPreviewUrl ? resolveWebApiUrl(pptPreviewUrl) : ''
-  ), [isOfficialSlidev, pptPreviewUrl])
+    isOfficialSlidev ? resolveWebApiUrl(resolvedPreviewUrl) : ''
+  ), [isOfficialSlidev, resolvedPreviewUrl])
+
   const slidevFallbackPreviewUrl = useMemo(() => (
-    !isOfficialSlidev
-      ? (pptDeckId ? `/api/ppt/decks/${encodeURIComponent(pptDeckId)}/slidev-preview` : '')
-      : ''
-  ), [isOfficialSlidev, pptDeckId])
+    pptDeckId ? `/api/ppt/decks/${encodeURIComponent(pptDeckId)}/slidev-preview` : ''
+  ), [pptDeckId])
 
-  const pipelineStepId = useMemo(
-    () => resolveSlidevPipelineStep(generationProgress, generationMessage || templateStatusMessage || ''),
-    [generationProgress, generationMessage, templateStatusMessage],
-  )
+  const useOfficialIframe = isOfficialSlidev && officialPreviewReady !== false
+  const useFallbackPreview = isSlidev && !useOfficialIframe && Boolean(slidevFallbackPreviewUrl)
 
-  const loadPreview = useCallback(() => {
-    if (!isSlidev || isOfficialSlidev || !slidevFallbackPreviewUrl) {
-      setSlidevPreviewHtml('')
-      setSlidevPreviewError(null)
-      setSlidevPreviewLoading(false)
+  const previewStatusLine = useMemo(() => {
+    if (isGenerating) {
+      const message = toUserPreviewMessage(generationMessage || templateStatusMessage) || '正在生成幻灯片预览'
+      const progress = generationProgress > 0 ? ` · ${Math.round(generationProgress)}%` : ''
+      return `${message}${progress}`
+    }
+    if (slidevPreviewLoading) return '正在加载幻灯片预览…'
+    if (slidevPreviewError) return toUserPreviewMessage(slidevPreviewError)
+    if (isOfficialSlidev && officialPreviewReady === false) {
+      return '官方 Slidev 预览不可用，正在尝试 HTML 预览…'
+    }
+    if (!hasDeckContent) return '在下方输入一句话开始生成 Slidev 演示'
+    if (!fallbackPreviewReady && !useOfficialIframe) return '正在准备幻灯片预览…'
+    return ''
+  }, [
+    generationMessage,
+    generationProgress,
+    hasDeckContent,
+    isGenerating,
+    isOfficialSlidev,
+    officialPreviewReady,
+    slidevPreviewError,
+    fallbackPreviewReady,
+    slidevPreviewLoading,
+    templateStatusMessage,
+    useOfficialIframe,
+  ])
+
+  const showPreviewStatusOverlay = Boolean(previewStatusLine) && (isGenerating || (!fallbackPreviewReady && !useOfficialIframe) || slidevPreviewLoading || slidevPreviewError)
+  const fallbackFrameUrl = useMemo(() => (
+    slidevFallbackPreviewUrl ? `${resolveWebApiUrl(slidevFallbackPreviewUrl)}#slide-${activeSlideIndex + 1}` : ''
+  ), [activeSlideIndex, slidevFallbackPreviewUrl])
+
+  const tryRebuildPreview = useCallback(async () => {
+    if (!pptDeckId || !pptSlidevMarkdown?.trim() || rebuildAttemptedRef.current) return false
+    rebuildAttemptedRef.current = true
+    const rebuilt = await rebuildSlidevPreview({
+      deckId: pptDeckId,
+      title,
+      slidevMarkdown: pptSlidevMarkdown,
+    })
+    if (!rebuilt.success || !rebuilt.previewUrl) return false
+    setResolvedPreviewUrl(rebuilt.previewUrl)
+    onPreviewUrlChange?.(rebuilt.previewUrl)
+    return true
+  }, [onPreviewUrlChange, pptDeckId, pptSlidevMarkdown, title])
+
+  useEffect(() => {
+    if (!isOfficialSlidev || !officialSlidevAppUrl) {
+      setOfficialPreviewReady(null)
+      return
+    }
+    let cancelled = false
+    setSlidevPreviewLoading(true)
+    void fetch(officialSlidevAppUrl, { credentials: 'include' })
+      .then(async (response) => {
+        if (cancelled) return
+        const contentType = (response.headers.get('content-type') || '').toLowerCase()
+        if (contentType.includes('application/json')) {
+          setOfficialPreviewReady(false)
+          return
+        }
+        const text = await response.text().catch(() => '')
+        if (text.trim().startsWith('{') && text.includes('"success"')) {
+          setOfficialPreviewReady(false)
+          return
+        }
+        if (!response.ok) {
+          setOfficialPreviewReady(false)
+          return
+        }
+        setOfficialPreviewReady(true)
+      })
+      .catch(() => {
+        if (!cancelled) setOfficialPreviewReady(false)
+      })
+      .finally(() => {
+        if (!cancelled) setSlidevPreviewLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [isOfficialSlidev, officialSlidevAppUrl])
+
+  const loadFallbackPreview = useCallback(() => {
+    if (!useFallbackPreview || !slidevFallbackPreviewUrl) {
+      setFallbackPreviewReady(false)
+      if (!useFallbackPreview) {
+        setSlidevPreviewError(null)
+        setSlidevPreviewLoading(false)
+      }
       return
     }
 
@@ -293,19 +407,28 @@ export default function PptWorkbenchPanel({
     setSlidevPreviewError(null)
 
     void fetchProtectedTextResource(slidevFallbackPreviewUrl)
-      .then((result) => {
+      .then(async (result) => {
         if (cancelled) return
         if (result.success && result.text && result.contentType.includes('text/html')) {
-          setSlidevPreviewHtml(result.text)
+          setFallbackPreviewReady(true)
           setSlidevPreviewError(null)
           return
         }
-        setSlidevPreviewHtml('')
-        setSlidevPreviewError(result.error || '预览加载失败')
-      })
-      .catch((error) => {
+        const recovered = await tryRebuildPreview()
         if (cancelled) return
-        setSlidevPreviewHtml('')
+        if (recovered) {
+          setSlidevPreviewError(null)
+          return
+        }
+        setFallbackPreviewReady(false)
+        setSlidevPreviewError(toUserPreviewMessage(result.error) || '预览加载失败')
+      })
+      .catch(async (error) => {
+        if (cancelled) return
+        const recovered = await tryRebuildPreview()
+        if (cancelled) return
+        if (recovered) return
+        setFallbackPreviewReady(false)
         setSlidevPreviewError(error instanceof Error ? error.message : '预览加载失败')
       })
       .finally(() => {
@@ -315,215 +438,223 @@ export default function PptWorkbenchPanel({
     return () => {
       cancelled = true
     }
-  }, [isSlidev, isOfficialSlidev, slidevFallbackPreviewUrl])
-
-  useEffect(() => loadPreview(), [loadPreview, pptSlidevMarkdown])
+  }, [slidevFallbackPreviewUrl, tryRebuildPreview, useFallbackPreview])
 
   useEffect(() => {
-    if (!isOfficialSlidev || !iframeRef.current || !officialSlidevAppUrl) return
+    if (!isSlidev) return
+    if (useOfficialIframe) {
+      setFallbackPreviewReady(false)
+      setSlidevPreviewError(null)
+      return
+    }
+    if (isOfficialSlidev && officialPreviewReady === null) return
+    if (isOfficialSlidev && officialPreviewReady === false && pptSlidevMarkdown?.trim()) {
+      void tryRebuildPreview()
+    }
+    return loadFallbackPreview()
+  }, [
+    isSlidev,
+    isOfficialSlidev,
+    loadFallbackPreview,
+    officialPreviewReady,
+    pptSlidevMarkdown,
+    resolvedPreviewUrl,
+    tryRebuildPreview,
+    useOfficialIframe,
+  ])
+
+  useEffect(() => {
+    if (!useOfficialIframe || !iframeRef.current || !officialSlidevAppUrl) return
     const base = officialSlidevAppUrl.replace(/\/?$/, '')
     iframeRef.current.src = `${base}#/${activeSlideIndex + 1}`
-  }, [activeSlideIndex, isOfficialSlidev, officialSlidevAppUrl])
-
-  useEffect(() => {
-    if (isOfficialSlidev) return
-    return subscribeSlidevPreview((message: SlidevPreviewOutboundMessage) => {
-      if (message.type === 'ppt-element-selected') {
-        setSelectedElement({
-          slideIndex: message.slideIndex,
-          selector: message.selector,
-          tagName: message.tagName,
-          textPreview: message.textPreview,
-        })
-        if (message.slideIndex !== activeSlideIndex) {
-          onSelectSlide(message.slideIndex)
-        }
-      }
-    })
-  }, [activeSlideIndex, isOfficialSlidev, onSelectSlide])
-
-  useEffect(() => {
-    if (isOfficialSlidev) return
-    postToSlidevPreview(iframeRef.current, { type: 'ppt-set-slide', slideIndex: activeSlideIndex })
-  }, [activeSlideIndex, isOfficialSlidev, slidevPreviewHtml])
-
-  useEffect(() => {
-    if (isOfficialSlidev) return
-    postToSlidevPreview(iframeRef.current, { type: 'ppt-selection-mode', enabled: selectionMode })
-  }, [isOfficialSlidev, selectionMode, slidevPreviewHtml])
+  }, [activeSlideIndex, officialSlidevAppUrl, useOfficialIframe])
 
   const handleSelectSlide = (index: number) => {
     onSelectSlide(index)
-    if (isOfficialSlidev && iframeRef.current && officialSlidevAppUrl) {
+    if (useOfficialIframe && iframeRef.current && officialSlidevAppUrl) {
       const base = officialSlidevAppUrl.replace(/\/?$/, '')
       iframeRef.current.src = `${base}#/${index + 1}`
       return
     }
-    postToSlidevPreview(iframeRef.current, { type: 'ppt-set-slide', slideIndex: index })
+    if (iframeRef.current && fallbackFrameUrl) {
+      iframeRef.current.src = `${resolveWebApiUrl(slidevFallbackPreviewUrl)}#slide-${index + 1}`
+    }
   }
 
-  const handleToggleSelection = () => {
-    setSelectionMode((value) => !value)
-  }
-
-  const handleApplyEdit = async () => {
-    const instruction = editInstruction.trim()
-    if (!instruction) return
-    const context = selectedElement
-      ? `请修改当前页中选中的 ${selectedElement.tagName} 区域（${selectedElement.selector}），原文：${selectedElement.textPreview}。用户要求：${instruction}`
-      : instruction
-    setEditBusy(true)
+  const handleFloatingApply = async () => {
+    const text = promptValue.trim()
+    if (!text) return
+    setActionBusy(true)
     try {
+      if (floatingMode === 'generate') {
+        await onGeneratePpt?.(text)
+        setPromptValue('')
+        return
+      }
+      const context = selectedElement
+        ? `请修改当前页中选中的 ${selectedElement.tagName} 区域，原文：${selectedElement.textPreview}。用户要求：${text}`
+        : text
       await onAiEditSlide(context)
-      setEditInstruction('')
-      void loadPreview()
+      setPromptValue('')
+      rebuildAttemptedRef.current = false
+      if (!useOfficialIframe) {
+        loadFallbackPreview()
+      }
     } finally {
-      setEditBusy(false)
+      setActionBusy(false)
     }
   }
 
   const handleExportPdf = () => {
-    if (!slidevPreviewHtml) {
-      onExportSlidev?.('pdf')
-      return
-    }
-    const blob = new Blob([slidevPreviewHtml], { type: 'text/html;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const opened = window.open(url, '_blank', 'noopener,noreferrer')
-    if (!opened) {
-      URL.revokeObjectURL(url)
-      window.alert('浏览器拦截了打印窗口，请允许弹窗后重试。')
-      return
-    }
-    opened.addEventListener('load', () => {
-      opened.focus()
-      opened.print()
-    })
-    window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    onExportSlidev?.('pdf')
   }
 
-  if (taskStatus !== 'completed' && liveSlides.length === 0 && !isGenerating) {
-    return (
-      <EmptyShell>
-        <EmptyCard>
-          <EmptyTitle>{taskStatus === 'failed' ? 'PPT 生成失败' : '输入需求，开始生成 PPT'}</EmptyTitle>
-          <EmptyText>
-            {templateStatusMessage || '在底部输入你想做的演示内容，生成过程会在这里实时展示。'}
-          </EmptyText>
-        </EmptyCard>
-      </EmptyShell>
-    )
+  const canExportPreview = Boolean(useOfficialIframe || fallbackPreviewReady || pptDeckId)
+  const closeMoreMenu = () => setMoreMenuOpen(false)
+  const runMoreAction = (handler?: () => void) => (event: ReactMouseEvent<HTMLButtonElement>) => {
+    event.preventDefault()
+    closeMoreMenu()
+    handler?.()
   }
-
   const slidevToolbarActions = isSlidev ? (
     <>
-      <ToolbarButton type="button" onClick={onDownloadSlidevHtml} disabled={!officialSlidevAppUrl && !slidevFallbackPreviewUrl} $tone="primary">
-        下载 HTML
-      </ToolbarButton>
-      <ToolbarButton type="button" onClick={onOpenSlidevPreview} disabled={!officialSlidevAppUrl && !slidevFallbackPreviewUrl} $tone="primary">
-        全屏预览
-      </ToolbarButton>
-      <ToolbarButton type="button" onClick={handleExportPdf} disabled={!officialSlidevAppUrl && !slidevPreviewHtml} $tone="primary">
-        导出 PDF
-      </ToolbarButton>
+      {onNewPpt ? (
+        <ToolbarButton type="button" onClick={onNewPpt} $tone="muted">
+          新建 PPT
+        </ToolbarButton>
+      ) : null}
+      <MoreMenuWrap ref={moreMenuRef}>
+        <ToolbarButton type="button" onClick={() => setMoreMenuOpen((value) => !value)} $tone="muted">
+          更多
+        </ToolbarButton>
+        {moreMenuOpen ? (
+          <MoreMenuPanel>
+            {slidevPreviewError && onRegeneratePreview ? (
+              <ToolbarButton type="button" onClick={runMoreAction(() => void onRegeneratePreview())} $tone="warning">
+                重新生成预览
+              </ToolbarButton>
+            ) : null}
+            <ToolbarButton type="button" onClick={runMoreAction(onDownloadSlidevHtml)} disabled={!canExportPreview}>
+              下载 HTML
+            </ToolbarButton>
+            <ToolbarButton type="button" onClick={runMoreAction(onOpenSlidevPreview)} disabled={!canExportPreview}>
+              全屏预览
+            </ToolbarButton>
+            <ToolbarButton type="button" onClick={runMoreAction(handleExportPdf)} disabled={!canExportPreview}>
+              导出 PDF
+            </ToolbarButton>
+          </MoreMenuPanel>
+        ) : null}
+      </MoreMenuWrap>
     </>
   ) : undefined
 
-  const pipelineContent = isSlidev && isGenerating ? (
-    <PipelineWrap>
-      <PptGenerationPipeline
-        steps={SLIDEV_PIPELINE_STEPS}
-        activeStepId={pipelineStepId}
-        progress={generationProgress}
-        detailMessage={generationMessage || templateStatusMessage}
-      />
-    </PipelineWrap>
-  ) : null
-
-  const activeSlide = liveSlides[activeSlideIndex] ?? null
-
-  const canvasPreviewContent = !isSlidev && liveSlides.length > 0 ? (
-    <CanvasStage>
-      <PptCanvasPreview slide={activeSlide} pageNumber={activeSlideIndex + 1} />
-    </CanvasStage>
-  ) : null
+  const handleEditCurrentSlide = () => {
+    const page = activeSlideIndex + 1
+    setPromptValue((current) => (
+      current.trim()
+        ? current
+        : `请修改第 ${page} 页：`
+    ))
+    window.setTimeout(() => floatingInputRef.current?.focus(), 0)
+  }
 
   const slidevPreviewContent = isSlidev ? (
-    <SlidevViewport data-testid="ppt-slidev-preview-shell">
-      {isOfficialSlidev && officialSlidevAppUrl ? (
+    <SlidevViewport
+      data-testid="ppt-slidev-preview-shell"
+      onMouseEnter={() => {
+        if (floatingMode === 'edit' && hasDeckContent) setEditFabVisible(true)
+      }}
+      onMouseLeave={() => setEditFabVisible(false)}
+    >
+      {useOfficialIframe && officialSlidevAppUrl ? (
         <SlidevFrame
           ref={iframeRef}
           src={officialSlidevAppUrl}
-          title={`Slidev 官方预览：${title}`}
-          sandbox="allow-scripts allow-same-origin allow-popups"
+          title={`Slidev 预览：${title}`}
         />
-      ) : slidevPreviewHtml ? (
+      ) : fallbackPreviewReady ? (
         <SlidevFrame
           ref={iframeRef}
-          srcDoc={slidevPreviewHtml}
+          src={fallbackFrameUrl}
           title={`Slidev 预览：${title}`}
-          sandbox="allow-scripts allow-same-origin"
         />
-      ) : (
-        <SlidevFallbackCard>
-          <SlidevInfoCard>
-            {slidevPreviewLoading
-              ? '正在加载幻灯片预览…'
-              : slidevPreviewError || (isGenerating ? '正在构建官方 Slidev 预览…' : '等待生成预览…')}
-          </SlidevInfoCard>
-          {pptSlidevMarkdown && !slidevPreviewLoading ? (
-            <SlidevMarkdownPreview>{pptSlidevMarkdown}</SlidevMarkdownPreview>
+      ) : !isGenerating && slidevPreviewError && !centerFloatingInput ? (
+        <PreviewStateCard>
+          <PreviewStateTitle>预览不可用</PreviewStateTitle>
+          <PreviewStateText>{toUserPreviewMessage(slidevPreviewError)}</PreviewStateText>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap', marginTop: 4 }}>
+            {onRegeneratePreview ? (
+              <ToolbarButton type="button" onClick={() => void onRegeneratePreview()} $tone="primary">
+                重新生成预览
+              </ToolbarButton>
+            ) : null}
+            {onNewPpt ? (
+              <ToolbarButton type="button" onClick={onNewPpt} $tone="muted">
+                新建 PPT
+              </ToolbarButton>
+            ) : null}
+          </div>
+        </PreviewStateCard>
+      ) : null}
+      {showPreviewStatusOverlay ? (
+        <PreviewStatusOverlay>
+          <PreviewStatusLine>{previewStatusLine}</PreviewStatusLine>
+          {isGenerating ? (
+            <PreviewProgressTrack>
+              <PreviewProgressFill $value={generationProgress} />
+            </PreviewProgressTrack>
           ) : null}
-        </SlidevFallbackCard>
-      )}
+        </PreviewStatusOverlay>
+      ) : null}
+      <SlidevEditFab
+        type="button"
+        $visible={editFabVisible && floatingMode === 'edit'}
+        disabled={actionBusy || isGenerating}
+        onClick={handleEditCurrentSlide}
+        data-testid="ppt-slidev-edit-fab"
+      >
+        编辑本页
+      </SlidevEditFab>
     </SlidevViewport>
   ) : null
 
-  const selectionBar = isSlidev && !isOfficialSlidev && (taskStatus === 'completed' || liveSlides.length > 0) ? (
-    <SelectionBar data-testid="ppt-selection-bar">
-      <SelectionButton type="button" onClick={handleToggleSelection} $primary={selectionMode}>
-        {selectionMode ? '退出选区' : '选区编辑'}
-      </SelectionButton>
-      <SelectionHint>
-        {selectedElement
-          ? `已选 ${selectedElement.tagName}：${selectedElement.textPreview.slice(0, 48)}`
-          : selectionMode
-            ? '点击幻灯片中的文字或区块进行选中'
-            : '开启选区后，可点选页面元素并用 AI 修改'}
-      </SelectionHint>
-      <SelectionInput
-        value={editInstruction}
-        onChange={(event) => setEditInstruction(event.target.value)}
-        placeholder="描述要如何修改当前页或选中区域…"
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' && !event.shiftKey) {
-            event.preventDefault()
-            void handleApplyEdit()
-          }
-        }}
-      />
-      <SelectionButton type="button" $primary onClick={() => void handleApplyEdit()} disabled={editBusy || !editInstruction.trim()}>
-        {editBusy ? '应用中…' : 'AI 修改'}
-      </SelectionButton>
-    </SelectionBar>
+  const floatingOverlay = showFloatingPanel ? (
+    <PptFloatingEditPanel
+      visible
+      mode={floatingMode}
+      centered={centerFloatingInput}
+      selectedLabel={
+        floatingMode === 'edit'
+          ? `第 ${activeSlideIndex + 1} 页`
+          : (selectedElement ? `${selectedElement.tagName}：${selectedElement.textPreview.slice(0, 40)}` : null)
+      }
+      value={promptValue}
+      busy={actionBusy || isGenerating}
+      onChange={setPromptValue}
+      onApply={() => void handleFloatingApply()}
+      inputRef={floatingInputRef}
+    />
   ) : null
 
   return (
     <PptEditorShell
       title={title}
-      slides={liveSlides}
+      slides={navigatorSlides}
       activeSlideIndex={activeSlideIndex}
       statusMessage={
-        isOfficialSlidev
-          ? '官方 Slidev 预览'
-          : (isGenerating ? (generationMessage || templateStatusMessage) : templateStatusMessage)
+        useOfficialIframe
+          ? 'Slidev 官方预览'
+          : fallbackPreviewReady
+            ? 'Slidev HTML 预览'
+            : (isGenerating ? (generationMessage || templateStatusMessage) : 'Slidev 网页演示')
       }
-      previewContent={slidevPreviewContent || canvasPreviewContent}
-      pipelineContent={pipelineContent}
-      selectionBar={selectionBar}
+      previewContent={isSlidev ? slidevPreviewContent : null}
+      floatingOverlay={floatingOverlay}
       downloadLabel={isSlidev ? '下载 Markdown' : '下载 PPTX'}
       toolbarExtraActions={slidevToolbarActions}
       compactMode={isSlidev}
+      hideNavigator={centerFloatingInput}
       onSelectSlide={handleSelectSlide}
       onDownload={onDownloadPpt}
     />

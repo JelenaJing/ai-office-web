@@ -1,43 +1,86 @@
-import { useMemo } from 'react'
+import { useCallback, useMemo } from 'react'
 import styled from 'styled-components'
 import type { DocumentCitation, DocumentReference } from '../services/documentWorkbenchApi'
 import type { DocumentPatchOperation } from '../services/documentCommandEngine'
 
 const Panel = styled.aside`
-  width: 300px;
-  min-width: 280px;
+  width: 360px;
+  min-width: 320px;
   border-left: 1px solid #d8e3ef;
-  background: #f7fafc;
+  background: #f8fbfe;
   display: flex;
   flex-direction: column;
   min-height: 0;
 `
 
 const PanelHeader = styled.div`
-  padding: 14px 16px 10px;
+  padding: 18px 18px 14px;
   border-bottom: 1px solid #dbe6f0;
+  background: rgba(255, 255, 255, 0.94);
   flex-shrink: 0;
 `
 
 const PanelTitle = styled.h3`
-  margin: 0 0 6px;
-  font-size: 15px;
+  margin: 0;
+  font-size: 16px;
   color: #1d3a57;
   font-weight: 800;
 `
 
-const ScopeBadgeRow = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+const PanelDescription = styled.div`
   margin-top: 6px;
+  font-size: 12px;
+  color: #627789;
+  line-height: 1.6;
 `
 
-const ScopeBadge = styled.div<{ $tone?: 'warn' | 'info' }>`
+const ScrollRegion = styled.div`
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+`
+
+const SectionCard = styled.section`
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid #dbe5ef;
+  background: rgba(255, 255, 255, 0.92);
+  display: grid;
+  gap: 10px;
+`
+
+const SectionTitle = styled.div`
+  font-size: 12px;
+  font-weight: 800;
+  color: #49627a;
+`
+
+const MetaGrid = styled.div`
+  display: grid;
+  gap: 8px;
+`
+
+const MetaLabel = styled.div`
+  font-size: 12px;
+  color: #607487;
+  line-height: 1.6;
+`
+
+const FocusBadgeRow = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+`
+
+const FocusBadge = styled.div<{ $tone?: 'info' | 'warn' }>`
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 4px 9px;
+  padding: 5px 10px;
   border-radius: 999px;
   background: ${({ $tone }) => ($tone === 'warn' ? '#fff7e5' : '#edf4fb')};
   color: ${({ $tone }) => ($tone === 'warn' ? '#8a5f1f' : '#31516f')};
@@ -45,95 +88,25 @@ const ScopeBadge = styled.div<{ $tone?: 'warn' | 'info' }>`
   font-weight: 700;
 `
 
-const ChatHistory = styled.div`
-  padding: 12px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-`
-
-const ScrollRegion = styled.div`
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-`
-
-const EmptyHint = styled.div`
-  font-size: 12px;
-  color: #7a8fa0;
-  line-height: 1.8;
-  padding: 8px 0;
-`
-
-const Bubble = styled.div<{ $role: 'user' | 'assistant' }>`
-  padding: 10px 13px;
-  border-radius: 14px;
-  background: ${({ $role }) => ($role === 'user' ? '#2e6aad' : '#fff')};
-  color: ${({ $role }) => ($role === 'user' ? '#fff' : '#304356')};
-  border: 1px solid ${({ $role }) => ($role === 'user' ? 'transparent' : '#dbe5ef')};
-  font-size: 13px;
-  line-height: 1.7;
-  white-space: pre-wrap;
-  align-self: ${({ $role }) => ($role === 'user' ? 'flex-end' : 'flex-start')};
-  max-width: 92%;
-`
-
-const InspectorSection = styled.div`
-  margin: 0 14px 12px;
-  padding: 12px;
-  border-radius: 14px;
-  border: 1px solid #dbe5ef;
-  background: rgba(255, 255, 255, 0.88);
-  display: grid;
-  gap: 8px;
-`
-
-const InspectorTitle = styled.div`
-  font-size: 12px;
-  font-weight: 800;
-  color: #4a647c;
-`
-
-const MetaLine = styled.div`
-  font-size: 12px;
-  color: #627789;
-  line-height: 1.6;
-`
-
-const RefList = styled.div`
-  display: grid;
-  gap: 8px;
-`
-
-const RefCard = styled.div`
+const PreviewBox = styled.div`
   padding: 10px 12px;
   border-radius: 12px;
-  background: #fff;
-  border: 1px solid #d8e3ef;
-  display: grid;
-  gap: 6px;
-`
-
-const RefLabel = styled.div`
+  background: #f5f9fd;
+  color: #39546d;
   font-size: 12px;
-  font-weight: 700;
-  color: #294764;
+  line-height: 1.7;
+  white-space: pre-wrap;
 `
 
-const RefMeta = styled.div`
-  font-size: 11px;
-  color: #6d8193;
-  line-height: 1.6;
-`
-
-const CitationList = styled.div`
-  display: grid;
-  gap: 6px;
+const ActionGrid = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 `
 
 const QuickBtn = styled.button`
-  min-height: 28px;
-  padding: 0 10px;
+  min-height: 32px;
+  padding: 0 12px;
   border-radius: 999px;
   border: 1px solid #d4deea;
   background: #fff;
@@ -154,6 +127,118 @@ const QuickBtn = styled.button`
     opacity: 0.4;
     cursor: not-allowed;
   }
+`
+
+const PromptBox = styled.div`
+  display: grid;
+  gap: 10px;
+`
+
+const PromptTextarea = styled.textarea`
+  width: 100%;
+  min-height: 116px;
+  max-height: 220px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid #d4deea;
+  resize: vertical;
+  font-size: 14px;
+  line-height: 1.7;
+  font-family: inherit;
+  background: #fbfdff;
+
+  &:focus {
+    outline: none;
+    border-color: #7aaee0;
+    background: #fff;
+  }
+`
+
+const PromptFooter = styled.div`
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+`
+
+const PromptHint = styled.div`
+  font-size: 12px;
+  color: #6b7f92;
+  line-height: 1.6;
+`
+
+const SubmitButton = styled.button`
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: 12px;
+  border: 1px solid #77a9df;
+  background: linear-gradient(180deg, #6aa4e2 0%, #4b8fd7 100%);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+`
+
+const HistoryList = styled.div`
+  display: grid;
+  gap: 8px;
+`
+
+const Bubble = styled.div<{ $role: 'user' | 'assistant' }>`
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: ${({ $role }) => ($role === 'user' ? '#2e6aad' : '#f5f9fd')};
+  color: ${({ $role }) => ($role === 'user' ? '#fff' : '#304356')};
+  border: 1px solid ${({ $role }) => ($role === 'user' ? 'transparent' : '#dbe5ef')};
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+`
+
+const BubbleLabel = styled.div`
+  margin-bottom: 4px;
+  font-size: 11px;
+  font-weight: 800;
+  opacity: 0.82;
+`
+
+const EmptyHint = styled.div`
+  font-size: 12px;
+  color: #7a8fa0;
+  line-height: 1.8;
+`
+
+const SourceList = styled.div`
+  display: grid;
+  gap: 8px;
+`
+
+const SourceCard = styled.div`
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid #d8e3ef;
+  display: grid;
+  gap: 6px;
+`
+
+const SourceTitle = styled.div`
+  font-size: 12px;
+  font-weight: 700;
+  color: #294764;
+`
+
+const SourceMeta = styled.div`
+  font-size: 11px;
+  color: #6d8193;
+  line-height: 1.6;
 `
 
 export interface SectionHistoryEntry {
@@ -184,6 +269,8 @@ interface DocumentAiEditPanelProps {
   canUndoLastAiEdit?: boolean
   lastCommandOp?: DocumentPatchOperation | null
   canUndoLastCommand?: boolean
+  promptValue: string
+  onPromptChange: (value: string) => void
   onUndoLastAiEdit?: () => void
   onUndoLastCommand?: () => void
   onContinueWriting?: (instruction?: string) => Promise<void> | void
@@ -193,9 +280,22 @@ interface DocumentAiEditPanelProps {
 }
 
 function providerLabel(provider?: 'remote' | 'workspace'): string {
-  if (provider === 'remote') return '远端知识库'
-  if (provider === 'workspace') return '工作区附件'
-  return '未标注来源'
+  if (provider === 'remote') return '知识库'
+  if (provider === 'workspace') return '附件'
+  return '引用来源'
+}
+
+function summarizeText(text?: string, limit = 96): string {
+  const normalized = String(text || '').replace(/\s+/g, ' ').trim()
+  if (!normalized) return ''
+  return normalized.length > limit ? `${normalized.slice(0, limit)}…` : normalized
+}
+
+function formatTime(value?: string | null): string {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString()
 }
 
 export function DocumentAiEditPanel({
@@ -219,6 +319,8 @@ export function DocumentAiEditPanel({
   canUndoLastAiEdit,
   lastCommandOp,
   canUndoLastCommand,
+  promptValue,
+  onPromptChange,
   onUndoLastAiEdit,
   onUndoLastCommand,
   onContinueWriting,
@@ -226,119 +328,242 @@ export function DocumentAiEditPanel({
   onGenerate,
   onSubmit,
 }: DocumentAiEditPanelProps) {
+  const hasCurrentParagraph = Boolean(
+    selectedBlockId
+    && selectedBlockText?.trim()
+    && ['paragraph', 'quote', 'list-item'].includes(selectedBlockRole || ''),
+  )
+
   const resolvedScope = useMemo<DocumentAiScope | null>(() => {
     if (!hasDocument) return null
     if (selectionLength > 0) return 'selection'
-    if (selectedSectionId) return 'section'
-    return null
-  }, [hasDocument, selectedSectionId, selectionLength])
+    if (hasCurrentParagraph || selectedSectionId) return 'section'
+    return 'document'
+  }, [hasCurrentParagraph, hasDocument, selectedSectionId, selectionLength])
 
   const scopeLabel = (() => {
     if (!hasDocument) return '新文稿'
-    if (selectionLength > 0) return `已选中 ${selectionLength} 字`
-    if (selectedSectionId) return `当前章节：${selectedSectionLabel}`
+    if (selectionLength > 0) return '已选中文字'
+    if (hasCurrentParagraph) return '当前段落'
+    if (selectedSectionId) return '当前章节'
     return '全文'
   })()
 
-  const lastInstruction = useMemo(() => {
-    if (lastCommandOp?.instruction) return lastCommandOp.instruction
-    return [...history].reverse().find((item) => item.role === 'user')?.text || ''
-  }, [history, lastCommandOp])
+  const focusPreview = selectionLength > 0
+    ? summarizeText(selectedText, 140)
+    : hasCurrentParagraph
+      ? summarizeText(selectedBlockText, 140)
+      : selectedSectionId
+        ? `将对“${selectedSectionLabel}”执行操作。`
+        : '将对整篇文稿执行操作。'
+
+  const promptHint = !hasDocument
+    ? '直接描述你要生成的文稿，例如：帮我生成一份年度总结。'
+    : selectionLength > 0
+      ? '当前会优先改写已选中的文字。'
+      : hasCurrentParagraph
+        ? '当前会优先改写光标所在段落；也可直接继续写或补充引用。'
+        : selectedSectionId
+          ? `当前会作用于章节“${selectedSectionLabel}”。`
+          : '未选中内容时，默认作用于全文。'
+
+  const recentHistory = useMemo(
+    () => [...history].reverse().slice(0, 6),
+    [history],
+  )
+
+  const visibleReferences = useMemo(() => {
+    const citedRefIds = new Set(citations.map((item) => item.refId))
+    const preferred = citedRefIds.size > 0
+      ? references.filter((reference) => citedRefIds.has(reference.id))
+      : references
+    return preferred.slice(0, 6)
+  }, [citations, references])
+
+  const handlePrimarySubmit = useCallback(async () => {
+    const instruction = promptValue.trim()
+    if (!instruction) return
+    if (!hasDocument) {
+      await onGenerate(instruction)
+      onPromptChange('')
+      return
+    }
+    await onSubmit(instruction, resolvedScope || 'document')
+    onPromptChange('')
+  }, [hasDocument, onGenerate, onPromptChange, onSubmit, promptValue, resolvedScope])
+
+  const runQuickAction = useCallback(async (kind: 'polish' | 'expand' | 'shorten' | 'formalize' | 'cite' | 'continue') => {
+    if (!hasDocument) return
+    if (kind === 'continue') {
+      await onContinueWriting?.()
+      return
+    }
+    if (kind === 'cite') {
+      if (references[0] && onInsertCitation) {
+        onInsertCitation(references[0])
+        return
+      }
+      await onSubmit('请给当前内容添加引用。', resolvedScope || 'section')
+      return
+    }
+
+    const instructionMap: Record<'polish' | 'expand' | 'shorten' | 'formalize', string> = {
+      polish: '请润色当前内容，让表达更顺滑、自然、清晰。',
+      expand: '请扩写当前内容，补充更多细节和依据。',
+      shorten: '请缩写当前内容，保留关键信息并更精炼。',
+      formalize: '请把当前内容改得更正式，符合中文办公文稿风格。',
+    }
+    await onSubmit(instructionMap[kind], resolvedScope || 'document')
+  }, [hasDocument, onContinueWriting, onInsertCitation, onSubmit, references, resolvedScope])
 
   return (
     <Panel data-testid="document-ai-edit-panel">
       <PanelHeader>
         <PanelTitle>AI 文稿助手</PanelTitle>
-        <ScopeBadgeRow>
-          <ScopeBadge>{scopeLabel}</ScopeBadge>
-          {selectionLength > 0
-            ? <ScopeBadge $tone="warn">选中文字将被替换</ScopeBadge>
-            : hasDocument && !selectedSectionId
-              ? <ScopeBadge>请点击章节或选中文字</ScopeBadge>
-              : null}
-        </ScopeBadgeRow>
+        <PanelDescription>在这里统一生成初稿、改写当前内容、继续写，以及把知识来源插入文稿。</PanelDescription>
       </PanelHeader>
 
       <ScrollRegion>
-        <InspectorSection data-testid="document-current-location">
-          <InspectorTitle>当前定位</InspectorTitle>
-          <MetaLine>{selectedSectionId ? `章节：${selectedSectionLabel}` : '章节：全文'}</MetaLine>
-          <MetaLine>{selectedBlockId ? `Block：${selectedBlockRole || 'paragraph'} · ${selectedBlockId}` : 'Block：未选中'}</MetaLine>
-          {selectedBlockText ? <MetaLine>{selectedBlockText.slice(0, 80)}</MetaLine> : null}
-        </InspectorSection>
+        <SectionCard data-testid="document-current-focus">
+          <SectionTitle>当前选中</SectionTitle>
+          <FocusBadgeRow>
+            <FocusBadge>{scopeLabel}</FocusBadge>
+            {selectionLength > 0 ? <FocusBadge $tone="warn">将替换已选中文字</FocusBadge> : null}
+          </FocusBadgeRow>
+          {hasDocument ? (
+            <MetaGrid>
+              <MetaLabel>{selectedSectionId ? `当前位置：${selectedSectionLabel}` : '当前位置：全文'}</MetaLabel>
+              {focusPreview ? <PreviewBox>{focusPreview}</PreviewBox> : null}
+            </MetaGrid>
+          ) : (
+            <MetaLabel>输入需求后可直接生成新文稿。</MetaLabel>
+          )}
+        </SectionCard>
 
-        <InspectorSection data-testid="document-save-status">
-          <InspectorTitle>保存状态</InspectorTitle>
-          <MetaLine>{saving ? '状态：保存中' : dirty ? '状态：有未保存修改' : '状态：已保存 / 已同步本地草稿'}</MetaLine>
-          {lastSavedAt ? <MetaLine>最近保存：{new Date(lastSavedAt).toLocaleString()}</MetaLine> : null}
-          {statusMessage ? <MetaLine>提示：{statusMessage}</MetaLine> : null}
-        </InspectorSection>
-
-        <InspectorSection data-testid="document-last-command-inspector">
-          <InspectorTitle>上一次指令</InspectorTitle>
-          {lastInstruction ? <MetaLine>原始指令：{lastInstruction}</MetaLine> : <MetaLine>暂无指令记录</MetaLine>}
-          {lastCommandOp ? (
-            <>
-              <MetaLine>Intent：{lastCommandOp.intent}</MetaLine>
-              <MetaLine>作用块：{lastCommandOp.blockIds.join('、') || '—'}</MetaLine>
-              <MetaLine>影响数量：{lastCommandOp.blockIds.length} 个 block</MetaLine>
-              <MetaLine>AI 调用：{lastCommandOp.aiCalled ? '是' : '否'}</MetaLine>
-              <MetaLine>可撤销：{canUndoLastCommand ? '是' : '否'}</MetaLine>
-              <MetaLine data-testid="document-last-command-card">
-                {lastCommandOp.summary} · intent：{lastCommandOp.intent}
-              </MetaLine>
-            </>
-          ) : null}
-        </InspectorSection>
-
-        <InspectorSection data-testid="document-undo-status">
-          <InspectorTitle>可撤销状态</InspectorTitle>
-          <MetaLine>上次 AI 修改：{canUndoLastAiEdit ? '可撤回' : '无可撤回项'}</MetaLine>
-          <MetaLine>上次指令操作：{canUndoLastCommand ? '可撤销' : '无可撤销项'}</MetaLine>
-          {canUndoLastAiEdit ? <QuickBtn type="button" disabled={busy || disabled} onClick={onUndoLastAiEdit}>撤回 AI 修改</QuickBtn> : null}
-          {canUndoLastCommand ? <QuickBtn type="button" disabled={busy || disabled} onClick={onUndoLastCommand}>撤销指令操作</QuickBtn> : null}
-        </InspectorSection>
-
-        {references.length > 0 || citations.length > 0 ? (
-          <InspectorSection data-testid="document-reference-panel">
-            <InspectorTitle>引用来源</InspectorTitle>
-            {citations.length > 0 ? <MetaLine>当前文稿引用 {citations.length} 条</MetaLine> : null}
-            <RefList>
-              {references.map((reference) => (
-                <RefCard key={reference.id}>
-                  <RefLabel>{reference.label}</RefLabel>
-                  <RefMeta>来源：{providerLabel(reference.provider)} · {reference.sourceType || reference.kind}</RefMeta>
-                  <RefMeta>sourceId: {reference.sourceId || '手动来源'}</RefMeta>
-                  <RefMeta>chunkId: {reference.chunkId || '待检索'} · trustLevel: {reference.trustLevel || reference.citationStatus || 'unknown'}</RefMeta>
-                  {reference.citedBlockIds?.length ? <RefMeta>引用段落：{reference.citedBlockIds.join('、')}</RefMeta> : null}
-                  {reference.excerpt ? <RefMeta>{reference.excerpt}</RefMeta> : null}
-                  {onInsertCitation ? (
-                    <QuickBtn
-                      type="button"
-                      disabled={busy || disabled || !selectedBlockId}
-                      onClick={() => onInsertCitation(reference)}
-                    >
-                      插入引用
-                    </QuickBtn>
-                  ) : null}
-                </RefCard>
-              ))}
-            </RefList>
-            {citations.length > 0 ? (
-              <CitationList>
-                {citations.slice(0, 6).map((citation) => (
-                  <RefCard key={citation.id}>
-                    <RefLabel>{citation.text || citation.id}</RefLabel>
-                    <RefMeta>{citation.renderMode} · blockId: {citation.blockId}</RefMeta>
-                    <RefMeta>来源：{providerLabel(citation.provider)}</RefMeta>
-                    <RefMeta>sourceId: {citation.sourceId || 'manual'} · chunkId: {citation.chunkId || '待检索'} · trustLevel: {citation.trustLevel || 'unknown'}</RefMeta>
-                  </RefCard>
-                ))}
-              </CitationList>
+        <SectionCard data-testid="document-save-status">
+          <SectionTitle>保存状态</SectionTitle>
+          <MetaGrid>
+            <MetaLabel>{saving ? '正在保存…' : dirty ? '有未保存修改' : '内容已保存'}</MetaLabel>
+            {lastSavedAt ? <MetaLabel>最近保存：{formatTime(lastSavedAt)}</MetaLabel> : null}
+            {statusMessage ? <MetaLabel>{statusMessage}</MetaLabel> : null}
+            {(lastCommandOp?.summary || canUndoLastAiEdit || canUndoLastCommand) ? (
+              <ActionGrid>
+                {lastCommandOp?.summary ? <FocusBadge>{lastCommandOp.summary}</FocusBadge> : null}
+                {canUndoLastAiEdit ? (
+                  <QuickBtn type="button" disabled={busy || disabled} onClick={onUndoLastAiEdit}>
+                    撤回 AI 修改
+                  </QuickBtn>
+                ) : null}
+                {canUndoLastCommand ? (
+                  <QuickBtn type="button" disabled={busy || disabled} onClick={onUndoLastCommand}>
+                    撤销上一步
+                  </QuickBtn>
+                ) : null}
+              </ActionGrid>
             ) : null}
-          </InspectorSection>
-        ) : null}
+          </MetaGrid>
+        </SectionCard>
 
+        <SectionCard data-testid="document-ai-actions">
+          <SectionTitle>快捷操作</SectionTitle>
+          <ActionGrid>
+            <QuickBtn type="button" disabled={busy || disabled || !hasDocument} onClick={() => void runQuickAction('polish')}>
+              润色
+            </QuickBtn>
+            <QuickBtn type="button" disabled={busy || disabled || !hasDocument} onClick={() => void runQuickAction('expand')}>
+              扩写
+            </QuickBtn>
+            <QuickBtn type="button" disabled={busy || disabled || !hasDocument} onClick={() => void runQuickAction('shorten')}>
+              缩写
+            </QuickBtn>
+            <QuickBtn type="button" disabled={busy || disabled || !hasDocument} onClick={() => void runQuickAction('formalize')}>
+              改正式
+            </QuickBtn>
+            <QuickBtn type="button" disabled={busy || disabled || !hasDocument} onClick={() => void runQuickAction('cite')}>
+              加引用
+            </QuickBtn>
+            <QuickBtn type="button" disabled={busy || disabled || !hasDocument || !onContinueWriting} onClick={() => void runQuickAction('continue')}>
+              继续写
+            </QuickBtn>
+          </ActionGrid>
+        </SectionCard>
+
+        <SectionCard data-testid="document-ai-prompt">
+          <SectionTitle>{hasDocument ? '输入修改指令' : '生成新文稿'}</SectionTitle>
+          <PromptBox>
+            <PromptTextarea
+              value={promptValue}
+              data-testid="document-generation-prompt"
+              onChange={(event) => onPromptChange(event.target.value)}
+              placeholder={hasDocument
+                ? '例如：把这段改得更正式，并补充一条依据。'
+                : '例如：帮我生成一份年度总结，包含主要成绩、问题分析和下一步计划。'}
+            />
+            <PromptFooter>
+              <PromptHint>{promptHint}</PromptHint>
+              <SubmitButton
+                type="button"
+                data-testid="document-generate-button"
+                disabled={busy || disabled || !promptValue.trim()}
+                onClick={() => void handlePrimarySubmit()}
+              >
+                {busy ? '处理中…' : hasDocument ? '发送给 AI' : '生成文稿'}
+              </SubmitButton>
+            </PromptFooter>
+          </PromptBox>
+        </SectionCard>
+
+        <SectionCard data-testid="document-ai-history">
+          <SectionTitle>最近操作历史</SectionTitle>
+          {recentHistory.length > 0 ? (
+            <HistoryList>
+              {recentHistory.map((item, index) => (
+                <Bubble key={`${item.role}-${index}-${item.text.slice(0, 24)}`} $role={item.role}>
+                  <BubbleLabel>{item.role === 'user' ? '你' : 'AI 助手'}</BubbleLabel>
+                  {item.text}
+                </Bubble>
+              ))}
+            </HistoryList>
+          ) : (
+            <EmptyHint>这里会显示最近的生成、改写、续写和引用操作记录。</EmptyHint>
+          )}
+        </SectionCard>
+
+        {(visibleReferences.length > 0 || citations.length > 0) ? (
+          <SectionCard data-testid="document-reference-panel">
+            <SectionTitle>引用来源</SectionTitle>
+            {visibleReferences.length > 0 ? (
+              <SourceList>
+                {visibleReferences.map((reference) => (
+                  <SourceCard key={reference.id}>
+                    <SourceTitle>{reference.label}</SourceTitle>
+                    <SourceMeta>{providerLabel(reference.provider)}</SourceMeta>
+                    <SourceMeta>{summarizeText(reference.excerpt, 140) || '已选为当前文稿可用来源。'}</SourceMeta>
+                    {onInsertCitation ? (
+                      <QuickBtn
+                        type="button"
+                        disabled={busy || disabled || !selectedBlockId}
+                        onClick={() => onInsertCitation(reference)}
+                      >
+                        插入引用
+                      </QuickBtn>
+                    ) : null}
+                  </SourceCard>
+                ))}
+              </SourceList>
+            ) : (
+              <SourceList>
+                {citations.slice(0, 6).map((citation) => (
+                  <SourceCard key={citation.id}>
+                    <SourceTitle>{citation.text || '已插入引用'}</SourceTitle>
+                    <SourceMeta>{providerLabel(citation.provider)}</SourceMeta>
+                    <SourceMeta>该来源已插入到当前文稿中。</SourceMeta>
+                  </SourceCard>
+                ))}
+              </SourceList>
+            )}
+          </SectionCard>
+        ) : null}
       </ScrollRegion>
     </Panel>
   )

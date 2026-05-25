@@ -9,6 +9,7 @@ import {
   type ArtifactSourceRef,
 } from '../artifacts/ArtifactStore'
 import { assertWorkspaceAccess } from './workspaceAccess'
+import { GENERATED_FILE_MIRROR_EXTS, registerUserFile } from './userFiles'
 
 export interface SaveSkillArtifactInput {
   userId: string
@@ -76,5 +77,26 @@ export function saveSkillArtifact(input: SaveSkillArtifactInput): Artifact {
     documentId: input.documentId,
   }
   saveArtifactMetadata(artifact)
+
+  const ext = path.extname(input.filename).slice(1).toLowerCase()
+  if (GENERATED_FILE_MIRROR_EXTS.has(ext)) {
+    try {
+      const buffer = typeof input.content === 'string'
+        ? Buffer.from(input.content, 'utf-8')
+        : input.content
+      registerUserFile({
+        userId: input.userId,
+        workspacePath: input.workspacePath,
+        filename: input.filename,
+        content: buffer,
+        sourceArtifactId: artifactId,
+        generated: true,
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.warn(`[artifact-mirror] failed to mirror ${artifactId} to user files: ${message}`)
+    }
+  }
+
   return artifact
 }

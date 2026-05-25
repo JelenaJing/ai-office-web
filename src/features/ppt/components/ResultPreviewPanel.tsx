@@ -34,15 +34,18 @@ import { isWebShim } from '../../../platform/detect'
 import { platformApi } from '../../../platform'
 import { artifactDownloadFilename, artifactHasExport } from '../../../utils/artifactDisplay'
 import { webMigrationLabel } from '../../../platform/webMigration'
-import { buildNearbySlidesContext, mergeDeckIntoLiveSlides, replaceSlideInPreviews } from '../services/webDeckSlides'
+import { buildNearbySlidesContext, mergeDeckIntoLiveSlides, parseSlidevMarkdownToPreviews, replaceSlideInPreviews } from '../services/webDeckSlides'
 import {
   downloadProtectedResource,
   editWebPptSlide,
   exportWebPptDeck,
   openProtectedHtmlPreview,
+  rebuildSlidevPreview,
   retemplateWebPptDeck,
+  runWebPptxCreate,
 } from '../services/pptWebGeneration'
 import { buildPptTemplateOptions, resolvePptTemplateId, resolvePptTemplateLabel } from '../services/pptTemplates'
+import { resolveWebApiUrl } from '../../../runtime/apiBase'
 
 const Shell = styled.section`
   flex: 1;
@@ -663,7 +666,7 @@ export default function ResultPreviewPanel() {
   const { currentMode, enterPptGenerationMode } = useWorkspaceMode()
   const workbench = useGenerationWorkbench()
   const knowledge = useKnowledge()
-  const { activeWorkspacePath, refreshTree } = useWorkspace()
+  const { activeWorkspacePath, openWorkspace, refreshTree } = useWorkspace()
   const { tabs, activeTabId, mainTabId, setStatusMessage } = useDocument()
   const { saveActiveDocument, saveActiveDocumentAs } = useDocumentEngineHostCommands()
   const { runtime } = useDocumentEngineRuntime()
@@ -709,7 +712,29 @@ export default function ResultPreviewPanel() {
   const pptOriginalFileName = workbench.sessions.ppt.pptOriginalFileName
   const pptImportStatus = workbench.sessions.ppt.pptImportStatus
   const pptImportWarnings = workbench.sessions.ppt.pptImportWarnings
-  const effectivePptSlides = pptSlides.length > 0 ? pptSlides : pptLiveSlides
+  const basePptSlides = pptSlides.length > 0 ? pptSlides : pptLiveSlides
+  const slidevDerivedSlides = useMemo(() => {
+    if (pptEngine !== 'slidev' && pptOutputMode !== 'web_deck') return []
+    if (basePptSlides.length > 0) return basePptSlides
+    if (pptSlidevMarkdown?.trim()) {
+      return parseSlidevMarkdownToPreviews(pptSlidevMarkdown, workbench.resultTitle || undefined)
+    }
+    return []
+  }, [basePptSlides, pptEngine, pptOutputMode, pptSlidevMarkdown, workbench.resultTitle])
+  const effectivePptSlides = slidevDerivedSlides.length > 0 ? slidevDerivedSlides : basePptSlides
+
+  useEffect(() => {
+    if (pptEngine !== 'slidev' && pptOutputMode !== 'web_deck') return
+    if (basePptSlides.length > 0 || slidevDerivedSlides.length === 0) return
+    workbench.setModeSession('ppt', (session) => ({
+      ...session,
+      pptSlides: slidevDerivedSlides,
+      pptLiveSlides: slidevDerivedSlides,
+      pptTotalSlides: slidevDerivedSlides.length,
+      pptOutputMode: session.pptOutputMode || 'web_deck',
+    }))
+  }, [basePptSlides.length, pptEngine, pptOutputMode, slidevDerivedSlides, workbench])
+
   const pptTemplateOptions = useMemo(() => buildPptTemplateOptions(), [])
   const activePptTemplateId = resolvePptTemplateId(pptActiveTemplateManifestId)
   const activePptTemplateLabel = resolvePptTemplateLabel(activePptTemplateId, pptTemplateOptions)
@@ -882,7 +907,10 @@ export default function ResultPreviewPanel() {
     return normalized.toLowerCase().endsWith('.pptx') ? normalized : `${normalized}.pptx`
   }
 
-  const ensureSlidevFilename = (name: string | null | undefined, suffix: '.slidev.md' | '.slidev.html') => {
+  const ensureSlidevFilename = (
+    name: string | null | undefined,
+    suffix: '.slidev.md' | '.slidev.html' | '.pdf' | '.png',
+  ) => {
     const stem = sanitizeFileStem(String(name || '').trim() || '演示文稿') || '演示文稿'
     return stem.toLowerCase().endsWith(suffix) ? stem : `${stem}${suffix}`
   }
@@ -1235,7 +1263,226 @@ export default function ResultPreviewPanel() {
     }))
   }, [workbench])
 
-  const handlePptSelectSlide= useCallback((index: number) => {
+  const handleNewPpt = useCallback(() => {
+    workbench.resetCurrentModeSession({ preserveSelections: true, preservePrompt: false })
+    workbench.setGenerationStatus('idle', '已清空当前 PPT，可在中间输入框新建演示。')
+    setPreviewMessage('已新建空白 PPT。请在中间输入框输入主题后点击「生成 PPT」。')
+  }, [workbench])
+
+  useEffect(() => {
+    const handler = () => handleNewPpt()
+    window.addEventListener('workspace-new-ppt', handler)
+    return () => window.removeEventListener('workspace-new-ppt', handler)
+  }, [handleNewPpt])
+
+  const handleGeneratePptWeb = useCallback(async (prompt: string) => {
+    const rawUserPrompt = prompt.trim()
+    if (!rawUserPrompt) {
+      setPreviewMessage('请输入演示内容后再生成。')
+      return
+    }
+    if (!isWebShim()) {
+      setPreviewMessage('请在 Web 环境中使用 Slidev 生成。')
+      return
+    }
+
+    workbench.setGenerationPrompt(rawUserPrompt)
+    workbench.setGenerationStatus('running', '正在通过服务器生成 Slidev 网页演示…')
+    workbench.clearCurrentResult()
+    workbench.setModeSession('ppt', (session) => ({
+      ...session,
+      pptTaskStatus: 'generating_deck',
+      pptGenerationProgress: 0,
+      pptDeckId: null,
+      pptArtifactId: null,
+      pptDownloadUrl: null,
+      pptEngine: 'slidev',
+      pptFallbackFrom: null,
+      pptFallbackReason: null,
+      pptOutputMode: 'web_deck',
+      pptPreviewUrl: null,
+      pptSlidevMarkdown: null,
+      pptDiagnostics: null,
+      pptSlides: [],
+      pptLiveSlides: [],
+      pptPreviewSlides: [],
+      pptTotalSlides: 0,
+      pptActiveSlideIndex: 0,
+      pptEditMessages: {},
+      pptDirty: false,
+      pptEditingSlideId: null,
+      pptSlideEditStatus: 'idle',
+      pptDeckDocumentId: null,
+    }))
+
+    try {
+      let workspacePath = activeWorkspacePath
+      const currentUserId = platformApi.auth.getCurrentUser()?.id ?? null
+      if (!workspacePath && currentUserId) {
+        const defaultWorkspace = await platformApi.workspaces.getDefault()
+        workspacePath = defaultWorkspace?.path || ''
+        if (workspacePath) {
+          await openWorkspace(workspacePath)
+        }
+      }
+      if (!workspacePath) {
+        throw new Error('请先创建或打开工作区后再生成 PPT')
+      }
+
+      const title = rawUserPrompt.slice(0, 40) || '演示文稿'
+      const result = await runWebPptxCreate({
+        workspacePath,
+        title,
+        prompt: rawUserPrompt,
+        engine: 'slidev',
+        outputMode: 'web_deck',
+        onProgress: (update) => {
+          const partial = update.data
+          workbench.setGenerationStatus('running', update.message)
+          if (!partial?.deckId) {
+            workbench.setModeSession('ppt', (session) => ({
+              ...session,
+              pptTaskStatus: 'generating_deck',
+              pptGenerationProgress: update.progress,
+              pptEngine: 'slidev',
+              pptOutputMode: 'web_deck',
+            }))
+            return
+          }
+          const partialSlides = mergeDeckIntoLiveSlides(partial, [])
+          const markdownSlides = partial.slidevMarkdown?.trim()
+            ? parseSlidevMarkdownToPreviews(partial.slidevMarkdown, title)
+            : []
+          const nextSlides = partialSlides.length > 0 ? partialSlides : markdownSlides
+          workbench.setModeSession('ppt', (session) => ({
+            ...session,
+            pptTaskStatus: 'generating_deck',
+            pptGenerationProgress: update.progress,
+            pptDeckId: partial.deckId || session.pptDeckId,
+            pptEngine: 'slidev',
+            pptOutputMode: 'web_deck',
+            pptPreviewUrl: partial.previewUrl || session.pptPreviewUrl,
+            pptSlidevMarkdown: partial.slidevMarkdown || session.pptSlidevMarkdown,
+            pptSlides: nextSlides.length > 0 ? nextSlides : session.pptSlides,
+            pptLiveSlides: nextSlides.length > 0 ? nextSlides : session.pptLiveSlides,
+            pptTotalSlides: nextSlides.length || session.pptTotalSlides,
+            pptDeckDocumentId: partial.deckId || session.pptDeckDocumentId,
+          }))
+        },
+      })
+
+      if (!result.success) {
+        const err = result.error || 'PPT 生成失败'
+        workbench.setGenerationStatus('error', err)
+        workbench.setModeSession('ppt', (session) => ({ ...session, pptTaskStatus: 'failed' }))
+        setPreviewMessage(err)
+        return
+      }
+
+      const resultData = result.data
+      if (!result.artifact?.id && !resultData?.deckId) {
+        const err = result.error || 'PPT 生成失败：缺少 deck 结果'
+        workbench.setGenerationStatus('error', err)
+        workbench.setModeSession('ppt', (session) => ({ ...session, pptTaskStatus: 'failed' }))
+        setPreviewMessage(err)
+        return
+      }
+
+      const artifact = result.artifact || {
+        id: resultData?.artifact?.id || resultData?.deckId || 'slidev-deck',
+        title: resultData?.deck?.title || title,
+        exports: resultData?.exportUrl ? [{ url: resultData.exportUrl, format: 'md' }] : [],
+      } as typeof result.artifact
+      const deck = resultData?.deck
+      const deckId = resultData?.deckId || null
+      const previewUrl = resultData?.previewUrl || null
+      const slidevMarkdown = resultData?.slidevMarkdown || null
+      const liveSlides = mergeDeckIntoLiveSlides(resultData || deck || null, [])
+      const markdownSlides = slidevMarkdown?.trim()
+        ? parseSlidevMarkdownToPreviews(slidevMarkdown, title)
+        : []
+      const resolvedSlides = liveSlides.length > 0 ? liveSlides : markdownSlides
+      const downloadUrl = resultData?.exportUrl
+        || artifact.exports?.[0]?.url
+        || (deckId ? `/api/ppt/decks/${deckId}/download` : null)
+      if (!downloadUrl && !previewUrl) {
+        throw new Error('PPT 任务已完成，但下载/预览链接缺失。')
+      }
+
+      workbench.setModeSession('ppt', (session) => ({
+        ...session,
+        pptTaskStatus: 'completed',
+        pptGenerationProgress: 100,
+        pptDeckId: deckId,
+        pptArtifactId: artifact?.id || null,
+        pptDownloadUrl: downloadUrl || artifact.exports?.[0]?.url || null,
+        pptEngine: 'slidev',
+        pptOutputMode: 'web_deck',
+        pptPreviewUrl: previewUrl,
+        pptSlidevMarkdown: slidevMarkdown,
+        resultType: 'pptx',
+        resultAssetId: artifact?.id || null,
+        resultPath: downloadUrl || previewUrl || '',
+        resultTitle: (artifact?.title as string | undefined) || title,
+        pptSlides: resolvedSlides,
+        pptLiveSlides: resolvedSlides,
+        pptTotalSlides: resolvedSlides.length,
+        pptActiveSlideIndex: 0,
+        pptEditingSlideId: resolvedSlides[0]?.id || null,
+        pptDeckDocumentId: deckId,
+        pptDirty: false,
+        lastUpdatedAt: new Date().toISOString(),
+      }))
+      workbench.setGenerationStatus('completed', '生成引擎：Slidev 网页演示')
+      setPreviewMessage('Slidev 网页演示已生成')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'PPT 生成失败'
+      workbench.setGenerationStatus('error', message)
+      workbench.setModeSession('ppt', (session) => ({ ...session, pptTaskStatus: 'failed' }))
+      setPreviewMessage(message)
+    }
+  }, [activeWorkspacePath, openWorkspace, workbench])
+
+  const handleRegenerateSlidevPreview = useCallback(async () => {
+    const deckId = pptDeckId || pptDeckDocumentId
+    const markdown = pptSlidevMarkdown?.trim()
+    if (!deckId || !markdown) {
+      const fallbackPrompt = workbench.generationPrompt.trim()
+      if (fallbackPrompt) {
+        await handleGeneratePptWeb(fallbackPrompt)
+        return
+      }
+      setPreviewMessage('缺少 deck 或 Markdown，请点击「新建 PPT」后在中间输入框重新生成。')
+      return
+    }
+    setPreviewMessage('正在重建 Slidev 预览…')
+    const rebuilt = await rebuildSlidevPreview({
+      deckId,
+      title: workbench.resultTitle || workbench.generationPrompt.slice(0, 40) || '演示文稿',
+      slidevMarkdown: markdown,
+      workspacePath: activeWorkspacePath || undefined,
+    })
+    if (!rebuilt.success || !rebuilt.previewUrl) {
+      setPreviewMessage(rebuilt.error || '预览重建失败，请在中间输入框重新生成 PPT。')
+      return
+    }
+    workbench.setModeSession('ppt', (session) => ({
+      ...session,
+      pptPreviewUrl: rebuilt.previewUrl,
+      pptOutputMode: 'web_deck',
+      pptEngine: 'slidev',
+    }))
+    setPreviewMessage(rebuilt.slidevPreviewMode === 'official' ? '已恢复 Slidev 官方预览' : '已恢复 HTML 预览')
+  }, [
+    activeWorkspacePath,
+    handleGeneratePptWeb,
+    pptDeckDocumentId,
+    pptDeckId,
+    pptSlidevMarkdown,
+    workbench,
+  ])
+
+  const handlePptSelectSlide = useCallback((index: number) => {
     const slide = effectivePptSlides[index]
     workbench.setModeSession('ppt', (session) => ({
       ...session,
@@ -1397,35 +1644,36 @@ export default function ResultPreviewPanel() {
       return
     }
 
-    let downloadUrl = slidevPreviewUrl
-    if (pptDirty || !downloadUrl) {
+    try {
       const result = await exportWebPptDeck({ deckId, engine: 'slidev', format: 'html' })
       if (!result.success) {
         setPreviewMessage(result.error || 'Slidev HTML 下载失败')
         return
       }
+      const downloadUrl = result.exportUrl || `/api/ppt/decks/${encodeURIComponent(deckId)}/slidev-official.zip`
+      const officialPreviewUrl = (
+        result.previewUrl && result.previewUrl.includes('/slidev-access/')
+          ? result.previewUrl
+          : (slidevPreviewUrl && slidevPreviewUrl.includes('/slidev-access/') ? slidevPreviewUrl : result.previewUrl)
+      )
       const nextSlides = result.deck ? mergeDeckIntoLiveSlides(result, effectivePptSlides) : effectivePptSlides
-      downloadUrl = result.exportUrl || result.previewUrl || slidevPreviewUrl
+      const markdownSlides = result.slidevMarkdown?.trim()
+        ? parseSlidevMarkdownToPreviews(result.slidevMarkdown, workbench.resultTitle || undefined)
+        : []
+      const resolvedSlides = nextSlides.length > 0 ? nextSlides : markdownSlides
       workbench.setModeSession('ppt', (session) => ({
         ...session,
-        pptSlides: nextSlides,
-        pptLiveSlides: nextSlides,
-        pptDownloadUrl: result.exportUrl || session.pptDownloadUrl,
-        pptPreviewUrl: result.previewUrl || session.pptPreviewUrl,
+        pptSlides: resolvedSlides.length > 0 ? resolvedSlides : session.pptSlides,
+        pptLiveSlides: resolvedSlides.length > 0 ? resolvedSlides : session.pptLiveSlides,
+        pptTotalSlides: resolvedSlides.length || session.pptTotalSlides,
+        pptDownloadUrl: downloadUrl || session.pptDownloadUrl,
+        pptPreviewUrl: officialPreviewUrl || session.pptPreviewUrl,
         pptSlidevMarkdown: result.slidevMarkdown || session.pptSlidevMarkdown,
         pptDirty: false,
       }))
-    }
-
-    if (!downloadUrl) {
-      setPreviewMessage('当前没有可下载的 Slidev HTML 预览。')
-      return
-    }
-
-    try {
-      const filename = ensureSlidevFilename(workbench.resultTitle, '.slidev.html')
+      const filename = ensureSlidevFilename(workbench.resultTitle, '.slidev.zip')
       await downloadProtectedUrl(downloadUrl, filename)
-      setPreviewMessage(`已下载 ${filename}`)
+      setPreviewMessage(`已下载官方 Slidev 站点包 ${filename}`)
     } catch (error) {
       setPreviewMessage(error instanceof Error ? error.message : 'Slidev HTML 下载失败')
     }
@@ -1434,18 +1682,29 @@ export default function ResultPreviewPanel() {
     mergeDeckIntoLiveSlides,
     pptDeckDocumentId,
     pptDeckId,
-    pptDirty,
     slidevPreviewUrl,
     workbench,
   ])
 
   const handleOpenSlidevPreview = useCallback(async () => {
-    if (!slidevPreviewUrl) {
-      setPreviewMessage('当前没有可打开的 Slidev HTML 预览。')
+    const previewTarget = (
+      slidevPreviewUrl && slidevPreviewUrl.includes('/slidev-access/')
+        ? slidevPreviewUrl
+        : slidevPreviewUrl
+    )
+    if (!previewTarget) {
+      setPreviewMessage('当前没有可打开的 Slidev 预览。')
+      return
+    }
+    if (previewTarget.includes('/slidev-access/')) {
+      const opened = window.open(resolveWebApiUrl(previewTarget), '_blank', 'noopener,noreferrer')
+      if (!opened) {
+        setPreviewMessage('浏览器拦截了预览窗口，请允许弹窗后重试。')
+      }
       return
     }
     try {
-      await openProtectedHtmlPreview(slidevPreviewUrl)
+      await openProtectedHtmlPreview(previewTarget)
     } catch (error) {
       setPreviewMessage(error instanceof Error ? error.message : 'Slidev 预览打开失败')
     }
@@ -1458,8 +1717,23 @@ export default function ResultPreviewPanel() {
       return
     }
     const result = await exportWebPptDeck({ deckId, engine: 'slidev', format })
-    setPreviewMessage(result.message || result.error || 'Slidev 导出请求已提交')
-  }, [pptDeckDocumentId, pptDeckId])
+    if (result.success && result.exportUrl) {
+      const filename = ensureSlidevFilename(
+        workbench.resultTitle,
+        format === 'pdf' ? '.pdf' : format === 'png' ? '.png' : '.pptx',
+      )
+      await downloadProtectedUrl(result.exportUrl, filename)
+      if (result.previewUrl?.includes('/slidev-access/')) {
+        workbench.setModeSession('ppt', (session) => ({
+          ...session,
+          pptPreviewUrl: result.previewUrl || session.pptPreviewUrl,
+        }))
+      }
+      setPreviewMessage(result.message || `已下载 ${filename}`)
+      return
+    }
+    setPreviewMessage(result.error || result.message || 'Slidev 导出失败')
+  }, [pptDeckDocumentId, pptDeckId, workbench])
 
   const handleRetemplatePptDeck = useCallback(async (templateId: string) => {
     const deckId = pptDeckId || pptDeckDocumentId
@@ -2340,7 +2614,8 @@ export default function ResultPreviewPanel() {
           activeSlideIndex={pptActiveSlideIndex}
           templateStatusMessage={pptSkillApplyStatus || workbench.generationStatus.message}
           pptDeckId={pptDeckId}
-          pptOutputMode={pptOutputMode || undefined}
+          pptEngine={pptEngine || (isWebShim() ? 'slidev' : undefined)}
+          pptOutputMode={pptOutputMode || (isWebShim() ? 'web_deck' : undefined)}
           pptPreviewUrl={pptPreviewUrl || undefined}
           pptSlidevMarkdown={pptSlidevMarkdown || undefined}
           generationProgress={pptGenerationProgress}
@@ -2351,6 +2626,15 @@ export default function ResultPreviewPanel() {
           onExportSlidev={(format) => void handleExportSlidev(format)}
           onSelectSlide={handlePptSelectSlide}
           onAiEditSlide={handlePptEditSlideWithAi}
+          onGeneratePpt={(prompt) => void handleGeneratePptWeb(prompt)}
+          onNewPpt={handleNewPpt}
+          onRegeneratePreview={() => handleRegenerateSlidevPreview()}
+          onPreviewUrlChange={(url) => {
+            workbench.setModeSession('ppt', (session) => ({
+              ...session,
+              pptPreviewUrl: url,
+            }))
+          }}
         />
       </div>
     )

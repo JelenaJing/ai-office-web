@@ -1,5 +1,5 @@
 import React from 'react'
-import styled, { keyframes } from 'styled-components'
+import styled, { css, keyframes } from 'styled-components'
 
 const pulse = keyframes`
   0%, 100% { opacity: 0.45; }
@@ -54,7 +54,9 @@ const StepDot = styled.span<{ $state: 'pending' | 'active' | 'done' }>`
       : $state === 'active' ? '#3b82f6'
       : '#cbd5e1'
   )};
-  ${({ $state }) => ($state === 'active' ? `animation: ${pulse} 1.2s ease-in-out infinite;` : '')}
+  ${({ $state }) => ($state === 'active' ? css`
+    animation: ${pulse} 1.2s ease-in-out infinite;
+  ` : css``)}
 `
 
 const ProgressBar = styled.div`

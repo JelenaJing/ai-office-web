@@ -269,9 +269,7 @@ const TOOLBAR_ACTIONS: ToolbarAction[] = [
   { label: '标题', kind: 'exec', command: 'formatBlock', value: 'h2' },
   { label: '正文', kind: 'exec', command: 'formatBlock', value: 'p' },
   { label: '加粗', kind: 'exec', command: 'bold' },
-  { label: '斜体', kind: 'exec', command: 'italic' },
-  { label: '项目符号', kind: 'exec', command: 'insertUnorderedList' },
-  { label: '编号列表', kind: 'exec', command: 'insertOrderedList' },
+  { label: '列表', kind: 'exec', command: 'insertUnorderedList' },
   { label: '引用', kind: 'insert', html: '<blockquote data-block-type="quote"><p>请输入引用内容</p></blockquote><p><br /></p>' },
   {
     label: '表格',
@@ -288,8 +286,6 @@ const TOOLBAR_ACTIONS: ToolbarAction[] = [
     ].join(''),
   },
   { label: '图片', kind: 'image' },
-  { label: '插入分隔线', kind: 'exec', command: 'insertHorizontalRule' },
-  { label: '清空文档', kind: 'clear' },
 ]
 
 const ALLOWED_PASTE_TAGS = new Set([
@@ -981,7 +977,7 @@ export const DocumentEditorCanvas = forwardRef<DocumentEditorCanvasHandle, Docum
               {action.label}
             </ToolbarButton>
           ))}
-          <ToolbarHint>标题和正文都可直接编辑；刷新后会恢复本地草稿。</ToolbarHint>
+          <ToolbarHint>精简工具栏已保留常用写作能力；右侧 AI 助手可继续生成、改写和加引用。</ToolbarHint>
         </EditorToolbar>
         <Paper>
           <EditableRoot

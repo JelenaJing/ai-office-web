@@ -25,8 +25,12 @@ function resolveSlidevCliBin(): string {
 }
 
 function ensureRuntimeDependencies(): string | null {
-  const nodeModules = path.join(SLIDEV_RUNTIME_DIR, 'node_modules', '@slidev', 'cli')
-  if (fs.existsSync(nodeModules)) return null
+  const requiredPackages = [
+    path.join(SLIDEV_RUNTIME_DIR, 'node_modules', '@slidev', 'cli'),
+    path.join(SLIDEV_RUNTIME_DIR, 'node_modules', '@slidev', 'theme-default'),
+    path.join(SLIDEV_RUNTIME_DIR, 'node_modules', '@slidev', 'theme-seriph'),
+  ]
+  if (requiredPackages.every((pkgPath) => fs.existsSync(pkgPath))) return null
   console.info('[slidev-official] installing runtime dependencies…')
   const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm'
   const install = spawnSync(npmCmd, ['install', '--no-audit', '--no-fund'], {

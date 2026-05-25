@@ -11,7 +11,6 @@ import { useDocument } from './contexts/DocumentContext'
 import { FormalTemplateSessionProvider } from './modules/formal/contexts/FormalTemplateSessionContext'
 import { GenerationWorkbenchProvider } from './contexts/GenerationWorkbenchContext'
 import { WorkspaceModeProvider, useWorkspaceMode } from './contexts/WorkspaceModeContext'
-import { useLanguage } from './contexts/LanguageContext'
 import { useWorkspace } from './contexts/WorkspaceContext'
 import { syncToolSettingsToLocalStorage } from './utils/aiToolSettings'
 import { TerminalSquare, X } from 'lucide-react'
@@ -37,6 +36,7 @@ import AccountView from './pages/AccountView'
 import SkillManagementView from './pages/SkillManagementView'
 import CalendarWorkspace from './pages/CalendarWorkspace'
 import AIOSHome from './features/aios/components/AIOSHome'
+import HtmlPptPage from './web/pages/HtmlPptPage'
 import WebFeatureComingSoon from './components/WebFeatureComingSoon'
 import { isWebShim } from './platform/detect'
 import { isWebFeatureEnabled } from './platform/featureGate'
@@ -58,6 +58,7 @@ const WEB_SECTION_ROUTE_MAP: Partial<Record<PrimarySection, string>> = {
   account: '/account',
   'skill-center': '/skills',
   calendar: '/calendar',
+  'html-ppt': '/ppt',
 }
 
 function resolvePrimarySectionFromLocation(): PrimarySection {
@@ -175,6 +176,23 @@ const WorkspaceBackBtn = styled.button`
   &:hover { background: rgba(255,255,255,0.15); color: #fff; }
 `
 
+const WorkspaceActionBtn = styled.button`
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid rgba(255,255,255,0.22);
+  border-radius: 4px;
+  background: rgba(37, 99, 235, 0.35);
+  color: #f8fbff;
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+  &:hover { background: rgba(37, 99, 235, 0.5); }
+`
+
 const WorkspaceModeLabel = styled.span`
   font-size: var(--font-size-sm);
   color: rgba(180,205,230,0.7);
@@ -257,108 +275,6 @@ const ScenarioArea = styled.div`
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-`
-
-const StatusBar = styled.div`
-  height: 30px;
-  background: #ffffff;
-  border-top: 1px solid #dde3ec;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 12px;
-  flex-shrink: 0;
-  font-size: var(--font-size-xs);
-  color: #304255;
-`
-
-const StatusLeft = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 12px;
-`
-
-const StatusRight = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 10px;
-`
-
-const StatusItem = styled.span`
-  cursor: pointer;
-  padding: 0 4px;
-  &:hover { background: #eef3f9; }
-`
-
-const StatusActionButton = styled.button<{ $active?: boolean }>`
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 26px;
-  padding: 0 8px;
-  border: 1px solid ${p => p.$active ? '#9fc2e6' : '#cad6e2'};
-  border-radius: 4px;
-  background: ${p => p.$active ? '#eaf2fb' : '#ffffff'};
-  color: #304255;
-  font-size: var(--font-size-xs);
-  cursor: pointer;
-  &:hover { background: #eef4fb; }
-`
-
-const UserStatusItem = styled.span`
-  padding: 0 6px;
-  font-size: var(--font-size-xs);
-  color: #4a5f73;
-  font-weight: 600;
-`
-
-const LogoutButton = styled.button`
-  height: 26px;
-  padding: 0 8px;
-  border: 1px solid #e0c8c8;
-  border-radius: 4px;
-  background: #fff5f5;
-  color: #a03030;
-  font-size: var(--font-size-xs);
-  cursor: pointer;
-  &:hover { background: #ffe8e8; }
-`
-
-const WorkspaceChip = styled.div`
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 22px;
-  padding: 0 6px 0 8px;
-  border: 1px solid #c8d8ea;
-  border-radius: 10px;
-  background: #edf4fc;
-  font-size: var(--font-size-xs);
-  color: #2a4a6e;
-  font-weight: 500;
-  max-width: 180px;
-  overflow: hidden;
-`
-
-const WorkspaceChipName = styled.span`
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 600;
-`
-
-const WorkspaceSwitchBtn = styled.button`
-  flex-shrink: 0;
-  height: 24px;
-  padding: 0 7px;
-  border: 1px solid #b0c8e0;
-  border-radius: 7px;
-  background: #ffffff;
-  color: #1f6fd6;
-  font-size: var(--font-size-xs);
-  font-weight: 600;
-  cursor: pointer;
-  &:hover { background: #e8f0fb; }
 `
 
 const SettingsEntryBtn = styled.button<{ $active?: boolean }>`
@@ -573,17 +489,6 @@ function formatOutputTimestamp(value: string): string {
   return date.toLocaleTimeString('zh-CN', { hour12: false })
 }
 
-const LangSelect = styled.select`
-  padding: 1px 4px;
-  border: none;
-  background: transparent;
-  color: #304255;
-  font-size: var(--font-size-xs);
-  cursor: pointer;
-  outline: none;
-  option { background: #ffffff; color: #304255; }
-`
-
 const Launcher = styled.div`
   display: flex;
   align-items: center;
@@ -638,10 +543,7 @@ interface WriterWorkspaceRuntimeProps {
   runtimeStatus: string
   activeWorkspacePath: string | null
   closeWorkspace: () => void
-  language: 'zh' | 'en'
-  setLanguage: (language: 'zh' | 'en') => void
   markdown: string
-  onLogout: () => void
 }
 
 function WriterWorkspaceRuntime({
@@ -649,17 +551,14 @@ function WriterWorkspaceRuntime({
   runtimeStatus,
   activeWorkspacePath,
   closeWorkspace,
-  language,
-  setLanguage,
   markdown,
-  onLogout,
 }: WriterWorkspaceRuntimeProps) {
   const { mode, currentMode, generationMode, enterFreeMode } = useWorkspaceMode()
   const { generationStatus } = useGenerationWorkbench()
   const { departments, selectedDepartmentId, selectDepartment, loading: deptLoading } = useDepartment()
-  const internalSession = useInternalSession()
-  const internalUsername = internalSession?.user?.username
   const { activeWorkspaceName } = useWorkspace()
+  const internalSession = useInternalSession()
+  const internalUsername = internalSession?.user?.username ?? null
   const [primarySection, setPrimarySection] = useState<PrimarySection>(DEFAULT_PRIMARY_SECTION)
   const [returnToScene, setReturnToScene] = useState<PrimarySection>(DEFAULT_PRIMARY_SECTION)
   const [pendingAiosMatterId, setPendingAiosMatterId] = useState<string | null>(null)
@@ -932,6 +831,11 @@ function WriterWorkspaceRuntime({
               <AIOSHome initialMatterId={pendingAiosMatterId} />
             </ScenarioArea>
           )}
+          {primarySection === 'html-ppt' && (
+            <ScenarioArea>
+              <HtmlPptPage onBack={() => navigateTo('work')} />
+            </ScenarioArea>
+          )}
           {primarySection === 'work' && (
             <ScenarioArea>
               <WorkWorkspace onGoToWorkspace={goToWorkspace} onNavigate={navigateTo} />
@@ -993,7 +897,23 @@ function WriterWorkspaceRuntime({
           )}
           <WorkspaceArea $visible={primarySection === 'workspace'}>
             <WorkspaceTopBar>
-              <WorkspaceBackBtn onClick={() => navigateTo(returnToScene)}>← 返回</WorkspaceBackBtn>
+              <WorkspaceBackBtn type="button" onClick={() => navigateTo(returnToScene)}>← 返回</WorkspaceBackBtn>
+              {mode === 'free' ? (
+                <WorkspaceActionBtn
+                  type="button"
+                  onClick={() => window.dispatchEvent(new CustomEvent('workspace-new-document'))}
+                >
+                  新建文稿
+                </WorkspaceActionBtn>
+              ) : null}
+              {generationMode === 'ppt' ? (
+                <WorkspaceActionBtn
+                  type="button"
+                  onClick={() => window.dispatchEvent(new CustomEvent('workspace-new-ppt'))}
+                >
+                  新建 PPT
+                </WorkspaceActionBtn>
+              ) : null}
               <WorkspaceModeLabel>
                 {mode === 'free'
                   ? '文稿'
@@ -1041,7 +961,7 @@ function WriterWorkspaceRuntime({
                 <DocumentViewport>
                   <WorkspaceViewportHost ghostTextEnabled={false} />
                 </DocumentViewport>
-                {mode !== 'free' && generationMode !== 'ai-class' && generationMode !== 'ai-forum' && generationMode !== 'daily-feed' && <KnowledgeConversationDock />}
+                {mode !== 'free' && generationMode !== 'ai-class' && generationMode !== 'ai-forum' && generationMode !== 'daily-feed' && generationMode !== 'ppt' && <KnowledgeConversationDock />}
               </CenterColumn>
             </MainArea>
           </WorkspaceArea>
@@ -1109,42 +1029,12 @@ function WriterWorkspaceRuntime({
           <SkillDevPanel onClose={() => setSkillDevPanelOpen(false)} />
         </Suspense>
       )}
-      <StatusBar>
-        <StatusLeft>
-          {activeWorkspacePath && activeWorkspaceName && (
-            <WorkspaceChip title={activeWorkspacePath}>
-              <WorkspaceChipName>{activeWorkspaceName}</WorkspaceChipName>
-              <WorkspaceSwitchBtn onClick={closeWorkspace} title="切换工作区">切换</WorkspaceSwitchBtn>
-            </WorkspaceChip>
-          )}
-        </StatusLeft>
-        <StatusRight>
-          {IS_DEV && (
-            <StatusActionButton type="button" $active={outputPanelOpen} onClick={() => setOutputPanelOpen((value) => !value)} title={outputPanelOpen ? '收起调试输出面板' : '打开调试输出面板'}>
-              <TerminalSquare size={13} /> 调试输出
-            </StatusActionButton>
-          )}
-          {IS_DEV && (
-            <StatusActionButton type="button" $active={skillDevPanelOpen} onClick={() => setSkillDevPanelOpen((v) => !v)} title="Skill Dev Panel">
-              🧠 Skills
-            </StatusActionButton>
-          )}
-          <StatusItem title="AI-Office 3.0">AI-Office 3.0</StatusItem>
-          <LangSelect value={language} onChange={(e) => setLanguage(e.target.value as 'zh' | 'en')}>
-            <option value="zh">中文</option>
-            <option value="en">English</option>
-          </LangSelect>
-          {internalUsername && <UserStatusItem>{internalUsername}</UserStatusItem>}
-          <LogoutButton type="button" onClick={onLogout} title="退出登录">退出</LogoutButton>
-        </StatusRight>
-      </StatusBar>
     </>
   )
 }
 
 function WriterWorkspaceApp({ onLogout }: { onLogout: () => void }) {
   const { markdown, statusMessage, setStatusMessage } = useDocument()
-  const { language, setLanguage } = useLanguage()
   const {
     initialized,
     activeWorkspacePath,
@@ -1293,10 +1183,7 @@ function WriterWorkspaceApp({ onLogout }: { onLogout: () => void }) {
                     runtimeStatus={runtimeStatus}
                     activeWorkspacePath={activeWorkspacePath}
                     closeWorkspace={closeWorkspace}
-                    language={language}
-                    setLanguage={setLanguage}
                     markdown={markdown}
-                    onLogout={onLogout}
                   />
                 </GenerationWorkbenchProvider>
               </FormalTemplateSessionProvider>

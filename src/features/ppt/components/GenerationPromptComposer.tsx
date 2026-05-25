@@ -1082,7 +1082,7 @@ export default function GenerationPromptComposer() {
           resultAssetId: artifact.id,
           resultPath: downloadUrl || artifact.id,
           resultTitle: artifact.title || title,
-          resultPreviewText: [engineText, fallbackText, `已生成 ${fn}，可在资源中心 › 生成记录下载。`].filter(Boolean).join(' · '),
+          resultPreviewText: [engineText, fallbackText, `已生成 ${fn}，可在资源中心 › 我的文件下载。`].filter(Boolean).join(' · '),
           pptSlides: liveSlides,
           pptLiveSlides: liveSlides,
           pptPreviewSlides: [],
@@ -1097,7 +1097,7 @@ export default function GenerationPromptComposer() {
           lastUpdatedAt: new Date().toISOString(),
         }))
         workbench.setGenerationStatus('completed', fallbackText || engineText)
-        setStatusMessage([`PPT 已生成（${fn}）。可在资源中心 › 生成记录下载，或点击右侧「下载 PPT」。`, engineText, fallbackText].filter(Boolean).join(' '))
+        setStatusMessage([`PPT 已生成（${fn}）。已保存到资源中心 › 我的文件，也可点击「下载 PPT」。`, engineText, fallbackText].filter(Boolean).join(' '))
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'PPT 生成失败'
         workbench.setGenerationStatus('error', msg)
