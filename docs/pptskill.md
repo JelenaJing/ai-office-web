@@ -16,6 +16,17 @@ metadata:
 
 This skill handles all PowerPoint tasks: reading/analyzing existing presentations, editing template-based decks via XML manipulation, and creating presentations from scratch using PptxGenJS. It includes a complete design system (color palettes, fonts, style recipes) and detailed guidance for every slide type.
 
+## Web PPT dual-engine policy
+
+Web PPT exposes two user-facing modes:
+
+| Mode | Engine | Output | Use case |
+|------|--------|--------|----------|
+| Formal PPTX (recommended) | `minimax_pptx_generator` | `editable_pptx` | Work reports, administrative material, business proposals; exports editable `.pptx` for PowerPoint/WPS. |
+| Slidev web deck | `slidev` | `web_deck` | Research talks, technical sharing, classroom presentations; exports Slidev Markdown and a safe HTML preview shell in phase 1. |
+
+MiniMax remains the default formal editable PPTX engine. Slidev is optional and must not replace MiniMax for editable PPTX workflows. Slidev PPTX export, when enabled later through `SLIDEV_CLI_ENABLED=1`, is image-based; text is not directly selectable/editable and it is not the formal editable PPTX path.
+
 ## Quick Reference
 
 | Task | Approach |

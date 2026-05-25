@@ -1,6 +1,7 @@
 import { deriveCandidateMailboxes, type CandidateMailbox } from '../../email/services/emailProviderPresets'
 import { accountFromCandidate, autoBindMailboxForUser, type MailboxBindingResult } from '../../email/services/mailboxAutoBinder'
 import { testMailboxCredential } from '../../email/services/emailMvp'
+import { resolveCanonicalAccountUser } from '../../../lib/accountCenterIdentity'
 import { createProvisionedMailboxUser, createWebAuthToken, type WebAuthUser } from './webAuthToken'
 
 export interface EmailFallbackDiagnostics {
@@ -103,7 +104,19 @@ export async function runEmailLoginFallback(input: {
           error: '邮箱验证成功，但当前 AI Office 未允许邮箱自动开通账号。',
         }
       }
-      const user = createProvisionedMailboxUser(input.inputLogin, candidate.email)
+      const canonicalUser = await resolveCanonicalAccountUser({
+        email: candidate.email,
+        username: input.inputLogin,
+        login: input.inputLogin,
+      })
+      if (!canonicalUser) {
+        return {
+          success: false,
+          diagnostics,
+          error: '邮箱验证成功，但无法从 AccountCenter 解析 canonical userId。',
+        }
+      }
+      const user = createProvisionedMailboxUser(canonicalUser)
       const autoBoundMailbox = autoBindMailboxForUser(user.id, candidate, input.password)
       return {
         success: true,

@@ -236,6 +236,7 @@ export default function PptSlideNavigator({
             onClick={() => onSelectSlide(index)}
             ref={active ? (node) => { activeRef.current = node } : undefined}
             type="button"
+            data-slide-index={index}
           >
             <CardHeader>
               <PageNumber>第 {index + 1} 页</PageNumber>

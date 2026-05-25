@@ -70,12 +70,22 @@ test.beforeAll(async () => {
 async function openPptWorkbench(page: Page): Promise<void> {
   await page.addInitScript((token) => {
     window.localStorage.setItem('aios_auth_token', token)
+    window.localStorage.setItem('aioffice.workspaceMode', 'generation')
+    window.localStorage.setItem('aioffice.generationMode', 'ppt')
   }, createDevAuthToken())
   await page.goto(APP_URL, { waitUntil: 'networkidle' })
-  // Navigate to PPT mode
-  await page.locator('button').filter({ hasText: '工作文稿、PPT、邮件、图片与办公资料' }).click()
-  await page.locator('button').filter({ hasText: 'PPT 生成' }).first().click()
-  await expect(page.getByText('准备生成 PPT')).toBeVisible({ timeout: 10_000 })
+  if (!(await page.getByText('准备生成 PPT').isVisible({ timeout: 3000 }).catch(() => false))) {
+    const adminWorkbench = page.getByRole('button', { name: /行政.*文稿.*PPT|文稿、PPT、邮件/ }).first()
+    if (await adminWorkbench.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await adminWorkbench.click()
+    }
+    const pptCard = page.getByRole('button', { name: /PPT 生成/ }).first()
+    if (await pptCard.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await pptCard.click()
+    }
+  }
+  await expect(page.locator('select[title*="选择生成引擎"]')).toBeVisible({ timeout: 10_000 })
+  await expect(page.locator('textarea').last()).toBeVisible({ timeout: 10_000 })
 }
 
 async function generatePptWithEngine(
@@ -94,7 +104,8 @@ async function generatePptWithEngine(
   await page.keyboard.press('Enter')
 
   // Wait for generation to complete
-  await expect(page.getByText(/已生成|任务已完成|Slidev|MiniMax/)).toBeVisible({ timeout: 90_000 })
+  await expect(page.locator('[data-slide-index]').nth(4)).toBeVisible({ timeout: 90_000 })
+  await expect(page.getByText(engineMode === 'slidev' ? /Slidev|网页演示/ : /MiniMax PPTX Generator/).first()).toBeVisible({ timeout: 10_000 })
 }
 
 // ─── Flow A: MiniMax 正式 PPTX ───────────────────────────────────────────────
@@ -112,11 +123,11 @@ test('Flow A: MiniMax 正式 PPTX — generate 5-slide deck', async ({ page }) =
   await test.step('generate deck', async () => {
     await page.locator('textarea').last().fill('生成一份 5 页 AI Office 产品介绍 PPT')
     await page.keyboard.press('Enter')
-    await expect(page.getByText(/PPT 已生成|MiniMax PPTX Generator 任务已完成|已生成/)).toBeVisible({ timeout: 90_000 })
+    await expect(page.locator('[data-slide-index]').nth(4)).toBeVisible({ timeout: 90_000 })
   })
 
   await test.step('verify engine label', async () => {
-    await expect(page.getByText(/MiniMax PPTX Generator/)).toBeVisible({ timeout: 5000 })
+    await expect(page.getByText(/MiniMax PPTX Generator/).first()).toBeVisible({ timeout: 5000 })
   })
 
   await writeFile(SCREENSHOTS.minimaxGenerated, await page.screenshot()).catch(() => {})
@@ -131,7 +142,8 @@ test('Flow A: MiniMax 正式 PPTX — edit slide 3', async ({ page }) => {
     const thumbnails = page.locator('[data-slide-index]')
     const count = await thumbnails.count()
     if (count >= 3) {
-      await thumbnails.nth(2).click()
+      await thumbnails.nth(2).evaluate((node: HTMLElement) => node.click())
+      await expect(page.getByText(/当前正在修改：第 3 页|当前页：3 \/ 5/).first()).toBeVisible({ timeout: 5000 })
     } else {
       // fallback: click third item in slide panel
       await page.locator('.ppt-slide-thumbnail').nth(2).click().catch(() => {})
@@ -139,13 +151,13 @@ test('Flow A: MiniMax 正式 PPTX — edit slide 3', async ({ page }) => {
   })
 
   await test.step('enter edit instruction', async () => {
-    const editInput = page.locator('textarea[placeholder*="修改"]').last()
-    if (await editInput.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await editInput.fill('把当前页改成三点式总结')
-      await page.keyboard.press('Enter')
-      await expect(page.getByText(/已修改|当前页|成功/)).toBeVisible({ timeout: 30_000 })
-    }
-  })
+      const editInput = page.locator('textarea[placeholder*="修改"]').last()
+      if (await editInput.isVisible({ timeout: 2000 }).catch(() => false)) {
+        await editInput.fill('把当前页改成三点式总结')
+        await page.locator('button').filter({ hasText: '发送' }).last().click()
+        await expect(page.getByText(/已使用 MiniMax PPTX Generator 修改第 3 页|只修改当前页/).first()).toBeVisible({ timeout: 30_000 })
+      }
+    })
 
   await writeFile(SCREENSHOTS.minimaxPageEdit, await page.screenshot()).catch(() => {})
 })
@@ -177,11 +189,11 @@ test('Flow B: Slidev 网页演示 — generate 5-slide web deck', async ({ page 
   await test.step('generate deck', async () => {
     await page.locator('textarea').last().fill('生成一份 5 页 AI Office 技术分享')
     await page.keyboard.press('Enter')
-    await expect(page.getByText(/Slidev|网页演示|已生成/)).toBeVisible({ timeout: 90_000 })
+    await expect(page.locator('[data-slide-index]').nth(4)).toBeVisible({ timeout: 90_000 })
   })
 
   await test.step('verify Slidev label', async () => {
-    await expect(page.getByText(/Slidev 网页演示|网页演示 Slidev/)).toBeVisible({ timeout: 5000 })
+    await expect(page.getByText(/Slidev 网页演示|网页演示 Slidev/).first()).toBeVisible({ timeout: 5000 })
   })
 
   await writeFile(SCREENSHOTS.slidevGenerated, await page.screenshot()).catch(() => {})
@@ -201,29 +213,29 @@ test('Flow B: Slidev 网页演示 — edit slide 3', async ({ page }) => {
   await openPptWorkbench(page)
   await generatePptWithEngine(page, 'slidev', '生成一份 5 页 AI Office 技术分享')
 
-  await test.step('click modify button', async () => {
-    const modifyBtn = page.locator('button').filter({ hasText: '修改当前页' })
-    if (await modifyBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-      page.once('dialog', async (dialog) => {
-        await dialog.accept('把当前页改成时间线')
-      })
-      await modifyBtn.click()
-      await expect(page.getByText(/已修改|成功|Slidev/)).toBeVisible({ timeout: 30_000 })
-    }
+  await test.step('select slide 3 and edit', async () => {
+    const thumbnails = page.locator('[data-slide-index]')
+    await expect(thumbnails.nth(2)).toBeVisible({ timeout: 5000 })
+    await thumbnails.nth(2).evaluate((node: HTMLElement) => node.click())
+    await expect(page.getByText(/当前正在修改：第 3 页|本次只会修改第 3 页/).first()).toBeVisible({ timeout: 5000 })
+    const editInput = page.locator('textarea[placeholder*="修改当前页"]').last()
+    await editInput.fill('把当前页改成时间线')
+    await page.locator('button').filter({ hasText: '发送' }).last().click()
+    await expect(page.getByText(/已修改 Slidev 第 3 页|只会修改第 3 页|时间线/).first()).toBeVisible({ timeout: 30_000 })
   })
 
   await writeFile(SCREENSHOTS.slidevPageEdit, await page.screenshot()).catch(() => {})
 })
 
-test('Flow B: Slidev 网页演示 — download Markdown artifact', async ({ page }) => {
+test('Flow B: Slidev 网页演示 — download Markdown and HTML artifacts', async ({ page }) => {
   await openPptWorkbench(page)
   await generatePptWithEngine(page, 'slidev', '生成一份 5 页 AI Office 技术分享')
 
-  const downloadLink = page.locator('a').filter({ hasText: /下载 HTML|全屏预览/ })
-  if (await downloadLink.isVisible({ timeout: 3000 }).catch(() => false)) {
-    const href = await downloadLink.first().getAttribute('href')
-    expect(href).toBeTruthy()
-  }
+  await expect(page.locator('button').filter({ hasText: '下载 Markdown' })).toBeVisible({ timeout: 5000 })
+  const htmlLink = page.locator('a').filter({ hasText: '下载 HTML' })
+  await expect(htmlLink).toBeVisible({ timeout: 5000 })
+  const href = await htmlLink.first().getAttribute('href')
+  expect(href).toContain('/api/artifacts/')
 })
 
 // ─── API-level checks ─────────────────────────────────────────────────────────
@@ -256,7 +268,7 @@ test('API: /api/ppt/decks/start with engine=minimax_pptx_generator returns taskI
   }
 })
 
-test('API: /api/ppt/decks/:deckId/export Slidev format=html returns 501 when SLIDEV_CLI_ENABLED=0', async ({ request }) => {
+test('API: /api/ppt/decks/:deckId/export Slidev pdf is controlled by SLIDEV_CLI_ENABLED', async ({ request }) => {
   const token = createDevAuthToken()
   // First create a Slidev deck and poll until completed
   const startResp = await request.post(`${SERVER_URL}/api/ppt/decks/start`, {

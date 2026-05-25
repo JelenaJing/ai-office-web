@@ -3,6 +3,14 @@ import { isWebShim } from '../platform/detect'
 import { platformApi } from '../platform'
 import type { WorkspaceInfo as PlatformWorkspaceInfo } from '../platform/types'
 import { useInternalAccount, useInternalSession } from './InternalAccountContext'
+import {
+  bootstrapWorkspaceForUser,
+  clearCurrentWorkspaceState,
+  persistCurrentWorkspaceState,
+  persistWorkspaceSelection,
+  readCurrentWorkspaceState,
+  workspaceIdFromPath,
+} from '../services/workspaceBootstrapClient'
 
 export interface FileTreeNode {
   name: string
@@ -25,6 +33,9 @@ interface WorkspaceState {
   projectRoot: string | null
   activeWorkspacePath: string | null
   activeWorkspaceName: string | null
+  currentUserId: string | null
+  currentTenantId: string | null
+  currentWorkspaceId: string | null
   initialized: boolean
   initError: string | null
   fileTree: FileTreeNode[]
@@ -73,10 +84,14 @@ function toWorkspaceInfo(ws: PlatformWorkspaceInfo): WorkspaceInfo {
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const internalSession = useInternalSession()
   const { state: accountState } = useInternalAccount()
+  const initialWorkspaceState = readCurrentWorkspaceState()
   const [workspaceRoot, setWorkspaceRoot] = useState<string | null>(null)
   const [projectRoot, setProjectRoot] = useState<string | null>(null)
   const [activeWorkspacePath, setActiveWorkspacePath] = useState<string | null>(null)
   const [activeWorkspaceName, setActiveWorkspaceName] = useState<string | null>(null)
+  const [currentUserId, setCurrentUserId] = useState<string | null>(initialWorkspaceState.currentUserId)
+  const [currentTenantId, setCurrentTenantId] = useState<string | null>(initialWorkspaceState.currentTenantId)
+  const [currentWorkspaceId, setCurrentWorkspaceId] = useState<string | null>(initialWorkspaceState.currentWorkspaceId)
   const [initialized, setInitialized] = useState(false)
   const [initError, setInitError] = useState<string | null>(null)
   const [fileTree, setFileTree] = useState<FileTreeNode[]>([])
@@ -86,27 +101,45 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const applyWebWorkspace = useCallback((ws: PlatformWorkspaceInfo) => {
     const name = ws.name || '默认工作区'
     const wsPath = ws.path
+    const selection = persistWorkspaceSelection({
+      currentUserId: internalSession?.user.id ?? readCurrentWorkspaceState().currentUserId,
+      currentTenantId: ws.tenantId ?? readCurrentWorkspaceState().currentTenantId,
+      currentWorkspacePath: wsPath,
+      currentWorkspaceId: ws.id || workspaceIdFromPath(wsPath),
+    })
     setWorkspaceRoot(wsPath)
     setProjectRoot(wsPath)
     setActiveWorkspacePath(wsPath)
     setActiveWorkspaceName(name)
+    setCurrentUserId(selection.currentUserId)
+    setCurrentTenantId(selection.currentTenantId)
+    setCurrentWorkspaceId(selection.currentWorkspaceId)
     setFileTree([])
     setWorkspaces([toWorkspaceInfo({ ...ws, name, path: wsPath })])
-  }, [])
+  }, [internalSession?.user.id])
 
   const initializeDefaultWorkspace = useCallback(async () => {
     if (!isWebShim()) return
+    const expectedUserId = internalSession?.user.id ?? null
+    if (!expectedUserId) return
     setLoading(true)
     setInitError(null)
     try {
-      let ws = await platformApi.workspaces.getDefault()
-      if (!ws?.path) {
-        ws = await platformApi.workspaces.create('默认工作区')
-      }
-      if (!ws?.path) {
+      const bootstrap = await bootstrapWorkspaceForUser(expectedUserId)
+      if (!bootstrap.workspace?.path) {
         throw new Error('服务器未返回有效的工作区路径')
       }
-      applyWebWorkspace(ws)
+      setCurrentUserId(bootstrap.currentUserId)
+      setCurrentTenantId(bootstrap.currentTenantId)
+      setCurrentWorkspaceId(bootstrap.currentWorkspaceId)
+      applyWebWorkspace({
+        id: bootstrap.currentWorkspaceId,
+        name: bootstrap.workspace.name,
+        path: bootstrap.workspace.path,
+        isDefault: bootstrap.workspace.isDefault,
+        tenantId: bootstrap.currentTenantId,
+        userId: bootstrap.currentUserId,
+      })
       setInitError(null)
       setInitialized(true)
     } catch (error) {
@@ -116,7 +149,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false)
     }
-  }, [applyWebWorkspace])
+  }, [applyWebWorkspace, internalSession?.user.id])
 
   const refreshWorkspaces = useCallback(async () => {
     if (isWebShim()) {
@@ -201,10 +234,19 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       if (isWebShim()) {
         const known = workspaces.find((w) => w.path === wsPath)
         const name = known?.name ?? workspaceNameFromToken(wsPath)
+        const selection = persistWorkspaceSelection({
+          currentUserId: internalSession?.user.id ?? currentUserId,
+          currentTenantId,
+          currentWorkspacePath: wsPath,
+          currentWorkspaceId: workspaceIdFromPath(wsPath),
+        })
         setWorkspaceRoot(wsPath)
         setProjectRoot(wsPath)
         setActiveWorkspacePath(wsPath)
         setActiveWorkspaceName(name)
+        setCurrentUserId(selection.currentUserId)
+        setCurrentTenantId(selection.currentTenantId)
+        setCurrentWorkspaceId(selection.currentWorkspaceId)
         setFileTree([])
         setInitError(null)
         return
@@ -238,13 +280,18 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false)
     }
-  }, [workspaces])
+  }, [currentTenantId, currentUserId, internalSession?.user.id, workspaces])
 
   const closeWorkspace = useCallback(() => {
+    const next = persistCurrentWorkspaceState({
+      currentWorkspaceId: null,
+      currentWorkspacePath: null,
+    })
     setWorkspaceRoot(null)
     setProjectRoot(null)
     setActiveWorkspacePath(null)
     setActiveWorkspaceName(null)
+    setCurrentWorkspaceId(next.currentWorkspaceId)
     setFileTree([])
   }, [])
 
@@ -261,11 +308,38 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, [activeWorkspacePath, closeWorkspace, refreshWorkspaces])
 
   useEffect(() => {
-    if (isWebShim()) {
-      if (accountState.phase === 'restoring' || accountState.phase === 'loading') return
-      const currentUserId = internalSession?.user.id ?? null
+      if (isWebShim()) {
+        if (accountState.phase === 'restoring' || accountState.phase === 'loading') return
+        if (accountState.phase !== 'logged_in' && accountState.phase !== 'must_change_password') {
+          clearCurrentWorkspaceState()
+          setWorkspaceRoot(null)
+          setProjectRoot(null)
+          setActiveWorkspacePath(null)
+          setActiveWorkspaceName(null)
+          setCurrentTenantId(null)
+          setCurrentWorkspaceId(null)
+          setCurrentUserId(null)
+          setFileTree([])
+          return
+        }
+        const currentUserId = internalSession?.user.id ?? null
+        const persisted = readCurrentWorkspaceState()
       const activeOwner = workspaceOwnerFromToken(activeWorkspacePath)
-      if (!activeWorkspacePath || (currentUserId && activeOwner !== currentUserId) || (!currentUserId && activeOwner !== null && activeOwner !== 'web-demo-user')) {
+      if (
+        (currentUserId && persisted.currentUserId && persisted.currentUserId !== currentUserId)
+        || (!currentUserId && persisted.currentUserId)
+      ) {
+        clearCurrentWorkspaceState()
+        setCurrentTenantId(null)
+        setCurrentWorkspaceId(null)
+        setCurrentUserId(null)
+      }
+      if (
+        !activeWorkspacePath
+        || !persisted.currentWorkspaceId
+        || (currentUserId && activeOwner !== currentUserId)
+        || (!currentUserId && activeOwner !== null && activeOwner !== 'web-demo-user')
+      ) {
         void initializeDefaultWorkspace()
       }
       return
@@ -278,6 +352,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     projectRoot,
     activeWorkspacePath,
     activeWorkspaceName,
+    currentUserId,
+    currentTenantId,
+    currentWorkspaceId,
     initialized,
     initError,
     fileTree,
@@ -298,6 +375,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     projectRoot,
     activeWorkspacePath,
     activeWorkspaceName,
+    currentUserId,
+    currentTenantId,
+    currentWorkspaceId,
     initialized,
     initError,
     fileTree,

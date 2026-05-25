@@ -18,11 +18,10 @@ import fs from 'fs'
 import path from 'path'
 import { randomUUID } from 'crypto'
 import { requireAccountUser } from '../lib/authUser'
-import {
-  getOrCreateDefaultWorkspace,
-  workspaceDir,
-} from '../lib/workspaceStore'
+import { workspaceDir } from '../lib/workspaceStore'
 import { uploadRateLimit } from '../middleware/rateLimit'
+import { assertWorkspaceAccess, WorkspaceAccessError } from '../lib/workspaceAccess'
+import { listUserFilesInWorkspace, readFilesIndex, resolveUserFile, type UserFileEntry } from '../lib/userFiles'
 
 const router = Router()
 
@@ -43,19 +42,6 @@ const ALLOWED_EXTS: Record<string, string> = {
 
 // ── File metadata types ───────────────────────────────────────────────────────
 
-interface FileEntry {
-  id: string
-  name: string
-  ext: string
-  mimeType: string
-  size: number
-  uploadedAt: string
-}
-
-interface FilesIndex {
-  files: FileEntry[]
-}
-
 // ── Multer config — store in memory, we write manually ────────────────────────
 
 const upload = multer({
@@ -69,22 +55,29 @@ function filesDir(userId: string, wsId: string): string {
   return path.join(workspaceDir(userId, wsId), 'files')
 }
 
-function readFilesIndex(userId: string, wsId: string): FilesIndex {
-  const dir = filesDir(userId, wsId)
-  fs.mkdirSync(dir, { recursive: true })
-  const p = path.join(dir, 'files.json')
-  if (!fs.existsSync(p)) return { files: [] }
-  try {
-    return JSON.parse(fs.readFileSync(p, 'utf-8')) as FilesIndex
-  } catch {
-    return { files: [] }
-  }
-}
-
-function writeFilesIndex(userId: string, wsId: string, index: FilesIndex): void {
+function writeFilesIndex(
+  userId: string,
+  wsId: string,
+  index: ReturnType<typeof readFilesIndex>,
+): void {
   const dir = filesDir(userId, wsId)
   fs.mkdirSync(dir, { recursive: true })
   fs.writeFileSync(path.join(dir, 'files.json'), JSON.stringify(index, null, 2), 'utf-8')
+}
+
+function sendWorkspaceError(res: import('express').Response, error: unknown): void {
+  const workspaceError = error instanceof WorkspaceAccessError ? error : null
+  if (workspaceError) {
+    res.status(workspaceError.status).json({
+      success: false,
+      code: workspaceError.code,
+      error: workspaceError.message,
+      bootstrap: workspaceError.bootstrap,
+    })
+    return
+  }
+  const message = error instanceof Error ? error.message : String(error)
+  res.status(500).json({ success: false, error: message })
 }
 
 // ── GET /api/files ────────────────────────────────────────────────────────────
@@ -92,9 +85,18 @@ function writeFilesIndex(userId: string, wsId: string, index: FilesIndex): void 
 router.get('/', async (req, res) => {
   const userId = await requireAccountUser(req, res)
   if (!userId) return
-  const ws = getOrCreateDefaultWorkspace(userId)
-  const index = readFilesIndex(userId, ws.id)
-  return res.json({ files: index.files })
+  try {
+    const requestedWorkspacePath = typeof req.query.workspacePath === 'string' ? req.query.workspacePath : undefined
+    const access = assertWorkspaceAccess(userId, requestedWorkspacePath, 'member')
+    const files = listUserFilesInWorkspace(userId, access.workspacePath).map((item) => item.entry)
+    return res.json({
+      files,
+      currentWorkspaceId: access.workspaceId,
+      currentWorkspacePath: access.workspacePath,
+    })
+  } catch (error) {
+    sendWorkspaceError(res, error)
+  }
 })
 
 // ── Filename normalization ────────────────────────────────────────────────────
@@ -136,14 +138,20 @@ router.post('/upload', uploadRateLimit, upload.single('file'), async (req, res) 
 
   const userId = await requireAccountUser(req, res)
   if (!userId) return
-  const ws = getOrCreateDefaultWorkspace(userId)
+  let access
+  try {
+    access = assertWorkspaceAccess(userId, typeof req.body?.workspacePath === 'string' ? req.body.workspacePath : undefined, 'editor')
+  } catch (error) {
+    sendWorkspaceError(res, error)
+    return
+  }
 
   const fileId = randomUUID()
-  const fileDir = path.join(filesDir(userId, ws.id), fileId)
+  const fileDir = path.join(filesDir(userId, access.workspaceId), fileId)
   fs.mkdirSync(fileDir, { recursive: true })
   fs.writeFileSync(path.join(fileDir, 'original'), req.file.buffer)
 
-  const entry: FileEntry = {
+  const entry: UserFileEntry = {
     id: fileId,
     name: orig,
     ext,
@@ -152,11 +160,16 @@ router.post('/upload', uploadRateLimit, upload.single('file'), async (req, res) 
     uploadedAt: new Date().toISOString(),
   }
 
-  const index = readFilesIndex(userId, ws.id)
+  const index = readFilesIndex(userId, access.workspaceId)
   index.files.unshift(entry)
-  writeFilesIndex(userId, ws.id, index)
+  writeFilesIndex(userId, access.workspaceId, index)
 
-  return res.json({ success: true, file: entry })
+  return res.json({
+    success: true,
+    file: entry,
+    currentWorkspaceId: access.workspaceId,
+    currentWorkspacePath: access.workspacePath,
+  })
 })
 
 // ── GET /api/files/:fileId/download ──────────────────────────────────────────
@@ -164,21 +177,27 @@ router.post('/upload', uploadRateLimit, upload.single('file'), async (req, res) 
 router.get('/:fileId/download', async (req, res) => {
   const userId = await requireAccountUser(req, res)
   if (!userId) return
-  const ws = getOrCreateDefaultWorkspace(userId)
-
-  const index = readFilesIndex(userId, ws.id)
-  const entry = index.files.find((f) => f.id === req.params.fileId)
-  if (!entry) {
+  const resolved = resolveUserFile(
+    userId,
+    req.params.fileId,
+    typeof req.query.workspacePath === 'string' ? req.query.workspacePath : undefined,
+  )
+  if (!resolved) {
     return res.status(404).json({ message: 'File not found' })
   }
-
-  const filePath = path.join(filesDir(userId, ws.id), entry.id, 'original')
+  try {
+    assertWorkspaceAccess(userId, resolved.workspacePath, 'member')
+  } catch (error) {
+    sendWorkspaceError(res, error)
+    return
+  }
+  const filePath = resolved.absolutePath
   if (!fs.existsSync(filePath)) {
     return res.status(404).json({ message: 'File missing on disk' })
   }
 
-  const encodedName = encodeURIComponent(entry.name)
-  res.setHeader('Content-Type', entry.mimeType)
+  const encodedName = encodeURIComponent(resolved.entry.name)
+  res.setHeader('Content-Type', resolved.entry.mimeType)
   res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodedName}`)
   res.sendFile(filePath)
 })
@@ -188,22 +207,34 @@ router.get('/:fileId/download', async (req, res) => {
 router.delete('/:fileId', async (req, res) => {
   const userId = await requireAccountUser(req, res)
   if (!userId) return
-  const ws = getOrCreateDefaultWorkspace(userId)
+  const resolved = resolveUserFile(
+    userId,
+    req.params.fileId,
+    typeof req.query.workspacePath === 'string' ? req.query.workspacePath : undefined,
+  )
+  if (!resolved) {
+    return res.status(404).json({ success: false, message: 'File not found' })
+  }
+  try {
+    assertWorkspaceAccess(userId, resolved.workspacePath, 'editor')
+  } catch (error) {
+    sendWorkspaceError(res, error)
+    return
+  }
 
-  const index = readFilesIndex(userId, ws.id)
-  const idx = index.files.findIndex((f) => f.id === req.params.fileId)
+  const index = readFilesIndex(userId, resolved.workspaceId)
+  const idx = index.files.findIndex((file) => file.id === req.params.fileId)
   if (idx === -1) {
     return res.status(404).json({ success: false, message: 'File not found' })
   }
-
   const entry = index.files[idx]
-  const fileDir = path.join(filesDir(userId, ws.id), entry.id)
+  const fileDir = path.join(filesDir(userId, resolved.workspaceId), entry.id)
   if (fs.existsSync(fileDir)) {
     fs.rmSync(fileDir, { recursive: true, force: true })
   }
 
   index.files.splice(idx, 1)
-  writeFilesIndex(userId, ws.id, index)
+  writeFilesIndex(userId, resolved.workspaceId, index)
 
   return res.json({ success: true })
 })

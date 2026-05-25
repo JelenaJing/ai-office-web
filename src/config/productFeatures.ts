@@ -9,6 +9,7 @@
 export const PRODUCT_FEATURES = {
   home: true,
   work: true,
+  research: true,
   learning: true,
   life: true,
   resources: true,

@@ -962,7 +962,7 @@ export default function ResultPreviewPanel() {
     let effectiveExportUrl = pptDownloadUrl || workbench.resultPath
     let effectiveArtifactId = typeof pptArtifactId === 'string' && pptArtifactId.trim() ? pptArtifactId : null
     if (isWebShim() && deckId && (pptDirty || !effectiveExportUrl)) {
-      const exported = await exportWebPptDeck({ deckId, engine: pptEngine || undefined })
+      const exported = await exportWebPptDeck({ deckId, engine: pptEngine || undefined, format: pptEngine === 'slidev' ? 'md' : 'pptx' })
       if (!exported.success || !exported.artifact?.id || !exported.exportUrl) {
         setPreviewMessage(exported.error || '下载前刷新最新 PPT 失败')
         return
@@ -1367,7 +1367,7 @@ export default function ResultPreviewPanel() {
       setPreviewMessage('当前修改已保存。')
       return
     }
-    const result = await exportWebPptDeck({ deckId, engine: pptEngine || undefined })
+    const result = await exportWebPptDeck({ deckId, engine: pptEngine || undefined, format: pptEngine === 'slidev' ? 'md' : 'pptx' })
     if (!result.success || !result.artifact) {
       setPreviewMessage(result.error || '保存修改失败')
       return
@@ -1379,6 +1379,9 @@ export default function ResultPreviewPanel() {
       pptLiveSlides: nextSlides,
       pptArtifactId: result.artifact?.id || session.pptArtifactId,
       pptDownloadUrl: result.exportUrl || session.pptDownloadUrl,
+      pptPreviewUrl: result.previewUrl || session.pptPreviewUrl,
+      pptSlidevMarkdown: result.slidevMarkdown || session.pptSlidevMarkdown,
+      pptOutputMode: result.outputMode || session.pptOutputMode,
       resultAssetId: result.artifact?.id || session.resultAssetId,
       resultPath: result.exportUrl || session.resultPath,
       pptDirty: false,
@@ -1390,6 +1393,16 @@ export default function ResultPreviewPanel() {
     }))
     setPreviewMessage(result.message || '已保存')
   }, [effectivePptSlides, mergeDeckIntoLiveSlides, pptDeckDocumentId, pptDeckId, pptDirty, pptEngine, workbench])
+
+  const handleExportSlidev = useCallback(async (format: 'pdf' | 'png' | 'pptx') => {
+    const deckId = pptDeckId || pptDeckDocumentId
+    if (!deckId) {
+      setPreviewMessage('当前没有可导出的 Slidev deck。')
+      return
+    }
+    const result = await exportWebPptDeck({ deckId, engine: 'slidev', format })
+    setPreviewMessage(result.message || result.error || 'Slidev 导出请求已提交')
+  }, [pptDeckDocumentId, pptDeckId])
 
   const handleRetemplatePptDeck = useCallback(async (templateId: string) => {
     const deckId = pptDeckId || pptDeckDocumentId
@@ -2252,11 +2265,11 @@ export default function ResultPreviewPanel() {
           : ''
   }, [pptEngine, pptFallbackFrom, pptFallbackReason])
   const pptPageEditEngineLabel = useMemo(() => (
-    isWebShim() || pptEngine === 'minimax_pptx_generator'
+    pptEngine === 'slidev'
+      ? '当前页修改引擎：Slidev'
+      : isWebShim() || pptEngine === 'minimax_pptx_generator'
       ? '当前页修改引擎：MiniMax PPTX Generator Skill'
-      : pptEngine === 'slidev'
-        ? '当前页修改引擎：Slidev'
-        : '当前页修改引擎：内置 fallback'
+      : '当前页修改引擎：内置 fallback'
   ), [pptEngine])
 
   // PPT mode: full-screen workbench replaces the default Shell layout
@@ -2283,8 +2296,10 @@ export default function ResultPreviewPanel() {
           templateBusy={pptSkillBusy || pptTaskStatus === 'applying_template'}
           pptOutputMode={pptOutputMode || undefined}
           pptPreviewUrl={pptPreviewUrl || undefined}
+          pptDownloadUrl={pptDownloadUrl}
           pptSlidevMarkdown={pptSlidevMarkdown || undefined}
           onDownloadPpt={() => void handleDownloadPptx()}
+          onExportSlidev={(format) => void handleExportSlidev(format)}
           onTemplateChange={(templateId) => void handleRetemplatePptDeck(templateId)}
           onSelectSlide={handlePptSelectSlide}
           onRegenerateDeck={handleRegenerateDeck}

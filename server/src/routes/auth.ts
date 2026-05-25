@@ -27,6 +27,7 @@ import {
   ACCOUNT_CENTER_UNREACHABLE_MESSAGE,
   buildAccountCenterUrl,
 } from '../lib/accountCenter'
+import { fetchCanonicalAccountUserByToken, resolveCanonicalAccountUser } from '../lib/accountCenterIdentity'
 
 const router = Router()
 
@@ -142,9 +143,15 @@ router.post('/login', async (req, res) => {
     try {
       const ac = await requestAccountCenterLogin(login, password)
       if (ac.ok && ac.data?.token && ac.data?.user) {
+        const canonicalUser = await fetchCanonicalAccountUserByToken(ac.data.token)
+        if (!canonicalUser) {
+          return res.status(502).json({
+            message: '账号中心登录成功，但无法解析 canonical userId。',
+          })
+        }
         let autoBoundMailbox
         try {
-          autoBoundMailbox = await tryAutoBindAccountCenterMailbox(ac.data.user.id, username, password)
+          autoBoundMailbox = await tryAutoBindAccountCenterMailbox(canonicalUser.id, username, password)
         } catch (err) {
           accountCenterErrors.push({
             login,
@@ -153,6 +160,7 @@ router.post('/login', async (req, res) => {
         }
         return res.json({
           ...ac.data,
+          user: canonicalUser,
           authMethod: 'account_center',
           autoBoundMailbox,
           diagnostics: { accountCenterErrors },
@@ -198,7 +206,16 @@ router.post('/login', async (req, res) => {
 router.get('/me', async (req, res) => {
   const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '')
   const localUser = verifyWebAuthToken(token)
-  if (localUser) return res.json(localUser)
+  if (localUser) {
+    if (!localUser.id.startsWith('mailbox:')) return res.json(localUser)
+    const canonicalUser = await resolveCanonicalAccountUser({
+      email: localUser.email,
+      username: localUser.username,
+      login: localUser.email || localUser.username,
+    })
+    if (canonicalUser) return res.json(canonicalUser)
+    return res.status(502).json({ message: '无法从 AccountCenter 解析 canonical userId' })
+  }
   await proxyAC(req, res, 'GET', '/api/auth/me')
 })
 

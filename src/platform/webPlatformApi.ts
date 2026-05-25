@@ -20,6 +20,12 @@ import type {
   EmailSendInput,
   AiSettingsView,
 } from './types'
+import {
+  bootstrapWorkspaceForUser,
+  clearCurrentWorkspaceState,
+  ensureWorkspaceBootstrap,
+  readCurrentWorkspaceState,
+} from '../services/workspaceBootstrapClient'
 
 // ── Token storage ─────────────────────────────────────────────────────────────
 // Check all known token keys so that sessions created by the legacy login flow
@@ -83,6 +89,23 @@ async function apiPost<T>(path: string, body: unknown): Promise<T> {
   })
 }
 
+function currentWorkspaceQueryParam(): string {
+  const { currentWorkspacePath } = readCurrentWorkspaceState()
+  return currentWorkspacePath ? `?workspacePath=${encodeURIComponent(currentWorkspacePath)}` : ''
+}
+
+async function ensureWorkspacePath(preferredWorkspacePath?: string): Promise<string> {
+  if (preferredWorkspacePath) return preferredWorkspacePath
+  const ensured = await ensureWorkspaceBootstrap()
+  const workspacePath = ensured && 'workspace' in ensured
+    ? ensured.workspace.path
+    : ensured?.currentWorkspacePath
+  if (!workspacePath) {
+    throw new Error('工作区尚未初始化')
+  }
+  return workspacePath
+}
+
 /** Fetch a protected resource and trigger a browser file download. */
 async function downloadBlob(url: string, filename: string): Promise<void> {
   const res = await fetch(url, { headers: authHeaders() })
@@ -142,6 +165,7 @@ export const webPlatformApi: PlatformApi = {
       localStorage.removeItem(PRIMARY_TOKEN_KEY)
       LEGACY_TOKEN_KEYS.forEach(k => localStorage.removeItem(k))
       localStorage.removeItem(USER_KEY)
+      clearCurrentWorkspaceState()
     },
 
     getCurrentUser(): UserInfo | null {
@@ -163,22 +187,19 @@ export const webPlatformApi: PlatformApi = {
 
   workspaces: {
     async getDefault(): Promise<WorkspaceInfo> {
-      try {
-        const data = await apiFetch<{
-          success: boolean
-          workspace: { name: string; path: string; isDefault?: boolean }
-        }>('/api/workspaces/default')
-        const w = data.workspace
-        if (w?.path) {
-          return { id: w.path, name: w.name, path: w.path, isDefault: w.isDefault }
-        }
-      } catch {
-        // fallback to create below
+      const data = await bootstrapWorkspaceForUser()
+      return {
+        id: data.currentWorkspaceId,
+        name: data.workspace.name,
+        path: data.workspace.path,
+        isDefault: data.workspace.isDefault,
+        tenantId: data.currentTenantId,
+        userId: data.currentUserId,
       }
-      return webPlatformApi.workspaces.create('默认工作区')
     },
 
     async list(): Promise<WorkspaceInfo[]> {
+      await ensureWorkspaceBootstrap()
       const data = await apiFetch<{
         workspaces: Array<{ name: string; path: string; isDefault?: boolean }>
       }>('/api/workspaces')
@@ -191,6 +212,7 @@ export const webPlatformApi: PlatformApi = {
     },
 
     async create(name: string): Promise<WorkspaceInfo> {
+      await ensureWorkspaceBootstrap()
       const data = await apiPost<{ success: boolean; name: string; path: string }>(
         '/api/workspaces',
         { name },
@@ -211,13 +233,16 @@ export const webPlatformApi: PlatformApi = {
 
   files: {
     async list(): Promise<FileEntry[]> {
-      const data = await apiFetch<{ files: FileEntry[] }>('/api/files')
+      await ensureWorkspaceBootstrap()
+      const data = await apiFetch<{ files: FileEntry[] }>(`/api/files${currentWorkspaceQueryParam()}`)
       return data.files ?? []
     },
 
     async upload(file: File): Promise<FileEntry> {
+      const workspacePath = await ensureWorkspacePath()
       const form = new FormData()
       form.append('file', file)
+      form.append('workspacePath', workspacePath)
       const res = await fetch('/api/files/upload', {
         method: 'POST',
         headers: authHeaders(),
@@ -252,7 +277,8 @@ export const webPlatformApi: PlatformApi = {
 
   artifacts: {
     async list(): Promise<Artifact[]> {
-      const data = await apiFetch<{ artifacts: Artifact[] }>('/api/artifacts')
+      await ensureWorkspaceBootstrap()
+      const data = await apiFetch<{ artifacts: Artifact[] }>(`/api/artifacts${currentWorkspaceQueryParam()}`)
       return data.artifacts ?? []
     },
 
@@ -281,11 +307,7 @@ export const webPlatformApi: PlatformApi = {
       summary?: string
       imageUrls?: string[]
     }> {
-      let workspacePath = input.workspacePath
-      if (!workspacePath) {
-        const ws = await webPlatformApi.workspaces.getDefault()
-        workspacePath = ws.path
-      }
+      const workspacePath = await ensureWorkspacePath(input.workspacePath)
       const start = await apiPost<{ success: boolean; jobId?: string; error?: string }>(
         '/api/data-analysis/jobs/start',
         {

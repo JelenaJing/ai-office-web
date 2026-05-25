@@ -18,9 +18,10 @@ interface ParsedSlide {
 
 function parseSlidesFromMarkdown(markdown: string): ParsedSlide[] {
   const raw = String(markdown || '')
-
-  // Split on slide separators (lines that are exactly ---)
-  const chunks = raw.split(/\n---\n/)
+  const withoutGlobalFrontmatter = raw.trimStart().startsWith('---')
+    ? raw.trimStart().replace(/^---\n[\s\S]*?\n---\n?/, '')
+    : raw
+  const chunks = withoutGlobalFrontmatter.split(/\n---\n/g)
 
   const slides: ParsedSlide[] = []
 
@@ -39,8 +40,6 @@ function parseSlidesFromMarkdown(markdown: string): ParsedSlide[] {
     let inFm = false
     let fmDone = false
 
-    // First chunk might start with theme/title frontmatter (already handled by global split)
-    // For all chunks: if first lines are YAML key:value, treat as frontmatter
     for (const line of chunk.split('\n')) {
       if (!fmDone) {
         const fm = line.match(/^([a-zA-Z_]+):\s*(.*)$/)

@@ -12,6 +12,7 @@ import {
   buildAccountCenterUrl,
   getAccountCenterBaseUrl,
 } from './accountCenter'
+import { resolveCanonicalAccountUser } from './accountCenterIdentity'
 
 export const ACCOUNT_CENTER_URL = getAccountCenterBaseUrl()
 
@@ -52,6 +53,19 @@ function identityFromLocalUser(user: ReturnType<typeof verifyWebAuthToken>): Acc
   }
 }
 
+async function normalizeLocalIdentity(user: ReturnType<typeof verifyWebAuthToken>): Promise<AccountIdentity | null> {
+  if (!user?.id) return null
+  if (!user.id.startsWith('mailbox:')) {
+    return identityFromLocalUser(user)
+  }
+  const canonical = await resolveCanonicalAccountUser({
+    email: user.email,
+    username: user.username,
+    login: user.email || user.username,
+  })
+  return canonical ? identityFromPayload(canonical) : null
+}
+
 function identityFromPayload(data: {
   id?: string
   userId?: string
@@ -80,7 +94,7 @@ function identityFromPayload(data: {
 export async function resolveAccountIdentity(req: Request): Promise<AccountIdentity> {
   const token = bearerToken(req)
   if (!token) return fallbackIdentity()
-  const localUser = identityFromLocalUser(verifyWebAuthToken(token))
+  const localUser = await normalizeLocalIdentity(verifyWebAuthToken(token))
   if (localUser) return localUser
   try {
     const resp = await fetch(buildAccountCenterUrl('/api/auth/me'), {
@@ -121,7 +135,7 @@ export async function requireAccountIdentity(
     res.status(401).json({ message: '未授权' })
     return null
   }
-  const localUser = identityFromLocalUser(verifyWebAuthToken(token))
+  const localUser = await normalizeLocalIdentity(verifyWebAuthToken(token))
   if (localUser) {
     next?.()
     return localUser

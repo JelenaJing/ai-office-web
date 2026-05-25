@@ -28,6 +28,7 @@ import WorkspaceGate from './pages/WorkspaceGate'
 import PrimaryNav, { type PrimarySection } from './components/nav/PrimaryNav'
 import HomeDashboard from './pages/HomeDashboard'
 import WorkWorkspace from './pages/WorkWorkspace'
+import ResearchPage from './pages/ResearchPage'
 import StudyWorkspace from './pages/StudyWorkspace'
 import LifeWorkspace from './pages/LifeWorkspace'
 import ResourceWorkspace from './pages/ResourceWorkspace'
@@ -41,9 +42,34 @@ import { isWebShim } from './platform/detect'
 import { isWebFeatureEnabled } from './platform/featureGate'
 import { DISABLE_FORCE_PASSWORD_CHANGE } from './config'
 import { DEFAULT_APP_ROUTE } from './config/productFeatures'
+import { bootstrapHandoffEntry, clearHandoffQueryFromLocation, readHandoffIdFromLocation } from './services/handoffBootstrap'
+import { peekPendingDocumentHandoff } from './services/pendingDocumentHandoff'
 
-/** Derive the initial PrimarySection from the feature-flag default route (e.g. '/work' → 'work'). */
-const DEFAULT_PRIMARY_SECTION = DEFAULT_APP_ROUTE.replace(/^\//, '') as import('./components/nav/PrimaryNav').PrimarySection
+const WEB_SECTION_ROUTE_MAP: Partial<Record<PrimarySection, string>> = {
+  home: '/home',
+  aios: '/aios',
+  work: '/work',
+  research: '/research',
+  study: '/study',
+  life: '/life',
+  resource: '/resource',
+  chat: '/chat',
+  settings: '/settings',
+  account: '/account',
+  'skill-center': '/skills',
+  calendar: '/calendar',
+}
+
+function resolvePrimarySectionFromLocation(): PrimarySection {
+  const defaultSection = DEFAULT_APP_ROUTE.replace(/^\//, '') as PrimarySection
+  if (typeof window === 'undefined' || !isWebShim()) return defaultSection
+
+  const normalizedPath = window.location.pathname.replace(/\/+$/, '') || DEFAULT_APP_ROUTE
+  const matchedEntry = Object.entries(WEB_SECTION_ROUTE_MAP).find(([, path]) => path === normalizedPath)
+  return (matchedEntry?.[0] as PrimarySection | undefined) ?? defaultSection
+}
+
+const DEFAULT_PRIMARY_SECTION = resolvePrimarySectionFromLocation()
 
 const IS_DEV = Boolean((import.meta as unknown as { env: Record<string, unknown> }).env?.DEV)
 const SkillDevPanel = IS_DEV
@@ -628,7 +654,7 @@ function WriterWorkspaceRuntime({
   markdown,
   onLogout,
 }: WriterWorkspaceRuntimeProps) {
-  const { mode, currentMode, generationMode } = useWorkspaceMode()
+  const { mode, currentMode, generationMode, enterFreeMode } = useWorkspaceMode()
   const { generationStatus } = useGenerationWorkbench()
   const { departments, selectedDepartmentId, selectDepartment, loading: deptLoading } = useDepartment()
   const internalSession = useInternalSession()
@@ -646,6 +672,13 @@ function WriterWorkspaceRuntime({
     setReturnToScene(primarySection)
     setPrimarySection('workspace')
   }, [primarySection])
+
+  useEffect(() => {
+    if (!peekPendingDocumentHandoff()) return
+    enterFreeMode()
+    setReturnToScene(primarySection)
+    setPrimarySection('workspace')
+  }, [enterFreeMode, primarySection])
   const [outputPanelOpen, setOutputPanelOpen] = useState(false)
   const [outputEntries, setOutputEntries] = useState<RuntimeOutputEntry[]>([])
   const [latestAiStep, setLatestAiStep] = useState<number | null>(null)
@@ -803,6 +836,17 @@ function WriterWorkspaceRuntime({
     return () => window.removeEventListener('open-calendar-workspace', handler)
   }, [navigateTo])
 
+  useEffect(() => {
+    if (!isWebShim()) return
+
+    const handlePopState = () => {
+      setPrimarySection(resolvePrimarySectionFromLocation())
+    }
+
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [])
+
   // Navigate to AIOS section and optionally open a specific matter.
   useEffect(() => {
     const handler = (event: Event) => {
@@ -854,6 +898,14 @@ function WriterWorkspaceRuntime({
   const currentOutputMessage = generationStatus.message || statusMessage || runtimeStatus || '当前没有新的输出'
   const currentStepLabel = latestAiStep !== null ? `步骤 ${latestAiStep}` : generationStatus.phase === 'running' ? '进行中' : '未开始'
 
+  useEffect(() => {
+    if (!isWebShim()) return
+    const route = WEB_SECTION_ROUTE_MAP[primarySection]
+    if (!route) return
+    if (window.location.pathname === route) return
+    window.history.replaceState(null, '', `${route}${window.location.search}${window.location.hash}`)
+  }, [primarySection])
+
   const outputSummary = useMemo(() => ([
     { label: '当前模式', value: formatGenerationModeLabel(currentMode) },
     { label: '当前阶段', value: formatGenerationPhaseLabel(generationStatus.phase) },
@@ -883,6 +935,11 @@ function WriterWorkspaceRuntime({
           {primarySection === 'work' && (
             <ScenarioArea>
               <WorkWorkspace onGoToWorkspace={goToWorkspace} onNavigate={navigateTo} />
+            </ScenarioArea>
+          )}
+          {primarySection === 'research' && (
+            <ScenarioArea>
+              <ResearchPage />
             </ScenarioArea>
           )}
           {primarySection === 'calendar' && (
@@ -1264,13 +1321,54 @@ const StartupSplash = styled.div`
 `
 
 export default function App() {
-  const { state, logout } = useInternalAccount()
+  const { state, logout, loginWithToken } = useInternalAccount()
+  const initialHandoffId = useMemo(() => readHandoffIdFromLocation(), [])
+  const [handoffBooting, setHandoffBooting] = useState(Boolean(initialHandoffId))
+  const [handoffError, setHandoffError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!initialHandoffId) return
+    let disposed = false
+    void (async () => {
+      try {
+        const { token } = await bootstrapHandoffEntry(initialHandoffId)
+        if (disposed) return
+        await loginWithToken(token)
+      } catch (error) {
+        if (!disposed) {
+          setHandoffError(error instanceof Error ? error.message : '外部文稿跳转失败')
+        }
+      } finally {
+        if (!disposed) {
+          clearHandoffQueryFromLocation()
+          setHandoffBooting(false)
+        }
+      }
+    })()
+    return () => {
+      disposed = true
+    }
+  // handoff 入口只执行一次，避免 StrictMode / 重渲染重复 claim
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialHandoffId])
   const effectiveLoggedIn =
     state.phase === 'logged_in' ||
     (state.phase === 'must_change_password' && DISABLE_FORCE_PASSWORD_CHANGE)
 
   // DEV-only skip flag
   const devSkip = (import.meta as any).env?.DEV && localStorage.getItem('AIOFFICE_SKIP_LOGIN') === '1'
+
+  if (handoffBooting) {
+    return <StartupSplash>AI Office · 正在打开 Word 文稿…</StartupSplash>
+  }
+
+  if (handoffError) {
+    return (
+      <StartupSplash>
+        外部文稿打开失败：{handoffError}
+      </StartupSplash>
+    )
+  }
 
   if (!devSkip) {
     if (state.phase === 'restoring') {

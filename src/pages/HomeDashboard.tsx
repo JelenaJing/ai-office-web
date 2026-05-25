@@ -1,6 +1,6 @@
 import styled from 'styled-components'
 import React from 'react'
-import { Briefcase, BookOpen, Heart, RefreshCw } from 'lucide-react'
+import { Briefcase, BookOpen, Heart, RefreshCw, Brain } from 'lucide-react'
 import { useWorkspace } from '../contexts/WorkspaceContext'
 import type { PrimarySection } from '../components/nav/PrimaryNav'
 import { PRODUCT_FEATURES } from '../config/productFeatures'
@@ -39,9 +39,13 @@ const Subtitle = styled.p`
 
 const ScenarioGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(3, minmax(320px, 1fr));
+  grid-template-columns: repeat(4, minmax(280px, 1fr));
   gap: 32px;
   width: 100%;
+
+  @media (max-width: 1320px) {
+    grid-template-columns: repeat(2, minmax(320px, 1fr));
+  }
 
   @media (max-width: 1000px) {
     grid-template-columns: repeat(2, 1fr);
@@ -162,7 +166,7 @@ const SwitchBtn = styled.button`
 `
 
 interface HomeCardDef {
-  featureKey: keyof Pick<typeof PRODUCT_FEATURES, 'work' | 'learning' | 'life'>
+  featureKey: keyof Pick<typeof PRODUCT_FEATURES, 'work' | 'research' | 'learning' | 'life'>
   section: PrimarySection
   accent: string
   accentBg: string
@@ -181,9 +185,20 @@ const HOME_CARD_DEFS: HomeCardDef[] = [
     accentBg: '#e6f0fc',
     iconBg: '#deeeff',
     icon: <Briefcase size={30} color="#1f6fd6" />,
-    title: '工作',
-    desc: '文稿、PPT、邮件、图片与办公资料',
-    chips: ['文稿', 'PPT', '邮件', '图片'],
+    title: '行政',
+    desc: '文稿、PPT、邮件、日程与行政协同工作台',
+    chips: ['文稿', 'PPT', '邮件', '日程'],
+  },
+  {
+    featureKey: 'research',
+    section: 'research',
+    accent: '#6b46c1',
+    accentBg: '#efe8ff',
+    iconBg: '#e8ddff',
+    icon: <Brain size={30} color="#6b46c1" />,
+    title: '科研',
+    desc: '从学科订阅到实验规划、数据分析与写作的科研工作台',
+    chips: ['订阅', 'Idea Feed', '实验规划', '写作'],
   },
   {
     featureKey: 'learning',
@@ -218,7 +233,7 @@ export default function HomeDashboard({ onNavigate }: HomeDashboardProps) {
     <Page>
       <Header>
         <Title>AI-Office 个人工作台</Title>
-        <Subtitle>围绕工作、学习、生活三个场景组织你的 AI 能力</Subtitle>
+        <Subtitle>围绕行政、科研、学习、生活四个场景组织你的 AI 能力</Subtitle>
       </Header>
 
       <ScenarioGrid>
@@ -258,4 +273,3 @@ export default function HomeDashboard({ onNavigate }: HomeDashboardProps) {
     </Page>
   )
 }
-

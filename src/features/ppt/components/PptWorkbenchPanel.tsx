@@ -1,7 +1,9 @@
 import React from 'react'
 import styled from 'styled-components'
 import type { PptAiMessage, PptSlidePreview, PptTaskStatus } from '../../../contexts/GenerationWorkbenchContext'
+import PptAiEditPanel from './PptAiEditPanel'
 import PptEditorShell from './PptEditorShell'
+import PptSlideNavigator from './PptSlideNavigator'
 import type { PptTemplateOption } from '../services/pptTemplates'
 
 const EmptyShell = styled.div`
@@ -57,8 +59,10 @@ interface PptWorkbenchPanelProps {
   templateBusy?: boolean
   pptOutputMode?: 'editable_pptx' | 'web_deck'
   pptPreviewUrl?: string
+  pptDownloadUrl?: string | null
   pptSlidevMarkdown?: string
   onDownloadPpt: () => void
+  onExportSlidev?: (format: 'pdf' | 'png' | 'pptx') => void
   onTemplateChange: (templateId: string) => void
   onSelectSlide: (index: number) => void
   onRegenerateDeck: () => void
@@ -84,8 +88,10 @@ export default function PptWorkbenchPanel({
   templateBusy,
   pptOutputMode,
   pptPreviewUrl,
+  pptDownloadUrl,
   pptSlidevMarkdown,
   onDownloadPpt,
+  onExportSlidev,
   onTemplateChange,
   onSelectSlide,
   onRegenerateDeck,
@@ -103,14 +109,24 @@ export default function PptWorkbenchPanel({
     )
   }
 
-  // Slidev web_deck: show HTML preview iframe + download buttons
+  const activeSlide = liveSlides[activeSlideIndex] ?? null
+  const activeMessages = activeSlide?.id ? pptEditMessages[activeSlide.id] || [] : []
+
   if (pptOutputMode === 'web_deck' && pptPreviewUrl) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', minHeight: 0, background: '#f5f7fa' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px', background: '#fff', borderBottom: '1px solid #e4e9f0', fontSize: 13, color: '#2d3a4a' }}>
           <span style={{ fontWeight: 600 }}>{title}</span>
-          <span style={{ marginLeft: 4, padding: '2px 8px', borderRadius: 4, background: '#e8f0fe', color: '#3367d6', fontSize: 12 }}>Slidev 网页演示</span>
+          <span style={{ marginLeft: 4, padding: '2px 8px', borderRadius: 4, background: '#e8f0fe', color: '#3367d6', fontSize: 12 }}>当前模式：网页演示 Slidev</span>
           <span style={{ flex: 1 }} />
+          <button
+            type="button"
+            onClick={onDownloadPpt}
+            disabled={!pptDownloadUrl}
+            style={{ padding: '4px 12px', borderRadius: 4, background: '#0f766e', color: '#fff', fontSize: 13, border: 'none', cursor: pptDownloadUrl ? 'pointer' : 'not-allowed', opacity: pptDownloadUrl ? 1 : 0.55 }}
+          >
+            下载 Markdown
+          </button>
           <a
             href={pptPreviewUrl}
             target="_blank"
@@ -126,35 +142,54 @@ export default function PptWorkbenchPanel({
           >
             下载 HTML
           </a>
+          <button
+            type="button"
+            disabled
+            title="Slidev CLI export 未启用，请设置 SLIDEV_CLI_ENABLED=1 并安装 @slidev/cli 与 playwright-chromium。"
+            style={{ padding: '4px 12px', borderRadius: 4, background: '#f1f5f9', color: '#64748b', fontSize: 13, border: '1px solid #cbd5e1', cursor: 'not-allowed' }}
+          >
+            导出 PDF
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              window.alert('Slidev PPTX 为图片型 PPTX，文字不可直接编辑，不作为正式可编辑 PPTX 主方案。')
+              onExportSlidev?.('pptx')
+            }}
+            style={{ padding: '4px 12px', borderRadius: 4, background: '#fff7ed', color: '#9a3412', fontSize: 13, border: '1px solid #fed7aa', cursor: 'pointer' }}
+          >
+            导出 PPTX（图片型）
+          </button>
         </div>
-        <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '220px minmax(0, 1fr) 360px', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+          <PptSlideNavigator
+            slides={liveSlides}
+            activeIndex={activeSlideIndex}
+            editingSlideId={pptEditingSlideId}
+            slideEditStatus={pptSlideEditStatus}
+            onSelectSlide={onSelectSlide}
+          />
           <iframe
             src={pptPreviewUrl}
             title={`Slidev 预览：${title}`}
             style={{ flex: 1, border: 'none', background: '#fff' }}
-            sandbox="allow-same-origin allow-scripts"
+            sandbox=""
           />
-          {/* Right: AI edit panel */}
-          <div style={{ width: 320, flexShrink: 0, borderLeft: '1px solid #e4e9f0', background: '#fff', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ padding: '12px 16px', borderBottom: '1px solid #e4e9f0', fontWeight: 600, fontSize: 14, color: '#2d3a4a' }}>AI 页面修改</div>
-            <div style={{ flex: 1, overflow: 'auto', padding: 12 }}>
+          <div style={{ minWidth: 0, borderLeft: '1px solid #e4e9f0', background: '#fff', display: 'grid', gridTemplateRows: 'minmax(0, 1fr) auto' }}>
+            <PptAiEditPanel
+              slide={activeSlide}
+              pageNumber={activeSlideIndex + 1}
+              engineLabel="当前页修改引擎：Slidev"
+              messages={activeMessages}
+              status={pptSlideEditStatus}
+              onSend={onAiEditSlide}
+            />
+            <div style={{ borderTop: '1px solid #e4e9f0', padding: 10 }}>
               {pptSlidevMarkdown && (
-                <pre style={{ fontSize: 11, color: '#627385', background: '#f5f7fa', borderRadius: 6, padding: 10, overflow: 'auto', maxHeight: 320, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                <pre style={{ margin: 0, fontSize: 11, color: '#627385', background: '#f5f7fa', borderRadius: 6, padding: 10, overflow: 'auto', maxHeight: 160, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                   {pptSlidevMarkdown.slice(0, 2000)}{pptSlidevMarkdown.length > 2000 ? '\n…（已截断）' : ''}
                 </pre>
               )}
-            </div>
-            <div style={{ padding: 12, borderTop: '1px solid #e4e9f0', fontSize: 12, color: '#627385' }}>
-              <p style={{ margin: '0 0 8px' }}>Slidev 网页演示支持按页 AI 修改。在左侧选择页面后输入指令。</p>
-              <button
-                style={{ padding: '6px 14px', borderRadius: 4, background: '#3367d6', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 13 }}
-                onClick={() => {
-                  const instruction = window.prompt('输入修改指令（将修改当前选中页）：')
-                  if (instruction?.trim()) void onAiEditSlide(instruction.trim())
-                }}
-              >
-                修改当前页
-              </button>
             </div>
           </div>
         </div>

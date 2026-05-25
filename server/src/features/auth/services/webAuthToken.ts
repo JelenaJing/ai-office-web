@@ -1,14 +1,7 @@
 import { createHmac, timingSafeEqual } from 'crypto'
+import type { CanonicalAccountUser } from '../../../lib/accountCenterIdentity'
 
-export interface WebAuthUser {
-  id: string
-  username: string
-  displayName: string
-  email: string
-  roles: string[]
-  status: 'active' | 'disabled' | string
-  mustChangePassword: boolean
-}
+export interface WebAuthUser extends CanonicalAccountUser {}
 
 interface TokenPayload {
   typ: 'web-email-fallback'
@@ -51,15 +44,10 @@ export function verifyWebAuthToken(token: string | null | undefined): WebAuthUse
   }
 }
 
-export function createProvisionedMailboxUser(inputLogin: string, email: string): WebAuthUser {
-  const username = String(inputLogin || email).trim().toLowerCase().split('@')[0] || email.split('@')[0]
+export function createProvisionedMailboxUser(user: CanonicalAccountUser): WebAuthUser {
   return {
-    id: `mailbox:${email.toLowerCase()}`,
-    username,
-    displayName: username,
-    email: email.toLowerCase(),
-    roles: ['mailbox-fallback'],
-    status: 'active',
-    mustChangePassword: false,
+    ...user,
+    email: String(user.email || '').trim().toLowerCase(),
+    roles: Array.from(new Set([...(user.roles ?? []), 'mailbox-fallback'])),
   }
 }

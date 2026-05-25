@@ -3,6 +3,7 @@ import { Router } from 'express'
 import multer from 'multer'
 import { requireAccountUser } from '../../../lib/authUser'
 import { getArtifact, getArtifactFilePath } from '../../../artifacts/ArtifactStore'
+import { assertWorkspaceAccess, WorkspaceAccessError } from '../../../lib/workspaceAccess'
 import { getDocumentRecord, getDocumentTask, saveDocumentRecord, updateDocumentTask, createDocumentTask } from '../services/documentTaskStore'
 import { resolveDocumentKnowledgeRefs } from '../services/documentKnowledgeRefs'
 import {
@@ -81,8 +82,11 @@ function updateRecordFromRequest(record: NonNullable<ReturnType<typeof getDocume
 }
 
 function resolveWorkspacePath(userId: string, value: unknown): string {
-  const workspacePath = String(value || '').trim()
-  return workspacePath || `web-workspace:${userId}:document-workbench`
+  return assertWorkspaceAccess(
+    userId,
+    typeof value === 'string' ? value : undefined,
+    'editor',
+  ).workspacePath
 }
 
 function normalizeAttachments(value: unknown): Array<{ id?: string; name?: string }> {
@@ -230,7 +234,19 @@ router.post('/start', async (req, res) => {
   const userId = await requireAccountUser(req, res)
   if (!userId) return
 
-  const workspacePath = String(req.body?.workspacePath || '').trim()
+  let workspacePath: string
+  try {
+    workspacePath = resolveWorkspacePath(userId, req.body?.workspacePath)
+  } catch (error) {
+    const workspaceError = error instanceof WorkspaceAccessError ? error : null
+    res.status(workspaceError?.status ?? 500).json({
+      success: false,
+      error: workspaceError?.message || (error instanceof Error ? error.message : String(error)),
+      code: workspaceError?.code,
+      bootstrap: workspaceError?.bootstrap,
+    })
+    return
+  }
   const prompt = String(req.body?.prompt || '').trim()
   const title = String(req.body?.title || '').trim()
   const templateId = typeof req.body?.templateId === 'string' ? req.body.templateId : undefined
@@ -240,10 +256,6 @@ router.post('/start', async (req, res) => {
   const documentType = normalizeDocumentType(req.body?.documentType)
   const language = req.body?.language === 'en-US' ? 'en-US' : (req.body?.language === 'zh-CN' ? 'zh-CN' : undefined)
 
-  if (!workspacePath) {
-    res.status(400).json({ success: false, error: 'workspacePath 不能为空' })
-    return
-  }
   if (!prompt) {
     res.status(400).json({ success: false, error: 'prompt 不能为空' })
     return

@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import styled from 'styled-components'
 import DocumentEngineHost from '../modules/writing/components/DocumentEngineHost'
-import WebDocumentWorkbench from '../modules/writing/components/WebDocumentWorkbench'
+import WebDocumentWorkbench from '../modules/document/components/WebDocumentWorkbench'
 import GenerationWorkbenchPanel from '../modules/generation/components/GenerationWorkbenchPanel'
 import CommunicationWorkbench from '../communication/CommunicationWorkbench'
 import HomeworkWorkbench from '../modules/homework/components/HomeworkWorkbench'

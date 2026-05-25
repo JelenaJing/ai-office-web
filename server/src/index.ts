@@ -22,9 +22,11 @@ import reportRouter from './features/report/routes'
 import chatRouter from './features/chat/routes'
 import communicationRouter from './features/communication/routes'
 import skillCenterRouter from './features/skill-center/routes'
+import integrationsRouter from './features/integrations/routes/contentHandoff'
 import {
   globalRateLimit,
   authRateLimit,
+  handoffRateLimit,
 } from './middleware/rateLimit'
 import {
   ACCOUNT_CENTER_UNREACHABLE_CODE,
@@ -103,6 +105,7 @@ app.use('/api/email', emailRouter)
 app.use('/api/calendar', calendarRouter)
 app.use('/api/settings', settingsRouter)
 app.use('/api/aios', aiosRouter)
+app.use('/api/integrations', handoffRateLimit, integrationsRouter)
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() })

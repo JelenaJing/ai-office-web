@@ -6,13 +6,13 @@ import fs from 'fs'
 import path from 'path'
 import { randomUUID } from 'crypto'
 import { resolveUserFile } from '../../../lib/userFiles'
-import { parseWorkspacePath } from '../../../artifacts/ArtifactStore'
 import {
   createArtifactDir,
   saveArtifactMetadata,
   type Artifact,
 } from '../../../artifacts/ArtifactStore'
 import { analyzeSpreadsheetWithChart, isSpreadsheetExt } from '../../../modules/excel'
+import { assertWorkspaceAccess, WorkspaceAccessError } from '../../../lib/workspaceAccess'
 
 export interface AnalyzeXlsxInput {
   userId: string
@@ -34,25 +34,24 @@ export async function runAnalyzeXlsxSkill(
     return { success: false, error: '请选择要分析的表格文件（fileId 不能为空）', status: 400 }
   }
 
-  const parsed = parseWorkspacePath(input.workspacePath)
-  if (!parsed) {
+  let access
+  try {
+    access = assertWorkspaceAccess(input.userId, input.workspacePath, 'editor')
+  } catch (error) {
+    const workspaceError = error instanceof WorkspaceAccessError ? error : null
     return {
       success: false,
-      error: `workspacePath 格式无效：${input.workspacePath}`,
-      status: 400,
+      error: workspaceError?.message || (error instanceof Error ? error.message : String(error)),
+      status: workspaceError?.status ?? 500,
     }
   }
 
-  if (parsed.userId !== input.userId) {
-    return { success: false, error: '无权访问该工作区', status: 403 }
-  }
-
-  const resolved = resolveUserFile(input.userId, fileId)
+  const resolved = resolveUserFile(input.userId, fileId, access.workspacePath)
   if (!resolved) {
     return { success: false, error: '文件不存在或无权访问', status: 404 }
   }
 
-  if (resolved.workspacePath !== input.workspacePath) {
+  if (resolved.workspacePath !== access.workspacePath) {
     return { success: false, error: '文件不属于当前工作区', status: 403 }
   }
 
@@ -78,7 +77,7 @@ export async function runAnalyzeXlsxSkill(
     const title = `${titleBase} 表格分析`
     const now = new Date().toISOString()
 
-    const dir = createArtifactDir(input.userId, parsed.wsId, artifactId)
+    const dir = createArtifactDir(input.userId, access.workspaceId, artifactId)
     const mdFilename = 'analysis.md'
     const chartFilename = 'chart.svg'
     const resultFilename = 'result.json'
@@ -96,8 +95,8 @@ export async function runAnalyzeXlsxSkill(
     const artifact: Artifact = {
       id: artifactId,
       userId: input.userId,
-      workspaceId: parsed.wsId,
-      workspacePath: input.workspacePath,
+      workspaceId: access.workspaceId,
+      workspacePath: access.workspacePath,
       type: 'data_analysis',
       title,
       editable: false,

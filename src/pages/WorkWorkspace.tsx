@@ -57,7 +57,7 @@ export default function WorkWorkspace({ onGoToWorkspace, onNavigate }: WorkWorks
   return (
     <Page>
       <PageHeader>
-        <PageTitle>工作场景</PageTitle>
+        <PageTitle>行政场景</PageTitle>
         <PageSubtitle>文稿编辑、邮件收发、日程管理、数据分析与 PPT 生成</PageSubtitle>
       </PageHeader>
 

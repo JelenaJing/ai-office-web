@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { requireAccountUser } from '../../../lib/authUser'
+import { assertWorkspaceAccess, WorkspaceAccessError } from '../../../lib/workspaceAccess'
 import {
   runPaperWorkflowService,
   type PaperWorkflowPaperType,
@@ -17,8 +18,11 @@ import { buildWorkbenchDraftFromMarkdown, persistWorkbenchDocument } from '../se
 const router = Router()
 
 function resolveWorkspacePath(userId: string, value: unknown): string {
-  const workspacePath = String(value || '').trim()
-  return workspacePath || `web-workspace:${userId}:document-workbench`
+  return assertWorkspaceAccess(
+    userId,
+    typeof value === 'string' ? value : undefined,
+    'editor',
+  ).workspacePath
 }
 
 /**
@@ -47,7 +51,18 @@ router.post('/start', async (req, res) => {
   const task = createPaperTask(paperType)
   const label = paperType === 'review' ? '文献综述' : '研究文章'
   const mode = typeof req.body?.mode === 'string' ? req.body.mode as PaperWorkflowMode : 'full'
-  const workspacePath = resolveWorkspacePath(userId, req.body?.workspacePath)
+  let workspacePath: string
+  try {
+    workspacePath = resolveWorkspacePath(userId, req.body?.workspacePath)
+  } catch (error) {
+    const workspaceError = error instanceof WorkspaceAccessError ? error : null
+    res.status(workspaceError?.status ?? 500).json({
+      error: workspaceError?.message || (error instanceof Error ? error.message : String(error)),
+      code: workspaceError?.code,
+      bootstrap: workspaceError?.bootstrap,
+    })
+    return
+  }
 
   updatePaperTask(task.taskId, { status: 'running', message: `正在启动${label} NFTCORE 链路…`, progress: 5 })
 

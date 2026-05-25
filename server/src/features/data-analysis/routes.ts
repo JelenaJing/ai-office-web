@@ -7,6 +7,7 @@ import {
   requestAnalysisJobCancel,
   updateAnalysisJob,
 } from './services/analysisJobStore'
+import { assertWorkspaceAccess, WorkspaceAccessError } from '../../lib/workspaceAccess'
 
 const router = Router()
 
@@ -20,13 +21,25 @@ router.post('/jobs/start', async (req, res) => {
   const userId = await requireAccountUser(req, res)
   if (!userId) return
   const fileId = String(req.body?.fileId || '').trim()
-  const workspacePath = String(req.body?.workspacePath || '').trim()
   if (!fileId) {
     res.status(400).json({ success: false, error: 'fileId 不能为空' })
     return
   }
-  if (!workspacePath) {
-    res.status(400).json({ success: false, error: 'workspacePath 不能为空' })
+  let access
+  try {
+    access = assertWorkspaceAccess(
+      userId,
+      typeof req.body?.workspacePath === 'string' ? req.body.workspacePath : undefined,
+      'editor',
+    )
+  } catch (error) {
+    const workspaceError = error instanceof WorkspaceAccessError ? error : null
+    res.status(workspaceError?.status ?? 500).json({
+      success: false,
+      code: workspaceError?.code,
+      error: workspaceError?.message || (error instanceof Error ? error.message : String(error)),
+      bootstrap: workspaceError?.bootstrap,
+    })
     return
   }
 
@@ -36,7 +49,7 @@ router.post('/jobs/start', async (req, res) => {
   void runAnalyzeXlsxSkill({
     userId,
     fileId,
-    workspacePath,
+    workspacePath: access.workspacePath,
     prompt: typeof req.body?.prompt === 'string' ? req.body.prompt : undefined,
     options: req.body?.options && typeof req.body.options === 'object' ? req.body.options : undefined,
   })

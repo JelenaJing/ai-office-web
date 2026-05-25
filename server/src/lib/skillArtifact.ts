@@ -3,12 +3,12 @@ import path from 'path'
 import { randomUUID } from 'crypto'
 import {
   createArtifactDir,
-  parseWorkspacePath,
   saveArtifactMetadata,
   type Artifact,
   type ArtifactKnowledgeRef,
   type ArtifactSourceRef,
 } from '../artifacts/ArtifactStore'
+import { assertWorkspaceAccess } from './workspaceAccess'
 
 export interface SaveSkillArtifactInput {
   userId: string
@@ -30,32 +30,19 @@ export interface SaveSkillArtifactInput {
 }
 
 export function saveSkillArtifact(input: SaveSkillArtifactInput): Artifact {
-  const parsed = parseWorkspacePath(input.workspacePath)
+  const access = assertWorkspaceAccess(input.userId, input.workspacePath, 'editor')
   const isPptArtifact = Boolean(input.deckId) || /ppt/i.test(input.skillId)
-  const resolvedWorkspaceOwner = parsed?.userId ?? ''
-  const canWrite = Boolean(parsed && parsed.userId === input.userId)
-  const reason = !parsed
-    ? 'workspacePath 格式无效'
-    : canWrite
-      ? 'workspace owner 与当前用户一致'
-      : `workspace owner=${parsed.userId}，当前用户无写入权限`
   if (isPptArtifact) {
     console.info(`[ppt-workspace] userId=${input.userId}`)
     console.info(`[ppt-workspace] username=${input.username || ''}`)
-    console.info(`[ppt-workspace] workspacePath=${input.workspacePath}`)
-    console.info(`[ppt-workspace] resolvedWorkspaceOwner=${resolvedWorkspaceOwner}`)
-    console.info(`[ppt-workspace] canWrite=${canWrite}`)
-    console.info(`[ppt-workspace] reason=${reason}`)
-  }
-  if (!parsed) {
-    throw new Error(`workspacePath 格式无效：${input.workspacePath}`)
-  }
-  if (!canWrite) {
-    throw new Error('无权写入该工作区')
+    console.info(`[ppt-workspace] workspacePath=${access.workspacePath}`)
+    console.info(`[ppt-workspace] resolvedWorkspaceOwner=${input.userId}`)
+    console.info('[ppt-workspace] canWrite=true')
+    console.info('[ppt-workspace] reason=assertWorkspaceAccess allowed write')
   }
 
   const artifactId = randomUUID()
-  const dir = createArtifactDir(input.userId, parsed.wsId, artifactId)
+  const dir = createArtifactDir(input.userId, access.workspaceId, artifactId)
   const filePath = path.join(dir, input.filename)
   if (typeof input.content === 'string') {
     fs.writeFileSync(filePath, input.content, 'utf-8')
@@ -66,8 +53,8 @@ export function saveSkillArtifact(input: SaveSkillArtifactInput): Artifact {
   const artifact: Artifact = {
     id: artifactId,
     userId: input.userId,
-    workspaceId: parsed.wsId,
-    workspacePath: input.workspacePath,
+    workspaceId: access.workspaceId,
+    workspacePath: access.workspacePath,
     type: input.type,
     title: input.title,
     editable: false,

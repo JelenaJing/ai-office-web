@@ -1,6 +1,6 @@
+import { createRequire } from 'module'
 import { Router } from 'express'
 import { requireAccountIdentity } from '../../lib/authUser'
-import { resolveWritableWorkspaceForUser } from '../../lib/workspaceStore'
 import {
   createDeckTask,
   getDeck,
@@ -14,10 +14,27 @@ import {
 } from './services/deckTaskStore'
 import { createDeckFromPrompt, exportDeckWithBuiltin, retemplateDeck } from './services/deckRuntime'
 import { editSlideWithMinimaxPptxGenerator, exportDeckWithMinimaxPptxGenerator, runMinimaxPptxGenerator } from './services/minimaxPptxGeneratorRunner'
-import { runSlidevDeckGenerator, editSlidevSlide } from './services/slidevDeckRunner'
+import { runSlidevDeckGenerator, editSlidevSlide, exportSlidevDeckArtifacts } from './services/slidevDeckRunner'
 import type { WebDeckDocument, WebDeckSlide, WebDeckTaskResult, PptEngine, PptOutputMode } from './types'
+import { assertWorkspaceAccess, WorkspaceAccessError } from '../../lib/workspaceAccess'
 
 const router = Router()
+const nodeRequire = createRequire(__filename)
+
+function sendWorkspaceError(res: import('express').Response, error: unknown): void {
+  const workspaceError = error instanceof WorkspaceAccessError ? error : null
+  if (workspaceError) {
+    res.status(workspaceError.status).json({
+      success: false,
+      code: workspaceError.code,
+      error: workspaceError.message,
+      bootstrap: workspaceError.bootstrap,
+    })
+    return
+  }
+  const message = error instanceof Error ? error.message : String(error)
+  res.status(500).json({ success: false, error: message })
+}
 
 function validateCompletedDeckTaskResult(result: WebDeckTaskResult | undefined): string | null {
   if (!result) return 'PPT 任务缺少 result，无法完成。'
@@ -63,6 +80,24 @@ function resolvePptEngine(): { engine: PptEngine; fallback: 'builtin' | 'none' }
   const engine: PptEngine = envEngine === 'builtin' ? 'builtin' : envEngine === 'slidev' ? 'slidev' : 'minimax_pptx_generator'
   const fallback = process.env.PPT_ENGINE_FALLBACK === 'none' ? 'none' : 'builtin'
   return { engine, fallback }
+}
+
+function resolvePptOutputMode(): PptOutputMode {
+  return process.env.PPT_OUTPUT_MODE === 'web_deck' ? 'web_deck' : 'editable_pptx'
+}
+
+function checkSlidevCliExportDependencies(): string | null {
+  try {
+    nodeRequire.resolve('@slidev/cli')
+  } catch {
+    return '@slidev/cli'
+  }
+  try {
+    nodeRequire.resolve('playwright-chromium')
+  } catch {
+    return 'playwright-chromium'
+  }
+  return null
 }
 
 function resolveRequestedEngine(body: unknown): PptEngine | null {
@@ -154,7 +189,7 @@ router.post('/decks/start', async (req, res) => {
   const user = await requireAccountIdentity(req, res)
   if (!user) return
 
-  const requestedWorkspacePath = String(req.body?.workspacePath || '').trim()
+  const requestedWorkspacePath = typeof req.body?.workspacePath === 'string' ? req.body.workspacePath : undefined
   const prompt = String(req.body?.prompt || req.body?.topic || '').trim()
   const title = String(req.body?.title || prompt.slice(0, 40) || '演示文稿').trim()
   console.info('[ppt-runtime] received request /api/ppt/decks/start')
@@ -165,26 +200,30 @@ router.post('/decks/start', async (req, res) => {
     res.status(400).json({ success: false, error: 'prompt 不能为空' })
     return
   }
-  const workspaceAccess = resolveWritableWorkspaceForUser(user.id, requestedWorkspacePath)
+  let workspaceAccess
+  try {
+    workspaceAccess = assertWorkspaceAccess(user.id, requestedWorkspacePath, 'editor')
+  } catch (error) {
+    sendWorkspaceError(res, error)
+    return
+  }
   const workspacePath = workspaceAccess.workspacePath
   console.info(`[ppt-workspace] userId=${user.id}`)
   console.info(`[ppt-workspace] username=${user.username}`)
   console.info(`[ppt-workspace] workspacePath=${workspacePath}`)
-  console.info(`[ppt-workspace] resolvedWorkspaceOwner=${workspaceAccess.resolvedWorkspaceOwner}`)
-  console.info(`[ppt-workspace] canWrite=${workspaceAccess.canWrite}`)
-  console.info(`[ppt-workspace] reason=${workspaceAccess.reason}`)
-  if (workspaceAccess.switchedFrom && workspaceAccess.switchedTo) {
-    console.warn(`[ppt-workspace] switchedFrom=${workspaceAccess.switchedFrom}`)
-    console.warn(`[ppt-workspace] switchedTo=${workspaceAccess.switchedTo}`)
-  }
+  console.info(`[ppt-workspace] resolvedWorkspaceOwner=${user.id}`)
+  console.info('[ppt-workspace] canWrite=true')
+  console.info('[ppt-workspace] reason=assertWorkspaceAccess allowed write')
 
   // Resolve engine: request body takes priority over env
   const requestedEngine = resolveRequestedEngine(req.body)
   const requestedOutputMode = resolveRequestedOutputMode(req.body)
   const engineConfig = resolvePptEngine()
+  const defaultOutputMode = resolvePptOutputMode()
   const activeEngine: PptEngine = requestedEngine || engineConfig.engine
-  const activeOutputMode: PptOutputMode = requestedOutputMode
-    || (activeEngine === 'slidev' ? 'web_deck' : 'editable_pptx')
+  const activeOutputMode: PptOutputMode = activeEngine === 'slidev'
+    ? 'web_deck'
+    : (requestedOutputMode === 'editable_pptx' ? 'editable_pptx' : defaultOutputMode === 'editable_pptx' ? 'editable_pptx' : 'editable_pptx')
 
   const task = createDeckTask()
   console.info('[ppt-runtime] route=/api/ppt/decks/start')
@@ -223,6 +262,7 @@ router.post('/decks/start', async (req, res) => {
     return {
       ...result,
       engine: 'builtin' as const,
+      outputMode: 'editable_pptx' as const,
       fallbackFrom: 'minimax_pptx_generator' as const,
       fallbackReason,
     }
@@ -244,6 +284,31 @@ router.post('/decks/start', async (req, res) => {
           onStep: (message, progress) => updateDeckTask(task.taskId, { status: 'running', message, progress }),
         })
         return result as unknown as WebDeckTaskResult
+      }
+      if (activeEngine === 'minimax_pptx_generator') {
+        return runMinimaxPptxGenerator({
+          userId: user.id,
+          username: user.username,
+          workspacePath,
+          title,
+          prompt,
+          taskId: task.taskId,
+          routePath: '/api/ppt/decks/start',
+          skillId: 'minimax.pptx-generator',
+          language: req.body?.language === 'en-US' ? 'en-US' : 'zh-CN',
+          slideCount: typeof req.body?.slideCount === 'number'
+            ? req.body.slideCount
+            : Number(req.body?.slideCount || 0) || undefined,
+          themeId: typeof req.body?.themeId === 'string' ? req.body.themeId : undefined,
+          source: req.body?.source === 'manuscript' || req.body?.source === 'matter' ? req.body.source : 'topic',
+          sourceId: typeof req.body?.matterId === 'string'
+            ? req.body.matterId
+            : typeof req.body?.documentId === 'string'
+              ? req.body.documentId
+              : undefined,
+          isCancelled: () => Boolean(getDeckTask(task.taskId)?.cancelRequested),
+          onStep: (message, progress) => updateDeckTask(task.taskId, { status: 'running', message, progress }),
+        })
       }
       return runBuiltinEngine()
     }
@@ -464,18 +529,20 @@ router.post('/decks/:deckId/retemplate', async (req, res) => {
       skillId: 'web.ppt.deck.create',
     })
     const deck = saveDeck(result.deck)
-    saveDeckRuntimeMeta({
-      ...runtimeMeta,
-      engine: 'builtin',
-      skillId: 'web.ppt.deck.create',
+      saveDeckRuntimeMeta({
+        ...runtimeMeta,
+        engine: 'builtin',
+        outputMode: 'editable_pptx',
+        skillId: 'web.ppt.deck.create',
       artifactId: result.artifact.id,
       exportUrl: result.exportUrl,
       updatedAt: new Date().toISOString(),
     })
-    res.json({
-      success: true,
-      engine: 'builtin',
-      deck,
+      res.json({
+        success: true,
+        engine: 'builtin',
+        outputMode: 'editable_pptx',
+        deck,
       slides: deck.slides,
       artifact: result.artifact,
       exportUrl: result.exportUrl,
@@ -608,6 +675,7 @@ router.post('/decks/:deckId/slides/:slideId/edit', async (req, res) => {
         res.json({
           success: true,
           engine: result.engine,
+          outputMode: 'editable_pptx',
           skillId: result.skillId,
           deckId: result.deckId,
           slideId: result.slideId,
@@ -654,6 +722,7 @@ router.post('/decks/:deckId/slides/:slideId/edit', async (req, res) => {
     saveDeckRuntimeMeta({
       ...runtimeMeta,
       engine: 'builtin',
+      outputMode: 'editable_pptx',
       skillId: 'web.ppt.deck.create',
       artifactId: exported.artifact.id,
       exportUrl: exported.exportUrl,
@@ -664,6 +733,7 @@ router.post('/decks/:deckId/slides/:slideId/edit', async (req, res) => {
     res.json({
       success: true,
       engine: 'builtin',
+      outputMode: 'editable_pptx',
       skillId: 'web.ppt.deck.create',
       deckId: nextDeck.deckId,
       slideId: updatedSlide.id,
@@ -711,24 +781,41 @@ router.post('/decks/:deckId/export', async (req, res) => {
   console.info(`[ppt-runtime] usingMinimaxSkill=${engine === 'minimax_pptx_generator'}`)
 
   try {
-    // Slidev engine: return existing markdown/html artifacts or 501 for pdf/png/pptx
     if (engine === 'slidev') {
       if (requestedFormat === 'md' || requestedFormat === 'html') {
         const isHtml = requestedFormat === 'html'
-        const artifactId = isHtml ? (runtimeMeta.htmlArtifactId || null) : runtimeMeta.artifactId
-        const url = isHtml ? (runtimeMeta.previewUrl || null) : runtimeMeta.exportUrl
-        if (!url) {
-          res.status(404).json({ success: false, error: `Slidev ${requestedFormat} artifact 不存在` })
-          return
-        }
+        const exported = exportSlidevDeckArtifacts({
+          userId: user.id,
+          username: user.username,
+          workspacePath: runtimeMeta.workspacePath,
+          deck,
+        })
+        saveDeck(exported.deck)
+        saveDeckRuntimeMeta({
+          ...runtimeMeta,
+          engine: 'slidev',
+          outputMode: 'web_deck',
+          skillId: 'web.ppt.slidev',
+          artifactId: exported.markdownArtifactId,
+          exportUrl: exported.exportUrl,
+          previewUrl: exported.previewUrl,
+          htmlArtifactId: exported.htmlArtifactId,
+          updatedAt: new Date().toISOString(),
+        })
         res.json({
           success: true,
           engine: 'slidev',
           outputMode: 'web_deck',
           deckId: deck.deckId,
           format: requestedFormat,
-          artifactId,
-          exportUrl: url,
+          deck: exported.deck,
+          slides: exported.slides,
+          artifact: isHtml ? exported.htmlArtifact : exported.artifact,
+          exportUrl: isHtml ? exported.previewUrl : exported.exportUrl,
+          previewUrl: exported.previewUrl,
+          slidevMarkdown: exported.slidevMarkdown,
+          markdownArtifactId: exported.markdownArtifactId,
+          htmlArtifactId: exported.htmlArtifactId,
           message: isHtml ? 'Slidev HTML preview 已准备' : 'Slidev Markdown 已准备',
         })
         return
@@ -743,10 +830,19 @@ router.post('/decks/:deckId/export', async (req, res) => {
           })
           return
         }
+        const missing = checkSlidevCliExportDependencies()
+        if (missing) {
+          res.status(501).json({
+            success: false,
+            error: `Slidev CLI export 未启用，请设置 SLIDEV_CLI_ENABLED=1 并安装 @slidev/cli 与 playwright-chromium。缺失依赖：${missing}`,
+            message: 'Slidev PPTX 为图片型 PPTX，文字不可直接编辑，不作为正式可编辑 PPTX 主方案。',
+          })
+          return
+        }
         res.status(501).json({
           success: false,
           error: 'Slidev PPTX 导出功能尚未实现。',
-          message: 'Slidev PPTX 为图片型 PPTX，文字不可直接编辑。',
+          message: 'Slidev PPTX 为图片型 PPTX，文字不可直接编辑，不作为正式可编辑 PPTX 主方案。',
         })
         return
       }
@@ -756,6 +852,14 @@ router.post('/decks/:deckId/export', async (req, res) => {
           res.status(501).json({
             success: false,
             error: `Slidev ${requestedFormat.toUpperCase()} export 未启用，请设置 SLIDEV_CLI_ENABLED=1 并安装 @slidev/cli 与 playwright-chromium。`,
+          })
+          return
+        }
+        const missing = checkSlidevCliExportDependencies()
+        if (missing) {
+          res.status(501).json({
+            success: false,
+            error: `Slidev ${requestedFormat.toUpperCase()} export 未启用，请设置 SLIDEV_CLI_ENABLED=1 并安装 @slidev/cli 与 playwright-chromium。缺失依赖：${missing}`,
           })
           return
         }
@@ -781,10 +885,11 @@ router.post('/decks/:deckId/export', async (req, res) => {
         })
 
     saveDeck(exported.deck)
-    saveDeckRuntimeMeta({
-      ...runtimeMeta,
-      engine,
-      skillId: engine === 'minimax_pptx_generator' ? 'minimax.pptx-generator' : 'web.ppt.deck.create',
+      saveDeckRuntimeMeta({
+        ...runtimeMeta,
+        engine,
+        outputMode: 'editable_pptx',
+        skillId: engine === 'minimax_pptx_generator' ? 'minimax.pptx-generator' : 'web.ppt.deck.create',
       artifactId: exported.artifact.id,
       exportUrl: exported.exportUrl,
       updatedAt: new Date().toISOString(),
@@ -794,6 +899,7 @@ router.post('/decks/:deckId/export', async (req, res) => {
     res.json({
       success: true,
       engine,
+      outputMode: 'editable_pptx',
       deckId: deck.deckId,
       artifact: exported.artifact,
       exportUrl: exported.exportUrl,

@@ -920,6 +920,7 @@ export default function GenerationPromptComposer() {
         pptOutputMode: null,
         pptPreviewUrl: null,
         pptSlidevMarkdown: null,
+        pptDiagnostics: null,
         pptSlides: [],
         pptLiveSlides: [],
         pptPreviewSlides: [],
@@ -981,6 +982,7 @@ export default function GenerationPromptComposer() {
         const fallbackReason = resultData?.fallbackReason || null
         const previewUrl = resultData?.previewUrl || null
         const slidevMarkdown = resultData?.slidevMarkdown || null
+        const diagnostics = resultData?.diagnostics || null
         const deckTemplateId = deck && typeof deck.templateId === 'string' ? deck.templateId : null
         const liveSlides = mergeDeckIntoLiveSlides(resultData || deck || null, [])
         const downloadUrl = resultData?.exportUrl
@@ -1014,6 +1016,7 @@ export default function GenerationPromptComposer() {
           pptOutputMode: outputMode,
           pptPreviewUrl: previewUrl,
           pptSlidevMarkdown: slidevMarkdown,
+          pptDiagnostics: diagnostics,
           resultType: 'pptx',
           resultAssetId: artifact.id,
           resultPath: downloadUrl || artifact.id,
@@ -2539,25 +2542,32 @@ export default function GenerationPromptComposer() {
             </UnifiedVoiceButton>
           )}
         />
-        <UnifiedComposerStatusRow>
+          <UnifiedComposerStatusRow>
           <UnifiedComposerStatusPill $tone={effectiveBusy ? 'running' : 'idle'}>
             {currentMode === 'image' ? '图片生成' : currentMode === 'ppt' ? 'PPT 生成' : modeOption.label}
           </UnifiedComposerStatusPill>
           <UnifiedComposerStatusText>{modeStatus}</UnifiedComposerStatusText>
           <UnifiedComposerStatusText>{voiceListening ? '语音输入中…' : 'Enter 发送，Shift+Enter 换行'}</UnifiedComposerStatusText>
           {currentMode === 'ppt' && isWebShim() && (
-            <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#627385' }}>
-              演示类型：
-              <select
-                value={pptEngineMode}
-                onChange={(e) => setPptEngineMode(e.target.value as 'minimax_pptx_generator' | 'slidev')}
-                disabled={effectiveBusy}
-                style={{ fontSize: 13, padding: '2px 6px', borderRadius: 4, border: '1px solid #c8d6e5', background: '#fff', color: '#2d3a4a' }}
-                title="选择生成引擎：正式 PPTX（可编辑）或网页演示 Slidev（Markdown/HTML）"
-              >
-                <option value="minimax_pptx_generator">正式 PPTX（推荐）</option>
-                <option value="slidev">网页演示 Slidev</option>
-              </select>
+            <span style={{ marginLeft: 'auto', display: 'grid', gap: 6, minWidth: 260, maxWidth: 520, fontSize: 13, color: '#627385' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, color: '#2d3a4a' }}>
+                演示类型：
+                <select
+                  value={pptEngineMode}
+                  onChange={(e) => setPptEngineMode(e.target.value as 'minimax_pptx_generator' | 'slidev')}
+                  disabled={effectiveBusy}
+                  style={{ fontSize: 13, padding: '3px 8px', borderRadius: 6, border: '1px solid #c8d6e5', background: '#fff', color: '#2d3a4a' }}
+                  title="选择生成引擎：正式 PPTX（可编辑）或网页演示 Slidev（Markdown/HTML）"
+                >
+                  <option value="minimax_pptx_generator">正式 PPTX，推荐</option>
+                  <option value="slidev">网页演示 Slidev</option>
+                </select>
+              </label>
+              <span style={{ lineHeight: 1.55 }}>
+                {pptEngineMode === 'slidev'
+                  ? '适合科研展示、技术分享、课堂展示；支持 Markdown、代码、公式、Mermaid，第一阶段生成 Markdown artifact + HTML preview。'
+                  : '适合工作汇报、行政材料、商务方案；底层使用 MiniMax PPTX Generator，导出 .pptx 后 PowerPoint/WPS 可继续编辑。'}
+              </span>
             </span>
           )}
           {currentMode === 'ppt' && false && pptTemplates.length > 1 && (

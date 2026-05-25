@@ -1125,6 +1125,7 @@ export async function runMinimaxPptxGenerator(input: RunMinimaxPptxGeneratorInpu
 
     return {
       engine: 'minimax_pptx_generator',
+      outputMode: 'editable_pptx',
       deckId,
       deck,
       slides: deck.slides.length > 0 ? deck.slides : [{

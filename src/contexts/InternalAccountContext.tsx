@@ -33,6 +33,10 @@ import {
   INTERNAL_MAIL_WEB_URL,
 } from '../accountCenterConfig'
 import { isForcePasswordChangeRequired } from '../config'
+import {
+  bootstrapWorkspaceForUser,
+  clearCurrentWorkspaceState,
+} from '../services/workspaceBootstrapClient'
 
 /* ---- web token persistence keys ---- */
 const PRIMARY_TOKEN_KEY = 'aios_auth_token'
@@ -98,6 +102,7 @@ function clearWebAuthSession(): void {
   removeLocalStorage(SHIM_TOKEN_KEY)
   removeLocalStorage(LEGACY_TOKEN_KEY)
   removeLocalStorage(USER_KEY)
+  clearCurrentWorkspaceState()
 }
 
 async function readStoredToken(): Promise<string | null> {
@@ -209,6 +214,8 @@ interface InternalAccountContextValue {
   applyEmailConfig: () => Promise<void>
   /** 返回当前会话内存中暂存的密码；不打日志；重启后为 null */
   getSessionPassword: () => string | null
+  /** 使用已有 AccountCenter token 直接建立登录态（用于外部 handoff 跳转） */
+  loginWithToken: (token: string) => Promise<void>
 }
 
 const InternalAccountContext = createContext<InternalAccountContextValue | null>(null)
@@ -272,8 +279,9 @@ export function InternalAccountProvider({ children }: { children: ReactNode }) {
       // Stay in 'restoring' while validating — App shows startup splash
         client
         .me(token)
-        .then((user) => {
+        .then(async (user) => {
           persistWebAuthSession(token, user)
+          await bootstrapWorkspaceForUser(user.id).catch(() => null)
           clearForcePasswordChangeStorage()
           // Mark bindings as loading immediately so UI shows spinner, not infinite "loading"
           setState({ phase: 'logged_in', session: { token, user, bindingsPhase: 'loading' } })
@@ -320,6 +328,39 @@ export function InternalAccountProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('account:session-expired', handler)
   }, [])
 
+  /* ---- loginWithToken (handoff / SSO) ---- */
+  const loginWithToken = useCallback(async (token: string) => {
+    const user = await client.me(token)
+    if (user.status === 'disabled') {
+      throw new Error('该内部账号已被禁用，请联系管理员')
+    }
+    await storeToken(token, user)
+    await bootstrapWorkspaceForUser(user.id).catch(() => null)
+    clearForcePasswordChangeStorage()
+    if (isForcePasswordChangeRequired(user)) {
+      setState({ phase: 'must_change_password', session: { token, user, bindingsPhase: 'loading' } })
+      return
+    }
+    setState({ phase: 'logged_in', session: { token, user, bindingsPhase: 'loading' } })
+    void client.getBindings(token, user.id).then(
+      (bindings) => {
+        setState((prev) =>
+          prev.phase === 'logged_in'
+            ? { phase: 'logged_in', session: { ...prev.session, bindings, bindingsPhase: 'success' } }
+            : prev,
+        )
+      },
+      (err) => {
+        const bindingsError = err instanceof Error ? err.message : '服务绑定状态读取失败'
+        setState((prev) =>
+          prev.phase === 'logged_in'
+            ? { phase: 'logged_in', session: { ...prev.session, bindingsPhase: 'error', bindingsError } }
+            : prev,
+        )
+      },
+    )
+  }, [])
+
   /* ---- login ---- */
   const login = useCallback(async (username: string, password: string) => {
     if (loginInProgressRef.current) {
@@ -331,7 +372,8 @@ export function InternalAccountProvider({ children }: { children: ReactNode }) {
     console.log(`[InternalAccount] login start requestId=${requestId} user=${username}`)
     setState({ phase: 'loading' })
     try {
-      const { token, user, authMethod, autoBoundMailbox, message } = await client.login(username, password)
+      const { token, authMethod, autoBoundMailbox, message } = await client.login(username, password)
+      const user = await client.me(token)
 
       if (user.status === 'disabled') {
         setState({ phase: 'error', message: '该内部账号已被禁用，请联系管理员' })
@@ -345,6 +387,7 @@ export function InternalAccountProvider({ children }: { children: ReactNode }) {
       mailboxPasswordRef.current = password
 
       await storeToken(token, user)
+      await bootstrapWorkspaceForUser(user.id).catch(() => null)
 
       clearForcePasswordChangeStorage()
 
@@ -433,6 +476,7 @@ export function InternalAccountProvider({ children }: { children: ReactNode }) {
     passwordRef.current = null // clear in-memory password
     mailboxPasswordRef.current = null
     clearStoredToken().catch(() => {/* ignore */})
+    clearCurrentWorkspaceState()
     setState({ phase: 'idle' })
   }, [])
 
@@ -554,7 +598,7 @@ export function InternalAccountProvider({ children }: { children: ReactNode }) {
 
   return (
     <InternalAccountContext.Provider
-      value={{ state, login, logout, loadBindings, changePassword, completeForcePasswordChange, applyEmailConfig, getSessionPassword }}
+      value={{ state, login, loginWithToken, logout, loadBindings, changePassword, completeForcePasswordChange, applyEmailConfig, getSessionPassword }}
     >
       {children}
     </InternalAccountContext.Provider>

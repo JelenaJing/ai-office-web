@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { requireAccountUser } from '../../../lib/authUser'
+import { assertWorkspaceAccess } from '../../../lib/workspaceAccess'
 import {
   analyzeFormalTemplate,
   generateFormalTemplate,
@@ -17,8 +18,11 @@ import { buildWorkbenchDraftFromMarkdown, persistWorkbenchDocument } from '../se
 const router = Router()
 
 function resolveWorkspacePath(userId: string, value: unknown): string {
-  const workspacePath = String(value || '').trim()
-  return workspacePath || `web-workspace:${userId}:document-workbench`
+  return assertWorkspaceAccess(
+    userId,
+    typeof value === 'string' ? value : undefined,
+    'editor',
+  ).workspacePath
 }
 
 function collectFieldOverrides(value: unknown): Record<string, string> {

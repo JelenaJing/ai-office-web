@@ -240,6 +240,7 @@ export async function createDeckFromPrompt(input: CreateDeckInput): Promise<WebD
 
   return {
     engine: 'builtin',
+    outputMode: 'editable_pptx',
     deckId,
     deck: exported.deck,
     slides: exported.deck.slides,

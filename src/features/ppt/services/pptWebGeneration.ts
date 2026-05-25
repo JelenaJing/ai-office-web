@@ -40,6 +40,7 @@ export interface WebPptDeckPayload {
   htmlArtifactId?: string
   fallbackFrom?: 'minimax_pptx_generator'
   fallbackReason?: string
+  diagnostics?: Record<string, unknown>
   tokenUsed?: boolean
   message?: string
 }
@@ -98,6 +99,7 @@ export function parseWebPptDeckPayload(value: unknown): WebPptDeckPayload {
     htmlArtifactId: pickString(raw.htmlArtifactId),
     fallbackFrom: raw.fallbackFrom === 'minimax_pptx_generator' ? 'minimax_pptx_generator' : undefined,
     fallbackReason: pickString(raw.fallbackReason),
+    diagnostics: pickObject(raw.diagnostics) || undefined,
     tokenUsed: typeof raw.tokenUsed === 'boolean' ? raw.tokenUsed : undefined,
     message: pickString(raw.message),
   }
@@ -129,7 +131,10 @@ export async function runWebPptxCreate(input: {
   workspacePath: string
   title: string
   prompt: string
+  slideCount?: number
+  themeId?: string
   templateId?: string
+  language?: 'zh-CN' | 'en-US'
   engine?: 'minimax_pptx_generator' | 'slidev' | 'builtin'
   outputMode?: 'editable_pptx' | 'web_deck'
 }): Promise<WebPptCreateResult> {
@@ -154,7 +159,10 @@ export async function runWebPptxCreate(input: {
         workspacePath: input.workspacePath,
         title: input.title.trim() || '演示文稿',
         prompt: input.prompt.trim() || input.title,
+        slideCount: input.slideCount,
+        themeId: input.themeId,
         templateId: input.templateId,
+        language: input.language,
         source: 'topic',
         engine: input.engine,
         outputMode: input.outputMode,
@@ -391,9 +399,13 @@ export async function exportWebPptDeck(input: {
     return {
       success: true,
       engine: payload.engine,
+      outputMode: payload.outputMode,
       deckId: payload.deckId,
       artifact: payload.artifact,
       exportUrl: payload.exportUrl,
+      previewUrl: payload.previewUrl,
+      slidevMarkdown: payload.slidevMarkdown,
+      format: body.format,
       deck: payload.deck,
       slides: payload.slides,
       previewImages: payload.previewImages,

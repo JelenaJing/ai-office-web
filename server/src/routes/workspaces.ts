@@ -18,22 +18,42 @@
 import { Router } from 'express'
 import fs from 'fs'
 import path from 'path'
-import { randomUUID } from 'crypto'
 import { requireAccountIdentity, requireAccountUser } from '../lib/authUser'
 import {
-  getOrCreateDefaultWorkspace,
-  getOrCreateDefaultWorkspaceWithMeta,
   hasDocument,
   readIndex,
-  resolveWorkspaceOwner,
   writeIndex,
   workspaceDir,
-  clientPath,
   parseClientPath,
   toSafeName,
 } from '../lib/workspaceStore'
+import {
+  assertWorkspaceAccess,
+  bootstrapWorkspaceForUser,
+  createWorkspaceForUser,
+  ensureWorkspaceMetadata,
+  WorkspaceAccessError,
+} from '../lib/workspaceAccess'
 
 const router = Router()
+
+function sendWorkspaceError(
+  res: { status: (status: number) => { json: (body: unknown) => void } },
+  error: unknown,
+): void {
+  const workspaceError = error instanceof WorkspaceAccessError ? error : null
+  if (workspaceError) {
+    res.status(workspaceError.status).json({
+      success: false,
+      code: workspaceError.code,
+      error: workspaceError.message,
+      bootstrap: workspaceError.bootstrap,
+    })
+    return
+  }
+  const message = error instanceof Error ? error.message : String(error)
+  res.status(500).json({ success: false, error: message })
+}
 
 // ── GET /api/workspaces/default ───────────────────────────────────────────────
 // Must be registered before dynamic routes.
@@ -41,20 +61,37 @@ const router = Router()
 router.get('/default', async (req, res) => {
   const user = await requireAccountIdentity(req, res)
   if (!user) return
-  const { entry, created } = getOrCreateDefaultWorkspaceWithMeta(user.id)
+  const bootstrapped = bootstrapWorkspaceForUser(user.id)
   console.info(`[workspace-default] userId=${user.id}`)
   console.info(`[workspace-default] username=${user.username}`)
-  console.info(`[workspace-default] workspacePath=${entry.path}`)
-  console.info(`[workspace-default] created=${created}`)
-  console.info(`[workspace-default] owner=${resolveWorkspaceOwner(entry.path) || user.id}`)
+  console.info(`[workspace-default] workspacePath=${bootstrapped.currentWorkspacePath}`)
+  console.info(`[workspace-default] created=${bootstrapped.created}`)
   return res.json({
     success: true,
+    ...bootstrapped,
     workspace: {
-      name: entry.name,
-      path: entry.path,
-      hasDocument: hasDocument(user.id, entry.id),
-      modifiedAt: entry.modifiedAt,
-      isDefault: true,
+      ...bootstrapped.workspace,
+      hasDocument: hasDocument(user.id, bootstrapped.currentWorkspaceId),
+      modifiedAt: new Date().toISOString(),
+    },
+  })
+})
+
+router.post('/bootstrap', async (req, res) => {
+  const user = await requireAccountIdentity(req, res)
+  if (!user) return
+  const expectedUserId = typeof req.body?.userId === 'string' ? req.body.userId.trim() : ''
+  if (expectedUserId && expectedUserId !== user.id) {
+    return res.status(403).json({ success: false, error: '当前登录用户与请求 bootstrap 的 userId 不一致' })
+  }
+  const bootstrapped = bootstrapWorkspaceForUser(user.id)
+  return res.json({
+    success: true,
+    ...bootstrapped,
+    workspace: {
+      ...bootstrapped.workspace,
+      hasDocument: hasDocument(user.id, bootstrapped.currentWorkspaceId),
+      modifiedAt: new Date().toISOString(),
     },
   })
 })
@@ -64,11 +101,14 @@ router.get('/default', async (req, res) => {
 router.get('/', async (req, res) => {
   const userId = await requireAccountUser(req, res)
   if (!userId) return
+  const bootstrapped = bootstrapWorkspaceForUser(userId)
   const store = readIndex(userId)
   const valid = store.workspaces.filter((ws) =>
     fs.existsSync(workspaceDir(userId, ws.id)),
   )
   res.json({
+    currentTenantId: bootstrapped.currentTenantId,
+    currentWorkspaceId: bootstrapped.currentWorkspaceId,
     workspaces: valid.map((ws) => ({
       name: ws.name,
       path: ws.path,
@@ -100,24 +140,14 @@ router.post('/', async (req, res) => {
     return res.json({ success: true, name: existing.name, path: existing.path })
   }
 
-  const wsId = randomUUID()
-  const wsPath = clientPath(userId, wsId)
-  const dir = workspaceDir(userId, wsId)
-  fs.mkdirSync(path.join(dir, 'files'), { recursive: true })
-  fs.mkdirSync(path.join(dir, 'artifacts'), { recursive: true })
-
-  const now = new Date().toISOString()
-  const entry = { id: wsId, name: name.trim(), path: wsPath, createdAt: now, modifiedAt: now }
-  store.workspaces.push(entry)
-  writeIndex(userId, store)
-
-  fs.writeFileSync(
-    path.join(dir, 'workspace.json'),
-    JSON.stringify({ id: wsId, name: name.trim(), userId, createdAt: now }, null, 2),
-    'utf-8',
-  )
-
-  return res.json({ success: true, name: entry.name, path: wsPath })
+  const created = createWorkspaceForUser(userId, safeName)
+  return res.json({
+    success: true,
+    currentTenantId: created.currentTenantId,
+    currentWorkspaceId: created.currentWorkspaceId,
+    name: created.workspace.name,
+    path: created.workspace.path,
+  })
 })
 
 // ── DELETE /api/workspaces ────────────────────────────────────────────────────
@@ -131,8 +161,11 @@ router.delete('/', async (req, res) => {
 
   const userId = await requireAccountUser(req, res)
   if (!userId) return
-  if (parsed.userId !== userId) {
-    return res.status(403).json({ success: false, error: 'Forbidden' })
+  try {
+    assertWorkspaceAccess(userId, p, 'owner')
+  } catch (error) {
+    sendWorkspaceError(res, error)
+    return
   }
 
   const store = readIndex(userId)
@@ -159,7 +192,12 @@ router.get('/tree', async (req, res) => {
 
   const userId = await requireAccountUser(req, res)
   if (!userId) return
-  if (parsed.userId !== userId) return res.status(403).json({ success: false, error: 'Forbidden' })
+  try {
+    assertWorkspaceAccess(userId, p, 'member')
+  } catch (error) {
+    sendWorkspaceError(res, error)
+    return
+  }
 
   const filesDir = path.join(workspaceDir(userId, parsed.wsId), 'files')
   if (!fs.existsSync(filesDir)) return res.json([])
@@ -192,7 +230,12 @@ router.post('/rename', async (req, res) => {
 
   const userId = await requireAccountUser(req, res)
   if (!userId) return
-  if (parsed.userId !== userId) return res.status(403).json({ success: false, error: 'Forbidden' })
+  try {
+    assertWorkspaceAccess(userId, p, 'owner')
+  } catch (error) {
+    sendWorkspaceError(res, error)
+    return
+  }
 
   const store = readIndex(userId)
   const entry = store.workspaces.find((ws) => ws.id === parsed.wsId)
@@ -201,6 +244,7 @@ router.post('/rename', async (req, res) => {
   entry.name = newName.trim()
   entry.modifiedAt = new Date().toISOString()
   writeIndex(userId, store)
+  ensureWorkspaceMetadata(userId, entry, bootstrapWorkspaceForUser(userId).currentTenantId)
 
   return res.json({ success: true, name: entry.name, path: entry.path })
 })
@@ -216,7 +260,12 @@ router.post('/register', async (req, res) => {
 
   const userId = await requireAccountUser(req, res)
   if (!userId) return
-  if (parsed.userId !== userId) return res.status(403).json({ success: false, error: 'Forbidden' })
+  try {
+    assertWorkspaceAccess(userId, p, 'member')
+  } catch (error) {
+    sendWorkspaceError(res, error)
+    return
+  }
 
   const store = readIndex(userId)
   const entry = store.workspaces.find((ws) => ws.id === parsed.wsId)

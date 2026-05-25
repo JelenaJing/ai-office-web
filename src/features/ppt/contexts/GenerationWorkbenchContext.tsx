@@ -151,6 +151,7 @@ export interface GenerationModeSession {
   pptOutputMode: 'editable_pptx' | 'web_deck' | null
   pptPreviewUrl: string | null
   pptSlidevMarkdown: string | null
+  pptDiagnostics: Record<string, unknown> | null
   pptSlides: PptSlidePreview[]
   pptLiveSlides: PptSlidePreview[]
   pptTotalSlides: number
@@ -282,6 +283,7 @@ function createEmptySession(): GenerationModeSession {
     pptOutputMode: null,
     pptPreviewUrl: null,
     pptSlidevMarkdown: null,
+    pptDiagnostics: null,
     pptSlides: [],
     pptLiveSlides: [],
     pptTotalSlides: 0,
@@ -422,6 +424,7 @@ export function GenerationWorkbenchProvider({ children }: { children: ReactNode 
           pptOutputMode: s.pptOutputMode,
           pptPreviewUrl: s.pptPreviewUrl,
           pptSlidevMarkdown: s.pptSlidevMarkdown,
+          pptDiagnostics: s.pptDiagnostics,
           pptSlides: s.pptSlides,
           pptLiveSlides: s.pptLiveSlides,
           pptTotalSlides: s.pptTotalSlides,

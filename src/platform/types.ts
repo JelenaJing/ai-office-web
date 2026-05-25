@@ -21,6 +21,8 @@ export interface WorkspaceInfo {
   name: string
   path: string        // opaque client path, e.g. web-workspace:{userId}:{wsId}
   isDefault?: boolean
+  tenantId?: string
+  userId?: string
 }
 
 export interface FileEntry {

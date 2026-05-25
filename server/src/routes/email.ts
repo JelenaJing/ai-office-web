@@ -22,8 +22,24 @@ import {
   updateEmailTriageTask,
 } from '../features/email/services/emailTriageTaskStore'
 import { runEmailUnreadTriage } from '../features/email/services/emailTriageService'
+import { assertWorkspaceAccess, WorkspaceAccessError } from '../lib/workspaceAccess'
 
 const router = Router()
+
+function sendWorkspaceError(res: import('express').Response, error: unknown): void {
+  const workspaceError = error instanceof WorkspaceAccessError ? error : null
+  if (workspaceError) {
+    res.status(workspaceError.status).json({
+      success: false,
+      code: workspaceError.code,
+      error: workspaceError.message,
+      bootstrap: workspaceError.bootstrap,
+    })
+    return
+  }
+  const message = error instanceof Error ? error.message : String(error)
+  res.status(500).json({ success: false, error: message })
+}
 
 interface EmailSavedArtifact {
   artifact: Artifact
@@ -142,15 +158,18 @@ router.post('/messages/:id/attachments/:attachmentId/artifact', async (req, res)
   if (!account) {
     return res.status(400).json({ success: false, error: '请先配置邮箱账号' })
   }
-  const workspacePath = String(req.body?.workspacePath || '').trim()
-  if (!workspacePath) {
-    return res.status(400).json({ success: false, error: 'workspacePath 不能为空' })
+  let access
+  try {
+    access = assertWorkspaceAccess(userId, typeof req.body?.workspacePath === 'string' ? req.body.workspacePath : undefined, 'editor')
+  } catch (error) {
+    sendWorkspaceError(res, error)
+    return
   }
   try {
     const attachment = await fetchMessageAttachment(account, req.params.id, req.params.attachmentId)
     const saved = createEmailAttachmentArtifact({
       userId,
-      workspacePath,
+      workspacePath: access.workspacePath,
       emailId: req.params.id,
       filename: attachment.filename,
       contentType: attachment.contentType,
@@ -166,12 +185,15 @@ router.post('/messages/:id/attachments/:attachmentId/artifact', async (req, res)
 router.post('/attachments/artifacts', async (req, res) => {
   const userId = await requireAccountUser(req, res)
   if (!userId) return
-  const workspacePath = String(req.body?.workspacePath || '').trim()
+  let access
+  try {
+    access = assertWorkspaceAccess(userId, typeof req.body?.workspacePath === 'string' ? req.body.workspacePath : undefined, 'editor')
+  } catch (error) {
+    sendWorkspaceError(res, error)
+    return
+  }
   const emailId = String(req.body?.emailId || 'manual').trim()
   const attachments = Array.isArray(req.body?.attachments) ? req.body.attachments : []
-  if (!workspacePath) {
-    return res.status(400).json({ success: false, error: 'workspacePath 不能为空' })
-  }
   if (attachments.length === 0) {
     return res.status(400).json({ success: false, error: 'attachments 不能为空' })
   }
@@ -183,7 +205,7 @@ router.post('/attachments/artifacts', async (req, res) => {
       : Buffer.from(String(item.textContent || ''), 'utf-8')
     return createEmailAttachmentArtifact({
       userId,
-      workspacePath,
+      workspacePath: access.workspacePath,
       emailId,
       filename,
       contentType: typeof item.contentType === 'string' ? item.contentType : undefined,
@@ -236,19 +258,22 @@ router.post('/drafts/dry-run', async (req, res) => {
 router.post('/drafts/artifact', async (req, res) => {
   const userId = await requireAccountUser(req, res)
   if (!userId) return
-  const workspacePath = String(req.body?.workspacePath || '').trim()
+  let access
+  try {
+    access = assertWorkspaceAccess(userId, typeof req.body?.workspacePath === 'string' ? req.body.workspacePath : undefined, 'editor')
+  } catch (error) {
+    sendWorkspaceError(res, error)
+    return
+  }
   const to = String(req.body?.to || '').trim()
   const subject = String(req.body?.subject || '').trim()
   const body = String(req.body?.body || '')
-  if (!workspacePath) {
-    return res.status(400).json({ success: false, error: 'workspacePath 不能为空' })
-  }
   if (!to || !subject) {
     return res.status(400).json({ success: false, error: 'to 和 subject 不能为空' })
   }
   const saved = createEmailDraftArtifact({
     userId,
-    workspacePath,
+    workspacePath: access.workspacePath,
     emailId: typeof req.body?.emailId === 'string' ? req.body.emailId : undefined,
     to,
     subject,
@@ -269,6 +294,14 @@ router.post('/triage/start', async (req, res) => {
     return res.status(400).json({ success: false, error: '请先配置邮箱账号' })
   }
 
+  let access
+  try {
+    access = assertWorkspaceAccess(userId, typeof req.body?.workspacePath === 'string' ? req.body.workspacePath : undefined, 'editor')
+  } catch (error) {
+    sendWorkspaceError(res, error)
+    return
+  }
+
   const task = createEmailTriageTask()
   updateEmailTriageTask(task.taskId, {
     status: 'running',
@@ -279,7 +312,7 @@ router.post('/triage/start', async (req, res) => {
   void runEmailUnreadTriage({
     account,
     userId,
-    workspacePath: typeof req.body?.workspacePath === 'string' ? req.body.workspacePath : undefined,
+    workspacePath: access.workspacePath,
     limit: Number(req.body?.limit) || 20,
     isCancelled: () => Boolean(getEmailTriageTask(task.taskId)?.cancelRequested),
     onStep: (message, progress, results, metadata) => updateEmailTriageTask(task.taskId, {

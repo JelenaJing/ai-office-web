@@ -74,7 +74,7 @@ export type PptOutputMode = 'editable_pptx' | 'web_deck'
 
 export interface WebDeckTaskResult {
   engine: PptEngine
-  outputMode?: PptOutputMode
+  outputMode: PptOutputMode
   deckId: string
   deck: WebDeckDocument
   slides: WebDeckSlide[]

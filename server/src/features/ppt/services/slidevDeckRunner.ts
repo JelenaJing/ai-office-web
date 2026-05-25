@@ -47,6 +47,76 @@ export interface SlidevDeckResult {
   }
 }
 
+interface SaveSlidevArtifactsInput {
+  userId: string
+  username?: string
+  workspacePath: string
+  deck: WebDeckDocument
+  slidevMarkdown: string
+  htmlPreview: string
+}
+
+interface SaveSlidevArtifactsResult {
+  deck: WebDeckDocument
+  artifact: WebDeckTaskResult['artifact']
+  htmlArtifact: WebDeckTaskResult['artifact']
+  exportUrl: string
+  previewUrl: string
+  markdownArtifactId: string
+  htmlArtifactId: string
+}
+
+function toSafeArtifactName(title: string): string {
+  return title.replace(/[^\w\u4e00-\u9fa5\-]+/g, '_').slice(0, 60) || 'presentation'
+}
+
+function saveSlidevArtifacts(input: SaveSlidevArtifactsInput): SaveSlidevArtifactsResult {
+  const safeName = toSafeArtifactName(input.deck.title)
+  const markdownArtifact = saveSkillArtifact({
+    userId: input.userId,
+    username: input.username,
+    workspacePath: input.workspacePath,
+    skillId: 'web.ppt.slidev',
+    type: 'presentation',
+    title: input.deck.title,
+    filename: `${safeName}.slidev.md`,
+    format: 'md',
+    content: input.slidevMarkdown,
+    deckId: input.deck.deckId,
+    sourceRefs: input.deck.sourceRefs.map((ref) => ({ type: ref.type, id: ref.id, label: ref.label })),
+  })
+  const htmlArtifact = saveSkillArtifact({
+    userId: input.userId,
+    username: input.username,
+    workspacePath: input.workspacePath,
+    skillId: 'web.ppt.slidev',
+    type: 'presentation',
+    title: `${input.deck.title} - HTML Preview`,
+    filename: `${safeName}.slidev.html`,
+    format: 'html',
+    content: input.htmlPreview,
+    deckId: input.deck.deckId,
+    sourceRefs: input.deck.sourceRefs.map((ref) => ({ type: ref.type, id: ref.id, label: ref.label })),
+  })
+  const deck: WebDeckDocument = {
+    ...input.deck,
+    artifactRefs: [
+      { artifactId: markdownArtifact.id, type: 'presentation', relation: 'export' },
+      { artifactId: htmlArtifact.id, type: 'presentation', relation: 'export' },
+    ],
+    updatedAt: new Date().toISOString(),
+  }
+  return {
+    deck,
+    artifact: markdownArtifact,
+    htmlArtifact,
+    exportUrl: markdownArtifact.exports?.[0]?.url || `/api/ppt/decks/${input.deck.deckId}/download`,
+    previewUrl: htmlArtifact.exports?.[0]?.url || `/api/artifacts/${htmlArtifact.id}/download`,
+    markdownArtifactId: markdownArtifact.id,
+    htmlArtifactId: htmlArtifact.id,
+  }
+}
+
 function buildDeterministicSlidevDeck(title: string, prompt: string): { title: string; slides: WebDeckDocument['slides'] } {
   const deckTitle = title || prompt.slice(0, 40) || '技术分享'
   return {
@@ -163,21 +233,7 @@ export async function runSlidevDeckGenerator(input: RunSlidevDeckInput): Promise
 
   let deck: WebDeckDocument
 
-  // Try LLM-based plan, fall back to deterministic if unavailable
-  try {
-    const { invokeLlmJson, isLlmConfigured } = await import('../../../modules/ai-gateway')
-    if (!isLlmConfigured()) throw new Error('LLM not configured')
-    const plan = await buildSlidePlanFromPrompt(title, input.prompt)
-    deck = buildDeckDocument({
-      deckId,
-      plan,
-      templateId: 'slidev_default',
-      source: input.source || 'topic',
-      sourceId: input.sourceId,
-      chain: 'slidev-deck-runner',
-    })
-  } catch {
-    // Deterministic fallback when LLM is unavailable
+  if (process.env.PPT_ACCEPTANCE_MODE === '1') {
     console.info('[ppt-runtime] slidev=deterministic-fallback')
     const det = buildDeterministicSlidevDeck(title, input.prompt)
     deck = {
@@ -197,6 +253,41 @@ export async function runSlidevDeckGenerator(input: RunSlidevDeckInput): Promise
       createdAt: now,
       updatedAt: now,
       diagnostics: { chain: 'slidev-deck-runner', partialMissing: [...PPT_PARTIAL_MISSING] },
+    }
+  } else {
+    try {
+      const { isLlmConfigured } = await import('../../../modules/ai-gateway')
+      if (!isLlmConfigured()) throw new Error('LLM not configured')
+      const plan = await buildSlidePlanFromPrompt(title, input.prompt)
+      deck = buildDeckDocument({
+        deckId,
+        plan,
+        templateId: 'slidev_default',
+        source: input.source || 'topic',
+        sourceId: input.sourceId,
+        chain: 'slidev-deck-runner',
+      })
+    } catch {
+      console.info('[ppt-runtime] slidev=deterministic-fallback')
+      const det = buildDeterministicSlidevDeck(title, input.prompt)
+      deck = {
+        deckId,
+        title: det.title,
+        source: input.source || 'topic',
+        templateId: 'slidev_default',
+        templateManifest: {
+          templateId: 'slidev_default',
+          inventoryStatus: 'available',
+          layouts: ['cover', 'toc-list', 'title-bullets'],
+          tokenUsed: false,
+        },
+        sourceRefs: [{ type: 'topic', id: `topic:${title}`, label: title }],
+        artifactRefs: [],
+        slides: det.slides,
+        createdAt: now,
+        updatedAt: now,
+        diagnostics: { chain: 'slidev-deck-runner', partialMissing: [...PPT_PARTIAL_MISSING] },
+      }
     }
   }
 
@@ -219,52 +310,23 @@ export async function runSlidevDeckGenerator(input: RunSlidevDeckInput): Promise
   }
 
   emit('正在保存 Slidev Markdown artifact…', 80)
-  const safeName = deck.title.replace(/[^\w\u4e00-\u9fa5\-]+/g, '_').slice(0, 60) || 'presentation'
-
-  const markdownArtifact = saveSkillArtifact({
-    userId: input.userId,
-    username: input.username,
-    workspacePath: input.workspacePath,
-    skillId: 'web.ppt.slidev',
-    type: 'presentation',
-    title: deck.title,
-    filename: `${safeName}.slidev.md`,
-    format: 'md',
-    content: slidevMarkdown,
-    deckId,
-  })
-
   emit('正在保存 HTML 预览 artifact…', 88)
-  const htmlArtifact = saveSkillArtifact({
+  const exported = saveSlidevArtifacts({
     userId: input.userId,
     username: input.username,
     workspacePath: input.workspacePath,
-    skillId: 'web.ppt.slidev',
-    type: 'presentation',
-    title: `${deck.title} - HTML Preview`,
-    filename: `${safeName}.slidev.html`,
-    format: 'html',
-    content: htmlPreview,
-    deckId,
+    deck,
+    slidevMarkdown,
+    htmlPreview,
   })
-
-  // Update deck artifactRefs
-  deck.artifactRefs = [
-    { artifactId: markdownArtifact.id, type: 'presentation', relation: 'export' },
-    { artifactId: htmlArtifact.id, type: 'presentation', relation: 'export' },
-  ]
-  deck.updatedAt = new Date().toISOString()
-
-  const exportUrl = markdownArtifact.exports?.[0]?.url || `/api/ppt/decks/${deckId}/download`
-  const previewUrl = htmlArtifact.exports?.[0]?.url || `/api/artifacts/${htmlArtifact.id}/download`
-
+  deck = exported.deck
   const previewImages = withDeckPreviewImages(deck).previewImages
 
   emit('Slidev DeckDocument 已完成', 100)
-  console.info(`[ppt-runtime] markdownArtifactId=${markdownArtifact.id}`)
-  console.info(`[ppt-runtime] htmlArtifactId=${htmlArtifact.id}`)
-  console.info(`[ppt-runtime] exportUrl=${exportUrl}`)
-  console.info(`[ppt-runtime] previewUrl=${previewUrl}`)
+  console.info(`[ppt-runtime] markdownArtifactId=${exported.markdownArtifactId}`)
+  console.info(`[ppt-runtime] htmlArtifactId=${exported.htmlArtifactId}`)
+  console.info(`[ppt-runtime] exportUrl=${exported.exportUrl}`)
+  console.info(`[ppt-runtime] previewUrl=${exported.previewUrl}`)
 
   return {
     engine: 'slidev',
@@ -273,15 +335,15 @@ export async function runSlidevDeckGenerator(input: RunSlidevDeckInput): Promise
     deck,
     slides: deck.slides,
     previewImages,
-    artifact: markdownArtifact,
-    exportUrl,
-    previewUrl,
+    artifact: exported.artifact,
+    exportUrl: exported.exportUrl,
+    previewUrl: exported.previewUrl,
     slidevMarkdown,
-    markdownArtifactId: markdownArtifact.id,
-    htmlArtifactId: htmlArtifact.id,
+    markdownArtifactId: exported.markdownArtifactId,
+    htmlArtifactId: exported.htmlArtifactId,
     relationships: {
       deckId,
-      artifactId: markdownArtifact.id,
+      artifactId: exported.markdownArtifactId,
       sourceRefs: deck.sourceRefs,
     },
     diagnostics: {
@@ -312,6 +374,7 @@ export async function editSlidevSlide(input: {
   changedSlideIds: string[]
   unchangedSlideIds: string[]
   artifact: WebDeckTaskResult['artifact']
+  htmlArtifact: WebDeckTaskResult['artifact']
   exportUrl: string
   previewUrl: string
   slidevMarkdown: string
@@ -351,57 +414,79 @@ export async function editSlidevSlide(input: {
   const slidevMarkdown = compileDeckToSlidevMarkdown(nextDeck)
   const htmlPreview = generateSlidevHtmlPreview({ title: nextDeck.title, slidevMarkdown })
 
-  const safeName = nextDeck.title.replace(/[^\w\u4e00-\u9fa5\-]+/g, '_').slice(0, 60) || 'presentation'
-  const markdownArtifact = saveSkillArtifact({
+  const exported = saveSlidevArtifacts({
     userId: input.userId,
     username: input.username,
     workspacePath: input.workspacePath,
-    skillId: 'web.ppt.slidev',
-    type: 'presentation',
-    title: nextDeck.title,
-    filename: `${safeName}.slidev.md`,
-    format: 'md',
-    content: slidevMarkdown,
-    deckId: input.deckId,
+    deck: nextDeck,
+    slidevMarkdown,
+    htmlPreview,
   })
-  const htmlArtifact = saveSkillArtifact({
-    userId: input.userId,
-    username: input.username,
-    workspacePath: input.workspacePath,
-    skillId: 'web.ppt.slidev',
-    type: 'presentation',
-    title: `${nextDeck.title} - HTML Preview`,
-    filename: `${safeName}.slidev.html`,
-    format: 'html',
-    content: htmlPreview,
-    deckId: input.deckId,
-  })
-
-  nextDeck.artifactRefs = [
-    { artifactId: markdownArtifact.id, type: 'presentation', relation: 'export' },
-    { artifactId: htmlArtifact.id, type: 'presentation', relation: 'export' },
-  ]
-
-  const exportUrl = markdownArtifact.exports?.[0]?.url || `/api/ppt/decks/${input.deckId}/download`
-  const previewUrl = htmlArtifact.exports?.[0]?.url || `/api/artifacts/${htmlArtifact.id}/download`
-  const previewImages = withDeckPreviewImages(nextDeck).previewImages
+  const exportedDeck = exported.deck
+  const previewImages = withDeckPreviewImages(exportedDeck).previewImages
 
   return {
     engine: 'slidev',
     outputMode: 'web_deck',
     deckId: input.deckId,
     slideId: input.slideId,
-    deck: nextDeck,
-    slides: nextDeck.slides,
+    deck: exportedDeck,
+    slides: exportedDeck.slides,
     previewImages,
-    updatedSlide,
+    updatedSlide: exportedDeck.slides[slideIndex] || updatedSlide,
     changedSlideIds: [input.slideId],
-    unchangedSlideIds: nextDeck.slides.filter((s) => s.id !== input.slideId).map((s) => s.id),
-    artifact: markdownArtifact,
-    exportUrl,
-    previewUrl,
+    unchangedSlideIds: exportedDeck.slides.filter((s) => s.id !== input.slideId).map((s) => s.id),
+    artifact: exported.artifact,
+    htmlArtifact: exported.htmlArtifact,
+    exportUrl: exported.exportUrl,
+    previewUrl: exported.previewUrl,
     slidevMarkdown,
-    htmlArtifactId: htmlArtifact.id,
+    htmlArtifactId: exported.htmlArtifactId,
     message: `已修改 Slidev 第 ${slideIndex + 1} 页（${input.slideId}）`,
+  }
+}
+
+export function exportSlidevDeckArtifacts(input: {
+  userId: string
+  username?: string
+  workspacePath: string
+  deck: WebDeckDocument
+}): {
+  engine: 'slidev'
+  outputMode: 'web_deck'
+  deck: WebDeckDocument
+  slides: WebDeckDocument['slides']
+  artifact: WebDeckTaskResult['artifact']
+  htmlArtifact: WebDeckTaskResult['artifact']
+  exportUrl: string
+  previewUrl: string
+  slidevMarkdown: string
+  markdownArtifactId: string
+  htmlArtifactId: string
+  message: string
+} {
+  const slidevMarkdown = compileDeckToSlidevMarkdown(input.deck)
+  const htmlPreview = generateSlidevHtmlPreview({ title: input.deck.title, slidevMarkdown })
+  const exported = saveSlidevArtifacts({
+    userId: input.userId,
+    username: input.username,
+    workspacePath: input.workspacePath,
+    deck: input.deck,
+    slidevMarkdown,
+    htmlPreview,
+  })
+  return {
+    engine: 'slidev',
+    outputMode: 'web_deck',
+    deck: exported.deck,
+    slides: exported.deck.slides,
+    artifact: exported.artifact,
+    htmlArtifact: exported.htmlArtifact,
+    exportUrl: exported.exportUrl,
+    previewUrl: exported.previewUrl,
+    slidevMarkdown,
+    markdownArtifactId: exported.markdownArtifactId,
+    htmlArtifactId: exported.htmlArtifactId,
+    message: 'Slidev Markdown 与 HTML preview 已导出',
   }
 }

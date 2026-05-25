@@ -15,8 +15,24 @@ import fs from 'fs'
 import { deleteArtifact, getArtifact, getArtifactFilePath, listArtifactsByUser, updateArtifact } from '../artifacts/ArtifactStore'
 import { requireAccountUser } from '../lib/authUser'
 import { saveSkillArtifact } from '../lib/skillArtifact'
+import { assertWorkspaceAccess, WorkspaceAccessError } from '../lib/workspaceAccess'
 
 const router = Router()
+
+function sendWorkspaceError(res: import('express').Response, error: unknown): void {
+  const workspaceError = error instanceof WorkspaceAccessError ? error : null
+  if (workspaceError) {
+    res.status(workspaceError.status).json({
+      success: false,
+      code: workspaceError.code,
+      error: workspaceError.message,
+      bootstrap: workspaceError.bootstrap,
+    })
+    return
+  }
+  const message = error instanceof Error ? error.message : String(error)
+  res.status(500).json({ success: false, error: message })
+}
 
 // ── Content-Type map ──────────────────────────────────────────────────────────
 
@@ -42,27 +58,40 @@ const CONTENT_TYPES: Record<string, string> = {
 router.get('/', async (req, res) => {
   const userId = await requireAccountUser(req, res)
   if (!userId) return
-  const artifacts = listArtifactsByUser(userId)
-  return res.json({ artifacts })
+  try {
+    const requestedWorkspacePath = typeof req.query.workspacePath === 'string' ? req.query.workspacePath : undefined
+    const access = assertWorkspaceAccess(userId, requestedWorkspacePath, 'member')
+    const artifacts = listArtifactsByUser(userId).filter((artifact) => artifact.workspaceId === access.workspaceId)
+    return res.json({
+      artifacts,
+      currentWorkspaceId: access.workspaceId,
+      currentWorkspacePath: access.workspacePath,
+    })
+  } catch (error) {
+    sendWorkspaceError(res, error)
+  }
 })
 
 router.post('/', async (req, res) => {
   const userId = await requireAccountUser(req, res)
   if (!userId) return
-  const workspacePath = String(req.body?.workspacePath || '').trim()
+  let access
+  try {
+    access = assertWorkspaceAccess(userId, typeof req.body?.workspacePath === 'string' ? req.body.workspacePath : undefined, 'editor')
+  } catch (error) {
+    sendWorkspaceError(res, error)
+    return
+  }
   const title = String(req.body?.title || 'Artifact').trim()
   const format = String(req.body?.format || 'txt').trim().replace(/^\./, '') || 'txt'
   const filename = String(req.body?.filename || `${title}.${format}`).trim()
-  if (!workspacePath) {
-    return res.status(400).json({ success: false, error: 'workspacePath 不能为空' })
-  }
   const content = typeof req.body?.contentBase64 === 'string'
     ? Buffer.from(req.body.contentBase64, 'base64')
     : String(req.body?.content || '')
   try {
     const artifact = saveSkillArtifact({
       userId,
-      workspacePath,
+      workspacePath: access.workspacePath,
       skillId: typeof req.body?.skillId === 'string' ? req.body.skillId : 'web.artifact.create',
       type: typeof req.body?.type === 'string' ? req.body.type : 'document',
       title,
@@ -93,8 +122,11 @@ router.get('/:artifactId', async (req, res) => {
   // Ownership check
   const userId = await requireAccountUser(req, res)
   if (!userId) return
-  if (artifact.userId && artifact.userId !== userId) {
-    return res.status(403).json({ message: 'Access denied' })
+  try {
+    assertWorkspaceAccess(userId, artifact.workspaceId, 'member')
+  } catch (error) {
+    sendWorkspaceError(res, error)
+    return
   }
   return res.json({ artifact })
 })
@@ -112,8 +144,11 @@ router.get('/:artifactId/download', async (req, res) => {
   // Ownership check — reject cross-user downloads
   const userId = await requireAccountUser(req, res)
   if (!userId) return
-  if (artifact.userId && artifact.userId !== userId) {
-    return res.status(403).json({ message: 'Access denied: artifact belongs to another user' })
+  try {
+    assertWorkspaceAccess(userId, artifact.workspaceId, 'member')
+  } catch (error) {
+    sendWorkspaceError(res, error)
+    return
   }
 
   const requestedFilename = typeof req.query.filename === 'string' ? req.query.filename : ''
@@ -151,8 +186,11 @@ router.get('/:artifactId/preview', async (req, res) => {
   }
   const userId = await requireAccountUser(req, res)
   if (!userId) return
-  if (artifact.userId && artifact.userId !== userId) {
-    return res.status(403).json({ message: 'Access denied' })
+  try {
+    assertWorkspaceAccess(userId, artifact.workspaceId, 'member')
+  } catch (error) {
+    sendWorkspaceError(res, error)
+    return
   }
 
   const exportEntry = artifact.exports[0]
@@ -193,8 +231,11 @@ router.get('/:artifactId/relationships', async (req, res) => {
   }
   const userId = await requireAccountUser(req, res)
   if (!userId) return
-  if (artifact.userId && artifact.userId !== userId) {
-    return res.status(403).json({ message: 'Access denied' })
+  try {
+    assertWorkspaceAccess(userId, artifact.workspaceId, 'member')
+  } catch (error) {
+    sendWorkspaceError(res, error)
+    return
   }
   return res.json({
     artifactId,
@@ -226,8 +267,11 @@ router.patch('/:artifactId', async (req, res) => {
   }
   const userId = await requireAccountUser(req, res)
   if (!userId) return
-  if (artifact.userId && artifact.userId !== userId) {
-    return res.status(403).json({ message: 'Access denied' })
+  try {
+    assertWorkspaceAccess(userId, artifact.workspaceId, 'editor')
+  } catch (error) {
+    sendWorkspaceError(res, error)
+    return
   }
   const title = typeof req.body?.title === 'string' ? req.body.title.trim() : undefined
   if (!title) {
@@ -245,8 +289,11 @@ router.delete('/:artifactId', async (req, res) => {
   }
   const userId = await requireAccountUser(req, res)
   if (!userId) return
-  if (artifact.userId && artifact.userId !== userId) {
-    return res.status(403).json({ message: 'Access denied' })
+  try {
+    assertWorkspaceAccess(userId, artifact.workspaceId, 'editor')
+  } catch (error) {
+    sendWorkspaceError(res, error)
+    return
   }
   deleteArtifact(artifactId)
   return res.json({ success: true, artifactId })
