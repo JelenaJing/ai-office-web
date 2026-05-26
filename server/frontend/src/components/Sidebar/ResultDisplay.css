@@ -1,0 +1,657 @@
+/* 结果展示样式 */
+.result-panel {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+.result-panel h4 {
+  margin: 0 0 1rem 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #333;
+  border-bottom: 2px solid #1890ff;
+  padding-bottom: 0.5rem;
+}
+
+.result-empty {
+  color: #999;
+  text-align: center;
+  padding: 2rem;
+}
+
+.result-rich-text {
+  color: #333;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.result-rich-text > :first-child {
+  margin-top: 0;
+}
+
+.result-rich-text > :last-child {
+  margin-bottom: 0;
+}
+
+.result-rich-text p,
+.result-rich-text ul,
+.result-rich-text ol,
+.result-rich-text blockquote,
+.result-rich-text pre {
+  margin: 0.45rem 0;
+  max-width: 100%;
+}
+
+.result-rich-text h1,
+.result-rich-text h2,
+.result-rich-text h3,
+.result-rich-text h4,
+.result-rich-text h5,
+.result-rich-text h6 {
+  margin: 0.7rem 0 0.4rem;
+  line-height: 1.35;
+  color: #1f2937;
+  word-break: break-word;
+}
+
+.result-rich-text h1 {
+  font-size: 1.5rem;
+}
+
+.result-rich-text h2 {
+  font-size: 1.25rem;
+}
+
+.result-rich-text h3 {
+  font-size: 1.08rem;
+}
+
+.result-rich-text h4,
+.result-rich-text h5,
+.result-rich-text h6 {
+  font-size: 1rem;
+}
+
+.result-rich-text pre {
+  padding: 0.65rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  overflow-x: auto;
+}
+
+.result-rich-text code {
+  background: #f1f5f9;
+  border-radius: 4px;
+  padding: 0.1rem 0.3rem;
+}
+
+.result-rich-text ul,
+.result-rich-text ol {
+  padding-left: 1.1rem;
+}
+
+.result-rich-text li {
+  margin: 0.2rem 0;
+}
+
+.result-rich-text img,
+.result-rich-text table,
+.result-rich-text .katex-display {
+  max-width: 100%;
+}
+
+.result-rich-text .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* Idea展示样式 */
+.result-idea {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.idea-item {
+  padding: 1rem;
+  background: #f9f9f9;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  border-left: 3px solid #1890ff;
+}
+
+.idea-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.idea-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: #1890ff;
+  color: #fff;
+  border-radius: 50%;
+  font-size: 0.75rem;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.idea-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #333;
+  flex: 1;
+}
+
+.idea-description,
+.idea-innovation {
+  margin-top: 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+.idea-description strong,
+.idea-innovation strong {
+  color: #666;
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+.idea-description p,
+.idea-innovation p {
+  margin: 0;
+  color: #333;
+  white-space: pre-wrap;
+}
+
+.idea-references {
+  margin-top: 0.75rem;
+  font-size: 0.875rem;
+}
+
+.idea-references strong {
+  color: #666;
+  display: block;
+  margin-bottom: 0.5rem;
+}
+
+.idea-references ul {
+  margin: 0;
+  padding-left: 1.25rem;
+  list-style-type: disc;
+}
+
+.idea-references li {
+  margin-bottom: 0.25rem;
+  color: #555;
+  line-height: 1.5;
+}
+
+/* 内容检查展示样式 */
+.result-check {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.check-section {
+  font-size: 0.875rem;
+}
+
+.check-section strong {
+  display: block;
+  color: #333;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+}
+
+.check-text {
+  padding: 0.75rem;
+  background: #f5f5f5;
+  border-radius: 4px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  color: #333;
+}
+
+.text-comparison {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.text-original,
+.text-updated {
+  padding: 0.75rem;
+  border-radius: 4px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.text-original {
+  background: #fff7e6;
+  border: 1px solid #ffd591;
+}
+
+.text-updated {
+  background: #f6ffed;
+  border: 1px solid #b7eb8f;
+}
+
+.text-label {
+  display: block;
+  font-weight: 600;
+  font-size: 0.8125rem;
+  margin-bottom: 0.5rem;
+  color: #666;
+}
+
+.text-content {
+  color: #333;
+  font-size: 0.875rem;
+}
+
+.text-arrow {
+  text-align: center;
+  font-size: 1.25rem;
+  color: #1890ff;
+  font-weight: bold;
+  margin: 0.25rem 0;
+}
+
+.check-status {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  padding: 0.5rem;
+  background: #f5f5f5;
+  border-radius: 4px;
+}
+
+.status-badge {
+  padding: 0.25rem 0.75rem;
+  border-radius: 4px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+.status-outdated {
+  background: #fff7e6;
+  color: #d46b08;
+  border: 1px solid #ffd591;
+}
+
+.status-current {
+  background: #f6ffed;
+  color: #52c41a;
+  border: 1px solid #b7eb8f;
+}
+
+.papers-count {
+  font-size: 0.8125rem;
+  color: #666;
+}
+
+.check-empty {
+  padding: 1rem;
+  text-align: center;
+  color: #999;
+  font-style: italic;
+}
+
+.check-references,
+.check-issues {
+  margin: 0;
+  padding-left: 0;
+  list-style-type: none;
+}
+
+.check-references li {
+  margin-bottom: 0.75rem;
+  padding: 0.75rem;
+  background: #fafafa;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  border-left: 3px solid #1890ff;
+}
+
+.ref-item {
+  display: block;
+}
+
+.ref-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.ref-title-line {
+  margin-bottom: 0.25rem;
+}
+
+.ref-title {
+  font-weight: 600;
+  color: #333;
+  font-size: 0.875rem;
+  line-height: 1.4;
+}
+
+.ref-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  font-size: 0.8125rem;
+}
+
+.ref-authors {
+  color: #666;
+}
+
+.ref-year {
+  color: #999;
+}
+
+.ref-doi {
+  color: #1890ff;
+  text-decoration: none;
+  padding: 0.125rem 0.5rem;
+  background: #e6f7ff;
+  border-radius: 3px;
+  font-size: 0.75rem;
+}
+
+.ref-doi:hover {
+  background: #bae7ff;
+  text-decoration: underline;
+}
+
+.ref-abstract {
+  margin-top: 0.5rem;
+  font-size: 0.8125rem;
+  color: #666;
+  line-height: 1.5;
+  font-style: italic;
+}
+
+.ref-sentence {
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+  background: #f0f7ff;
+  border-left: 3px solid #1890ff;
+  border-radius: 3px;
+  font-size: 0.8125rem;
+}
+
+.ref-sentence strong {
+  color: #1890ff;
+  margin-right: 0.5rem;
+}
+
+.sentence-text {
+  color: #333;
+  font-style: italic;
+}
+
+.ref-relevance {
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+  background: #f6ffed;
+  border-left: 3px solid #52c41a;
+  border-radius: 3px;
+  font-size: 0.8125rem;
+}
+
+.ref-relevance strong {
+  color: #52c41a;
+  margin-right: 0.5rem;
+}
+
+.relevance-text {
+  color: #333;
+}
+
+.check-issues li {
+  margin-bottom: 0.75rem;
+  padding: 0.5rem;
+  background: #fff;
+  border-left: 3px solid #ff9800;
+  border-radius: 4px;
+}
+
+.issue-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.issue-item.issue-high {
+  border-left-color: #ff4d4f;
+}
+
+.issue-item.issue-medium {
+  border-left-color: #ff9800;
+}
+
+.issue-item.issue-low {
+  border-left-color: #52c41a;
+}
+
+.issue-type {
+  font-weight: 600;
+  color: #333;
+  font-size: 0.875rem;
+}
+
+.issue-description {
+  color: #666;
+  font-size: 0.875rem;
+}
+
+.issue-suggestion {
+  color: #1890ff;
+  font-size: 0.8125rem;
+  font-style: italic;
+}
+
+/* 实验设计展示样式 */
+.result-experiment {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.experiment-section {
+  font-size: 0.875rem;
+}
+
+.experiment-section strong {
+  display: block;
+  color: #333;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+}
+
+.experiment-design {
+  padding: 0.75rem;
+  background: #f5f5f5;
+  border-radius: 4px;
+  line-height: 1.6;
+}
+
+.experiment-design div {
+  margin-bottom: 0.5rem;
+}
+
+.experiment-design div:last-child {
+  margin-bottom: 0;
+}
+
+.experiment-recipe {
+  padding: 0.75rem;
+  background: #f5f5f5;
+  border-radius: 4px;
+  line-height: 1.6;
+  font-size: 0.875rem;
+  overflow: hidden;
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* 理论分析展示样式 */
+.result-theory {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.theory-section {
+  font-size: 0.875rem;
+}
+
+.theory-section strong {
+  display: block;
+  color: #333;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+}
+
+.theory-analysis {
+  padding: 0.75rem;
+  background: #f5f5f5;
+  border-radius: 4px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.theory-formulas {
+  margin: 0;
+  padding-left: 1.25rem;
+  list-style-type: decimal;
+}
+
+.theory-formulas li {
+  margin-bottom: 0.5rem;
+  padding: 0.5rem;
+  background: #f5f5f5;
+  border-radius: 4px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.875rem;
+  overflow-x: auto;
+}
+
+/* KaTeX 公式样式优化 */
+.theory-formulas .katex,
+.theory-analysis .katex,
+.theory-steps .katex {
+  font-size: 1.1em;
+}
+
+.theory-formulas .katex-display,
+.theory-analysis .katex-display,
+.theory-steps .katex-display {
+  margin: 1rem 0;
+  padding: 0.5rem;
+  background: #fff;
+  border-radius: 4px;
+  overflow-x: auto;
+}
+
+.theory-formulas .katex-display .katex,
+.theory-analysis .katex-display .katex,
+.theory-steps .katex-display .katex {
+  font-size: 1.2em;
+}
+
+.theory-steps {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.theory-steps li {
+  margin-bottom: 0.5rem;
+  line-height: 1.6;
+  padding-left: 0.5rem;
+}
+
+/* 全文检查展示样式 */
+.result-overall {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.overall-section {
+  font-size: 0.875rem;
+}
+
+.overall-section strong {
+  display: block;
+  color: #333;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+}
+
+.overall-issues,
+.overall-suggestions {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.overall-issues li {
+  margin-bottom: 0.75rem;
+  padding: 0.5rem;
+  background: #fff;
+  border-left: 3px solid #ff9800;
+  border-radius: 4px;
+}
+
+.overall-suggestions li {
+  margin-bottom: 0.5rem;
+  padding: 0.5rem;
+  background: #f0f8ff;
+  border-left: 3px solid #1890ff;
+  border-radius: 4px;
+  line-height: 1.6;
+}
+
+.issue-location {
+  display: block;
+  font-weight: 600;
+  color: #333;
+  font-size: 0.8125rem;
+  margin-bottom: 0.25rem;
+}
+
+/* 默认展示样式 */
+.result-default {
+  font-size: 0.8125rem;
+}
+
+.result-default pre {
+  margin: 0;
+  padding: 0.75rem;
+  background: #f5f5f5;
+  border-radius: 4px;
+  overflow-x: auto;
+  font-family: 'Courier New', monospace;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}

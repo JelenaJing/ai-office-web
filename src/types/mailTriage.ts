@@ -230,8 +230,23 @@ export type EmailActionType =
   | 'spam_or_noise'
   | 'no_action'
 
+export interface EmailAnalysisRequestItem {
+  mailId: string
+  /** RFC 2822 Message-ID header value. */
+  messageId?: string
+  sourceMailKey?: string
+  accountId?: string
+  folder?: string
+  uid?: string
+  uidValidity?: string
+  subject?: string
+}
+
 export interface EmailAnalysisResult {
-  messageId: string
+  mailId: string
+  /** RFC 2822 Message-ID header value. */
+  messageId?: string
+  sourceMailKey?: string
   mailKey?: string
   threadId?: string
   status?: 'pending' | 'running' | 'done' | 'failed' | 'skipped'
@@ -321,6 +336,7 @@ export interface EmailAnalysisBatchSummary {
 
   calendarItems: {
     pending: Array<{
+      mailId: string
       messageId: string
       subject: string
       title: string
@@ -328,12 +344,14 @@ export interface EmailAnalysisBatchSummary {
       deadlineTime?: string
     }>
     conflicts: Array<{
+      mailId: string
       messageId: string
       subject: string
       title: string
       conflictCount: number
     }>
     deadlines: Array<{
+      mailId: string
       messageId: string
       subject: string
       title: string
@@ -344,6 +362,7 @@ export interface EmailAnalysisBatchSummary {
   contentTopics: EmailContentTopicSummary[]
 
   topImportantEmails: Array<{
+    mailId: string
     messageId: string
     fromName?: string
     fromEmail?: string
@@ -353,6 +372,7 @@ export interface EmailAnalysisBatchSummary {
   }>
 
   actionItems: Array<{
+    mailId: string
     messageId: string
     subject: string
     fromName?: string
@@ -370,6 +390,7 @@ export interface EmailAnalysisBatchSummary {
   }>
 
   failedItems: Array<{
+    mailId: string
     messageId: string
     subject: string
     fromName?: string
@@ -396,18 +417,26 @@ export type EmailAnalysisFailureStage =
 export type EmailAnalysisErrorCode =
   | 'BODY_INCOMPLETE'
   | 'FETCH_BODY_FAILED'
+  | 'MESSAGE_NOT_FOUND'
   | 'BODY_EMPTY'
+  | 'EMPTY_BODY'
   | 'HTML_CLEAN_FAILED'
   | 'BODY_TOO_LONG'
   | 'LLM_TIMEOUT'
+  | 'TIMEOUT'
   | 'MODEL_UNAVAILABLE'
+  | 'AI_MODEL_ERROR'
   | 'LLM_REQUEST_FAILED'
   | 'LLM_NON_JSON'
   | 'JSON_PARSE_FAILED'
+  | 'RESPONSE_PARSE_FAILED'
   | 'SAVE_FAILED'
   | 'ALREADY_ANALYZED'
   | 'ATTACHMENT_ONLY'
   | 'SYSTEM_DELIVERY_NOTICE'
+  | 'MISSING_MAIL_ID'
+  | 'MISSING_SOURCE_MAIL_KEY'
+  | 'INVALID_ANALYSIS_PAYLOAD'
 
 export interface EmailAnalysisTaskReasonCount {
   key: string
@@ -419,7 +448,10 @@ export interface EmailAnalysisJobSnapshot {
   jobId: string
   accountId: string
   folder: string
-  messageId: string
+  mailId: string
+  /** RFC 2822 Message-ID header value. */
+  messageId?: string
+  sourceMailKey?: string
   messageUid: string
   status: EmailAnalysisJobStatus
   subject?: string
@@ -466,7 +498,10 @@ export interface EmailAnalysisTaskSnapshot {
 }
 
 export type AiMailTriageResult = {
-  messageId: string
+  mailId: string
+  /** RFC 2822 Message-ID header value. */
+  messageId?: string
+  sourceMailKey?: string
   mailKey?: string
   threadId?: string
   accountId: string
@@ -544,6 +579,7 @@ export type MailTriageJob = {
 
 /** Progress counters for the user-initiated "AI邮件分析" run. */
 export type MailAnalysisProgress = {
+  batchId?: string
   /** Total mails considered in this run (unread inbox + selected-if-unanalysed) */
   total: number
   /** Mails that already had a cached success result (skipped LLM call) */
@@ -560,6 +596,9 @@ export type MailAnalysisProgress = {
   drafts: number
   /** Mails that failed classification */
   failed: number
+  status?: 'idle' | 'starting' | 'running' | 'completed' | 'failed'
+  startedAt?: string
+  updatedAt?: string
   /**
    * true when the currently-selected mail was already read (not in unread scan)
    * but was included in this run because it had no cached analysis result.

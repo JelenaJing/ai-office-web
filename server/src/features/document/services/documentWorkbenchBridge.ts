@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto'
+import { findUserFileBySourceArtifactId } from '../../../lib/userFiles'
 import { parseDocument } from 'htmlparser2'
 import type { Element, Node } from 'domhandler'
 import { getName, getText, isTag } from 'domutils'
@@ -188,7 +189,8 @@ export async function persistWorkbenchDocument(input: {
   html?: string
   fallbackFrom?: 'minimax_docx'
   fallbackReason?: string
-}): Promise<{ record: DocumentRecord; result: DocumentTaskResult }> {
+  userFileId?: string
+}): Promise<{ record: DocumentRecord; result: DocumentTaskResult & { userFileId?: string } }> {
   const documentId = input.draft.id?.trim() || `document-${randomUUID()}`
   const draft: DocumentDraft = {
     ...input.draft,
@@ -216,6 +218,7 @@ export async function persistWorkbenchDocument(input: {
     draft,
     knowledgeRefs: input.knowledgeRefs,
     html: input.html,
+    userFileId: input.userFileId,
   })
   const now = new Date().toISOString()
   const record: DocumentRecord = {
@@ -245,6 +248,11 @@ export async function persistWorkbenchDocument(input: {
     updatedAt: now,
   }
   saveDocumentRecord(record)
+  let resolvedUserFileId = exported.userFileId || input.userFileId
+  if (!resolvedUserFileId) {
+    const mirrored = findUserFileBySourceArtifactId(input.userId, exported.artifact.id, input.workspacePath)
+    resolvedUserFileId = mirrored?.entry.id
+  }
   return {
     record,
     result: {
@@ -263,6 +271,7 @@ export async function persistWorkbenchDocument(input: {
       knowledgeRefs: record.knowledgeRefs,
       fallbackFrom: record.fallbackFrom,
       fallbackReason: record.fallbackReason,
+      userFileId: resolvedUserFileId,
     },
   }
 }

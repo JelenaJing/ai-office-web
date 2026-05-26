@@ -2,7 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { randomUUID } from 'crypto'
 import { spawn } from 'child_process'
-import { invokeLlmText, isLlmConfigured } from '../../../modules/ai-gateway'
+import { invokeLlmText, invokeLlmTextStream, isLlmConfigured, type LlmMessage } from '../../../modules/ai-gateway'
 
 const OPENCODE_BIN = '/data/darebug/tools/bin/opencode'
 const OPENCODE_TIMEOUT_MS = 90_000
@@ -33,6 +33,11 @@ export interface WebDocPatchJson {
   text?: string
 }
 
+export interface WebDocChatTurn {
+  role: 'user' | 'assistant'
+  text: string
+}
+
 export interface WebDocInvokeInput {
   tool: WebDocToolId
   instruction: string
@@ -41,6 +46,7 @@ export interface WebDocInvokeInput {
   selectedText?: string
   selectedBlockId?: string | null
   selectedSectionId?: string | null
+  chatHistory?: WebDocChatTurn[]
 }
 
 export interface WebDocInvokeResult {
@@ -90,15 +96,16 @@ function resolveSkillDir(): string {
   throw new Error(`未找到 ${WEBDOC_SKILL_ID} 技能目录`)
 }
 
-function buildOpenCodePrompt(tool: WebDocToolId, instruction: string): string {
+function buildOpenCodePrompt(tool: WebDocToolId, instruction: string, historyCount: number): string {
   return [
     '请严格执行 html-webdoc 技能：',
-    '1. 阅读 input/context.json 与 input/source.html。',
-    '2. 按 context.json 中的 tool 语义处理用户 instruction。',
+    '1. 阅读 input/context.json（含 chatHistory 对话上下文）与 input/source.html。',
+    '2. 按 context.json 中的 tool 语义处理用户 instruction；需结合历史对话理解指代。',
     '3. 将完整结果写入 output/response.json（JSON，UTF-8）。',
     '4. 不要只在终端回复；必须落盘 output/response.json。',
     '',
     `当前 tool: ${tool}`,
+    `对话轮数: ${historyCount}`,
     `用户 instruction: ${instruction}`,
   ].join('\n')
 }
@@ -140,28 +147,8 @@ async function runLlmFallback(input: WebDocInvokeInput): Promise<WebDocInvokeRes
     }
   }
 
-  const system = [
-    '你是 AI Office HTML 文稿助手。只输出 JSON，不要其他文字。',
-    '格式：{"assistantMessage":"给用户看的 Markdown 说明","patch":null或补丁对象}',
-    '补丁类型：replace_block_text | replace_selection | insert_at_cursor | replace_document',
-    '不要编造事实与数据。',
-  ].join('\n')
-
-  const user = [
-    `tool: ${input.tool}`,
-    `instruction: ${input.instruction}`,
-    `title: ${input.title || '未命名文稿'}`,
-    `selectedBlockId: ${input.selectedBlockId || ''}`,
-    `selectedText: ${input.selectedText || ''}`,
-    '--- HTML ---',
-    input.html.slice(0, 120_000),
-  ].join('\n')
-
   const raw = await invokeLlmText(
-    [
-      { role: 'system', content: system },
-      { role: 'user', content: user },
-    ],
+    buildLlmFallbackMessages(input),
     { temperature: 0.3, maxTokens: 4096, timeoutMs: 60_000 },
   )
 
@@ -205,6 +192,7 @@ function prepareJobWorkspace(input: WebDocInvokeInput): {
         selectedText: input.selectedText || '',
         selectedBlockId: input.selectedBlockId || null,
         selectedSectionId: input.selectedSectionId || null,
+        chatHistory: (input.chatHistory || []).slice(-20),
       },
       null,
       2,
@@ -309,6 +297,84 @@ export function listWebDocTools(): Array<{ id: WebDocToolId; label: string; desc
   ]
 }
 
+function buildLlmFallbackMessages(input: WebDocInvokeInput): LlmMessage[] {
+  const system = [
+    '你是 AI Office HTML 文稿助手。只输出 JSON，不要其他文字。',
+    '格式：{"assistantMessage":"简短说明（一两句话）","patch":补丁对象或null}',
+    '补丁类型：replace_block_text | replace_selection | insert_at_cursor | replace_document',
+    '当用户要求撰写、生成、续写、改写正文时，必须把正文写入 patch，不能只写在 assistantMessage。',
+    '生成/改写全文时用 replace_document，html 字段为完整 article；局部修改用 replace_selection 或 insert_at_cursor。',
+    'insert_at_cursor 的 html 可含 <figure><img src="..." alt="..."/><figcaption>图注</figcaption></figure>。',
+    'assistantMessage 仅用于简短状态说明，不要重复整篇正文。',
+    '不要编造事实与数据。',
+  ].join('\n')
+
+  const history = (input.chatHistory || []).slice(-20)
+  const historyMessages = history.map((turn) => ({
+    role: turn.role,
+    content: turn.text.slice(0, 4000),
+  }))
+
+  const user = [
+    `tool: ${input.tool}`,
+    `instruction: ${input.instruction}`,
+    `title: ${input.title || '未命名文稿'}`,
+    `selectedBlockId: ${input.selectedBlockId || ''}`,
+    `selectedText: ${input.selectedText || ''}`,
+    '--- HTML ---',
+    input.html.slice(0, 120_000),
+  ].join('\n')
+
+  return [
+    { role: 'system', content: system },
+    ...historyMessages,
+    { role: 'user', content: user },
+  ]
+}
+
+/** 对话快速路径：直接 LLM 流式，跳过 OpenCode 以降低首字延迟。 */
+export async function streamWebDocChatLlm(
+  input: WebDocInvokeInput,
+  onDelta: (text: string) => void,
+): Promise<WebDocInvokeResult> {
+  const instruction = input.instruction.trim()
+  if (!instruction) {
+    return {
+      success: false,
+      assistantMessage: '请输入修改说明。',
+      source: 'llm-fallback',
+      error: 'empty_instruction',
+    }
+  }
+
+  if (!isLlmConfigured()) {
+    return {
+      success: false,
+      assistantMessage: '当前未配置 LLM，无法处理请求。',
+      source: 'llm-fallback',
+      error: 'llm_not_configured',
+    }
+  }
+
+  const raw = await invokeLlmTextStream(
+    buildLlmFallbackMessages({ ...input, tool: input.tool || 'chat' }),
+    onDelta,
+    { temperature: 0.3, maxTokens: 4096, timeoutMs: 60_000 },
+  )
+
+  const parsed = extractJsonFromLlmText(raw)
+  if (parsed) {
+    return { ...parsed, source: 'llm-fallback' }
+  }
+
+  return {
+    success: true,
+    assistantMessage: raw.trim() || '已完成处理。',
+    patch: null,
+    source: 'llm-fallback',
+  }
+}
+
 export async function invokeWebDocOpenCode(input: WebDocInvokeInput): Promise<WebDocInvokeResult> {
   const instruction = input.instruction.trim()
   if (!instruction) {
@@ -340,7 +406,7 @@ export async function invokeWebDocOpenCode(input: WebDocInvokeInput): Promise<We
   }
 
   const { jobDir, responsePath, logPath } = prepareJobWorkspace(input)
-  const prompt = buildOpenCodePrompt(input.tool, instruction)
+  const prompt = buildOpenCodePrompt(input.tool, instruction, (input.chatHistory || []).length)
 
   try {
     await runOpenCode(jobDir, responsePath, logPath, prompt)

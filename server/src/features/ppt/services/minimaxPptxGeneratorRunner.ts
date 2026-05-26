@@ -5,6 +5,7 @@ import { randomUUID } from 'crypto'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { saveSkillArtifact } from '../../../lib/skillArtifact'
+import { resolveTaskTimeoutMs } from '../../../lib/taskTimeouts'
 import { invokeLlmJson, isLlmConfigured } from '../../../modules/ai-gateway'
 import { buildDeckDocument } from './deckRuntime'
 import { withDeckPreviewImages } from './deckRenderer'
@@ -13,7 +14,7 @@ import type { WebDeckDocument, WebDeckSlide, WebDeckTaskResult } from '../types'
 
 const execFileAsync = promisify(execFile)
 const DEFAULT_OUTPUT_NAME = 'presentation.pptx'
-const COMPILE_TIMEOUT_MS = 60_000
+const COMPILE_TIMEOUT_MS = resolveTaskTimeoutMs('ppt')
 const MAX_SLIDES = 12
 const MIN_SLIDES = 4
 

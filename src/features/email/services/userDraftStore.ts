@@ -15,6 +15,15 @@ const MAX_DRAFTS = 200
 
 type UserDraftStore = Record<string, UserMailReplyDraft>
 
+function candidateKeys(primaryKey: string, aliases: string[] = []): string[] {
+  return [...new Set([
+    primaryKey,
+    ...aliases,
+    extractLegacyMailId(primaryKey),
+    ...aliases.map((key) => extractLegacyMailId(key)),
+  ].filter(Boolean))]
+}
+
 function load(): UserDraftStore {
   try {
     return JSON.parse(localStorage.getItem(STORE_KEY) ?? '{}')
@@ -53,10 +62,12 @@ export function getUserDraft(
   accountId: string,
   mailKey: string,
   bodyHash: string,
+  aliases: string[] = [],
 ): UserMailReplyDraft | null {
   const store = load()
-  const draft = store[key(accountId, mailKey, bodyHash)]
-    ?? store[key(accountId, extractLegacyMailId(mailKey), bodyHash)]
+  const draft = candidateKeys(mailKey, aliases)
+    .map((candidate) => store[key(accountId, candidate, bodyHash)])
+    .find(Boolean)
     ?? null
   if (!draft) return null
   if (draft.status === 'sent' || draft.status === 'discarded') return null

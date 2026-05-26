@@ -12,18 +12,26 @@ export type EmailAnalysisFailureStage =
 export type EmailAnalysisErrorCode =
   | 'BODY_INCOMPLETE'
   | 'FETCH_BODY_FAILED'
+  | 'MESSAGE_NOT_FOUND'
   | 'BODY_EMPTY'
+  | 'EMPTY_BODY'
   | 'HTML_CLEAN_FAILED'
   | 'BODY_TOO_LONG'
   | 'LLM_TIMEOUT'
+  | 'TIMEOUT'
   | 'MODEL_UNAVAILABLE'
+  | 'AI_MODEL_ERROR'
   | 'LLM_REQUEST_FAILED'
   | 'LLM_NON_JSON'
   | 'JSON_PARSE_FAILED'
+  | 'RESPONSE_PARSE_FAILED'
   | 'SAVE_FAILED'
   | 'ALREADY_ANALYZED'
   | 'ATTACHMENT_ONLY'
   | 'SYSTEM_DELIVERY_NOTICE'
+  | 'MISSING_MAIL_ID'
+  | 'MISSING_SOURCE_MAIL_KEY'
+  | 'INVALID_ANALYSIS_PAYLOAD'
 
 export interface EmailAnalysisReasonCount {
   key: string
@@ -46,7 +54,10 @@ export interface EmailAnalysisJobRecord {
   jobId: string
   accountId: string
   folder: string
-  messageId: string
+  mailId: string
+  /** RFC 2822 Message-ID header value. */
+  messageId?: string
+  sourceMailKey?: string
   messageUid: string
   status: EmailAnalysisJobStatus
   subject?: string

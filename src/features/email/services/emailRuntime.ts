@@ -7,7 +7,7 @@ import type {
   EmailAccountConfig,
   MailItem,
 } from '../../../types/email'
-import type { EmailAnalysisTaskSnapshot } from '../../../types/mailTriage'
+import type { EmailAnalysisRequestItem, EmailAnalysisTaskSnapshot } from '../../../types/mailTriage'
 import type {
   EmailAccountInput,
   EmailAccountState,
@@ -267,8 +267,21 @@ export function emailRuntimeSupportsAttachments(): boolean {
 export async function emailRuntimeStartTriage(options?: {
   limit?: number
   messageIds?: string[]
+  requestedMails?: EmailAnalysisRequestItem[]
   force?: boolean
-}): Promise<{ taskId: string }> {
+}): Promise<{
+  batchId?: string
+  taskId?: string
+  id?: string
+  total?: number
+  accepted?: number
+  skipped?: number
+  jobs?: Array<{
+    mailId: string
+    sourceMailKey?: string
+    status: 'queued' | 'running' | 'completed' | 'failed' | 'skipped'
+  }>
+}> {
   if (!isWebShim()) {
     throw new Error('Electron 邮件整理继续使用本地 MailTriageContext。')
   }
@@ -281,14 +294,28 @@ export async function emailRuntimeStartTriage(options?: {
     body: JSON.stringify({
       limit: options?.limit ?? 30,
       messageIds: options?.messageIds,
+      requestedMails: options?.requestedMails,
       force: options?.force,
     }),
   })
-  const body = await response.json().catch(() => ({ error: `HTTP ${response.status}` })) as { taskId?: string; error?: string }
-  if (!response.ok || !body.taskId) {
+  const body = await response.json().catch(() => ({ error: `HTTP ${response.status}` })) as {
+    batchId?: string
+    taskId?: string
+    id?: string
+    total?: number
+    accepted?: number
+    skipped?: number
+    jobs?: Array<{
+      mailId: string
+      sourceMailKey?: string
+      status: 'queued' | 'running' | 'completed' | 'failed' | 'skipped'
+    }>
+    error?: string
+  }
+  if (!response.ok || !(body.batchId || body.taskId || body.id)) {
     throw new Error(body.error || `邮件整理任务启动失败 (${response.status})`)
   }
-  return { taskId: body.taskId }
+  return body
 }
 
 export async function emailRuntimeGetTriageTask(taskId: string): Promise<EmailAnalysisTaskSnapshot> {

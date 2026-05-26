@@ -1,0 +1,26 @@
+/* App shell: full viewport, no Vite template flex-centering (see App.css for UI styles) */
+:root {
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  color-scheme: light;
+  color: #213547;
+  background-color: #f0f2f5;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100%;
+}
+
+#root {
+  min-height: 100%;
+}

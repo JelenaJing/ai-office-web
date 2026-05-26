@@ -15,6 +15,15 @@ const MAX_DRAFTS = 200
 
 type DraftStore = Record<string, AiMailReplyDraft>
 
+function candidateKeys(primaryKey: string, aliases: string[] = []): string[] {
+  return [...new Set([
+    primaryKey,
+    ...aliases,
+    extractLegacyMailId(primaryKey),
+    ...aliases.map((key) => extractLegacyMailId(key)),
+  ].filter(Boolean))]
+}
+
 function load(): DraftStore {
   try {
     return JSON.parse(localStorage.getItem(STORE_KEY) ?? '{}')
@@ -43,10 +52,11 @@ function save(store: DraftStore): void {
 }
 
 /** Get the AI draft for a specific mail. Returns null if not present or discarded. */
-export function getAiDraft(accountId: string, mailKey: string, bodyHash: string): AiMailReplyDraft | null {
+export function getAiDraft(accountId: string, mailKey: string, bodyHash: string, aliases: string[] = []): AiMailReplyDraft | null {
   const store = load()
-  const draft = store[`${accountId}:${mailKey}:${bodyHash}`]
-    ?? store[`${accountId}:${extractLegacyMailId(mailKey)}:${bodyHash}`]
+  const draft = candidateKeys(mailKey, aliases)
+    .map((key) => store[`${accountId}:${key}:${bodyHash}`])
+    .find(Boolean)
     ?? null
   if (!draft) return null
   // Don't return discarded drafts
@@ -55,8 +65,8 @@ export function getAiDraft(accountId: string, mailKey: string, bodyHash: string)
 }
 
 /** Check if a non-discarded AI draft exists for a specific mail + bodyHash. */
-export function hasAiDraft(accountId: string, mailKey: string, bodyHash: string): boolean {
-  return getAiDraft(accountId, mailKey, bodyHash) !== null
+export function hasAiDraft(accountId: string, mailKey: string, bodyHash: string, aliases: string[] = []): boolean {
+  return getAiDraft(accountId, mailKey, bodyHash, aliases) !== null
 }
 
 /** Store an AI draft. */

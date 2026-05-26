@@ -11,7 +11,9 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import styled from 'styled-components'
-import { FolderOpen, Sparkles, BookOpen, Download, Trash2, RefreshCw } from 'lucide-react'
+import { FolderOpen, Sparkles, BookOpen, Download, Trash2, RefreshCw, ExternalLink } from 'lucide-react'
+import type { FileEntry } from '../platform'
+import { canOpenArtifact, openArtifactLabel } from '../services/openResourceIntent'
 import MyFilesView from '../components/resource/MyFilesView'
 import RemoteKnowledgePanel from '../components/resource/RemoteKnowledgePanel'
 import { platformApi } from '../platform'
@@ -115,7 +117,7 @@ function fmtDate(iso: string): string {
   } catch { return iso }
 }
 
-function ArtifactsTab() {
+function ArtifactsTab({ onOpenArtifact }: { onOpenArtifact?: (artifact: Artifact) => void }) {
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -141,6 +143,12 @@ function ArtifactsTab() {
   }, [])
 
   useEffect(() => { void fetchArtifacts() }, [fetchArtifacts])
+
+  useEffect(() => {
+    const handler = () => { void fetchArtifacts() }
+    window.addEventListener('resource-files-changed', handler)
+    return () => window.removeEventListener('resource-files-changed', handler)
+  }, [fetchArtifacts])
 
   const handleDownload = async (artifact: Artifact) => {
     const filename = artifactDownloadFilename(artifact)
@@ -258,6 +266,7 @@ function ArtifactsTab() {
           <tbody>
             {artifacts.filter(a => typeFilter === 'all' || a.type === typeFilter).map((a) => {
               const canDownload = artifactHasExport(a)
+              const canOpen = canOpenArtifact(a)
               return (
                 <tr key={a.id} style={{ borderBottom: '1px solid #f0f4f8' }}>
                   <td style={{ padding: '10px 20px' }}>
@@ -273,6 +282,25 @@ function ArtifactsTab() {
                   </td>
                   <td style={{ padding: '10px 20px' }}>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      {canOpen && onOpenArtifact ? (
+                        <button
+                          type="button"
+                          onClick={() => onOpenArtifact(a)}
+                          disabled={actionBusy}
+                          title={openArtifactLabel(a)}
+                          style={{
+                            height: 30, padding: '0 10px', border: '1px solid #b8d4f0',
+                            borderRadius: 6, background: '#f0f7ff',
+                            cursor: actionBusy ? 'not-allowed' : 'pointer',
+                            display: 'inline-flex', alignItems: 'center', gap: 5,
+                            fontSize: 12, color: '#1f6fd6', fontWeight: 600,
+                            opacity: actionBusy ? 0.6 : 1,
+                          }}
+                        >
+                          <ExternalLink size={13} />
+                          {openArtifactLabel(a)}
+                        </button>
+                      ) : null}
                       {canDownload ? (
                         <button
                           type="button"
@@ -323,9 +351,11 @@ function ArtifactsTab() {
 
 interface ResourceWorkspaceProps {
   onGoToWorkspace?: () => void
+  onOpenFile?: (file: FileEntry) => void
+  onOpenArtifact?: (artifact: Artifact) => void
 }
 
-export default function ResourceWorkspace(_props: ResourceWorkspaceProps) {
+export default function ResourceWorkspace({ onOpenFile, onOpenArtifact }: ResourceWorkspaceProps) {
   const [tab, setTab] = useState<ResourceTab>('files')
 
   return (
@@ -348,9 +378,9 @@ export default function ResourceWorkspace(_props: ResourceWorkspaceProps) {
       </TabBar>
 
       <PanelArea>
-        {tab === 'files' && <MyFilesView fullHeight />}
+        {tab === 'files' && <MyFilesView fullHeight onOpenFile={onOpenFile} />}
 
-        {tab === 'artifacts' && <ArtifactsTab />}
+        {tab === 'artifacts' && <ArtifactsTab onOpenArtifact={onOpenArtifact} />}
 
         {tab === 'kb' && <RemoteKnowledgePanel />}
       </PanelArea>

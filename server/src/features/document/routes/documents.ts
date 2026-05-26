@@ -1,8 +1,10 @@
 import fs from 'fs'
+import path from 'path'
 import { Router } from 'express'
 import multer from 'multer'
 import { requireAccountUser } from '../../../lib/authUser'
 import { getArtifact, getArtifactFilePath } from '../../../artifacts/ArtifactStore'
+import { resolveUserFileInWorkspace } from '../../../lib/userFiles'
 import { assertWorkspaceAccess, WorkspaceAccessError } from '../../../lib/workspaceAccess'
 import { getDocumentRecord, getDocumentTask, saveDocumentRecord, updateDocumentTask, createDocumentTask } from '../services/documentTaskStore'
 import { resolveDocumentKnowledgeRefs } from '../services/documentKnowledgeRefs'
@@ -11,7 +13,7 @@ import {
   editDocumentSelectionWithBuiltin,
   runBuiltinDocumentEngine,
 } from '../services/documentBuiltinEngine'
-import { buildDocumentOutline } from '../services/documentDraft'
+import { buildDocumentOutline, normalizeDocumentDraft } from '../services/documentDraft'
 import { saveDocumentDraftDocxArtifact } from '../services/documentArtifactService'
 import {
   editDocumentSectionWithMinimax,
@@ -464,7 +466,7 @@ router.post('/:documentId/sections/:sectionId/edit', async (req, res) => {
   const userId = await requireAccountUser(req, res)
   if (!userId) return
 
-  const record = getDocumentRecord(req.params.documentId)
+  const record = getDocumentRecord(req.params.documentId, userId)
   if (!record || record.userId !== userId) {
     res.status(404).json({ success: false, error: '文稿不存在或无权限访问' })
     return
@@ -518,7 +520,7 @@ router.post('/:documentId/edit-selection', async (req, res) => {
   const userId = await requireAccountUser(req, res)
   if (!userId) return
 
-  const record = getDocumentRecord(req.params.documentId)
+  const record = getDocumentRecord(req.params.documentId, userId)
   if (!record || record.userId !== userId) {
     res.status(404).json({ success: false, error: '文稿不存在或无权限访问' })
     return
@@ -575,7 +577,7 @@ router.post('/:documentId/continue', async (req, res) => {
   const userId = await requireAccountUser(req, res)
   if (!userId) return
 
-  const record = getDocumentRecord(req.params.documentId)
+  const record = getDocumentRecord(req.params.documentId, userId)
   if (!record || record.userId !== userId) {
     res.status(404).json({ success: false, error: '文稿不存在或无权限访问' })
     return
@@ -606,15 +608,78 @@ router.post('/:documentId/continue', async (req, res) => {
   }
 })
 
+router.post('/save-initial', async (req, res) => {
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+
+  const workspacePath = resolveWorkspacePath(userId, req.body?.workspacePath)
+  const body = (req.body || {}) as Record<string, unknown>
+  const html = typeof body.html === 'string' ? body.html : ''
+  if (!html.trim()) {
+    res.status(400).json({ success: false, error: 'html 不能为空' })
+    return
+  }
+
+  try {
+    const title = typeof body.title === 'string' && body.title.trim() ? body.title.trim() : '未命名文稿'
+    const rawDraft = body.document || body.documentDraft
+    const draft = rawDraft && typeof rawDraft === 'object'
+      ? normalizeDocumentDraft({
+        raw: rawDraft as Record<string, unknown>,
+        title,
+        type: 'report',
+        language: 'zh-CN',
+        engine: 'builtin',
+        knowledgeRefs: [],
+        preferredOutline: [],
+      })
+      : buildWorkbenchDraftFromHtml({
+        html,
+        title,
+        documentType: 'report',
+        language: 'zh-CN',
+        engine: 'builtin',
+        knowledgeRefs: [],
+      })
+    const userFileId = typeof body.userFileId === 'string' ? body.userFileId.trim() : ''
+    const persisted = await persistWorkbenchDocument({
+      userId,
+      workspacePath,
+      skillId: 'web.document.save-initial',
+      engine: 'builtin',
+      title: draft.title,
+      documentType: 'report',
+      language: 'zh-CN',
+      knowledgeRefs: [],
+      draft,
+      html,
+      userFileId: userFileId || undefined,
+    })
+    res.json({
+      success: true,
+      savedAt: persisted.record.updatedAt,
+      userFileId: persisted.result.userFileId,
+      ...persisted.result,
+    })
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+})
+
 router.post('/:documentId/save', async (req, res) => {
   const userId = await requireAccountUser(req, res)
   if (!userId) return
 
-  const record = getDocumentRecord(req.params.documentId)
+  const record = getDocumentRecord(req.params.documentId, userId)
   if (!record || record.userId !== userId) {
     res.status(404).json({ success: false, error: '文稿不存在或无权限访问' })
     return
   }
+
+  const userFileId = typeof req.body?.userFileId === 'string' ? req.body.userFileId.trim() : ''
 
   try {
     const requestRecord = updateRecordFromRequest(record, (req.body || {}) as Record<string, unknown>)
@@ -627,6 +692,7 @@ router.post('/:documentId/save', async (req, res) => {
       knowledgeRefs: requestRecord.knowledgeRefs,
       html: requestRecord.html,
       documentArtifact: requestRecord.documentArtifact,
+      userFileId: userFileId || undefined,
     })
     const savedAt = new Date().toISOString()
     const nextRecord = {
@@ -642,10 +708,12 @@ router.post('/:documentId/save', async (req, res) => {
       updatedAt: savedAt,
     }
     saveDocumentRecord(nextRecord)
+    const mirroredFileId = userFileId || exported.userFileId
     res.json({
       success: true,
       documentId: nextRecord.documentId,
       savedAt,
+      userFileId: mirroredFileId,
       artifact: nextRecord.artifact,
       artifactId: nextRecord.artifactId,
       exportUrl: nextRecord.exportUrl,
@@ -664,7 +732,7 @@ router.post('/:documentId/export', async (req, res) => {
   const userId = await requireAccountUser(req, res)
   if (!userId) return
 
-  const record = getDocumentRecord(req.params.documentId)
+  const record = getDocumentRecord(req.params.documentId, userId)
   if (!record || record.userId !== userId) {
     res.status(404).json({ success: false, error: '文稿不存在或无权限访问' })
     return
@@ -731,8 +799,19 @@ router.post('/import-docx', upload.single('file'), async (req, res) => {
 
   const workspacePath = resolveWorkspacePath(userId, req.body?.workspacePath)
   const artifactId = typeof req.body?.artifactId === 'string' ? req.body.artifactId.trim() : ''
+  const fileId = typeof req.body?.fileId === 'string' ? req.body.fileId.trim() : ''
   let buffer: Buffer | null = req.file?.buffer ?? null
   let originalName = req.file?.originalname || ''
+
+  if (!buffer && fileId) {
+    const resolved = resolveUserFileInWorkspace(userId, fileId, workspacePath)
+    if (!resolved) {
+      res.status(404).json({ success: false, error: 'fileId 对应的文件不存在' })
+      return
+    }
+    buffer = fs.readFileSync(resolved.absolutePath)
+    originalName = resolved.entry.name
+  }
 
   if (!buffer && artifactId) {
     const artifact = getArtifact(artifactId)
@@ -751,20 +830,83 @@ router.post('/import-docx', upload.single('file'), async (req, res) => {
   }
 
   if (!buffer) {
-    res.status(400).json({ success: false, error: '请上传 .docx 文件或提供 artifactId' })
+    res.status(400).json({ success: false, error: '请上传文件，或提供 artifactId / fileId' })
     return
   }
 
-  if (!originalName.toLowerCase().endsWith('.docx')) {
-    res.status(400).json({ success: false, error: '仅支持 .docx 格式文件' })
-    return
+  const ext = path.extname(originalName).slice(1).toLowerCase() || 'docx'
+
+  if (fileId) {
+    const resolvedFile = resolveUserFileInWorkspace(userId, fileId, workspacePath)
+    const linkedDocId = resolvedFile?.entry.documentId
+    if (linkedDocId) {
+      const existing = getDocumentRecord(linkedDocId, userId)
+      if (existing) {
+        saveDocumentRecord(existing)
+        return res.json({
+          success: true,
+          source: 'record',
+          text: '',
+          title: existing.title,
+          wordCount: 0,
+          userFileId: fileId,
+          engine: existing.engine,
+          skillId: existing.skillId,
+          documentId: existing.documentId,
+          artifactId: existing.artifactId,
+          exportUrl: existing.exportUrl,
+          filename: existing.filename,
+          document: existing.draft,
+          html: existing.html,
+          documentArtifact: existing.documentArtifact,
+          outline: buildDocumentOutline(existing.draft),
+        })
+      }
+    }
   }
 
   try {
-    const extracted = await extractDocxContent(buffer)
+    let html = ''
+    let text = ''
+    let wordCount = 0
+    let title = originalName.replace(/\.[^.]+$/, '') || '未命名文稿'
+
+    if (ext === 'docx') {
+      const extracted = await extractDocxContent(buffer)
+      html = extracted.html
+      text = extracted.text
+      wordCount = extracted.wordCount
+      title = extracted.title || title
+    } else if (ext === 'html' || ext === 'md' || ext === 'txt') {
+      const raw = buffer.toString('utf-8')
+      text = raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+      wordCount = text.length
+      if (ext === 'html') {
+        html = raw
+      } else if (ext === 'md') {
+        html = raw
+          .split(/\n{2,}/)
+          .map((block) => block.trim())
+          .filter(Boolean)
+          .map((block) => `<p>${block.replace(/\n/g, '<br/>')}</p>`)
+          .join('\n')
+      } else {
+        html = raw
+          .split(/\n{2,}/)
+          .map((block) => block.trim())
+          .filter(Boolean)
+          .map((block) => `<p>${block.replace(/\n/g, '<br/>')}</p>`)
+          .join('\n')
+      }
+      if (!html.trim()) html = '<p></p>'
+    } else {
+      res.status(400).json({ success: false, error: '仅支持 .docx / .html / .md / .txt 格式' })
+      return
+    }
+
     const draft = buildWorkbenchDraftFromHtml({
-      html: extracted.html,
-      title: extracted.title || originalName.replace(/\.docx$/i, ''),
+      html,
+      title,
       documentType: 'report',
       language: 'zh-CN',
       engine: 'builtin',
@@ -773,21 +915,23 @@ router.post('/import-docx', upload.single('file'), async (req, res) => {
     const persisted = await persistWorkbenchDocument({
       userId,
       workspacePath,
-      skillId: 'web.document.import-docx',
+      skillId: fileId ? 'web.document.import-file' : artifactId ? 'web.document.import-artifact' : 'web.document.import-docx',
       engine: 'builtin',
       title: draft.title,
       documentType: 'report',
       language: 'zh-CN',
       knowledgeRefs: [],
       draft,
-      html: extracted.html,
+      html,
+      userFileId: fileId || undefined,
     })
     res.json({
       success: true,
-      source: artifactId ? 'artifact' : 'upload',
-      text: extracted.text,
+      source: fileId ? 'file' : artifactId ? 'artifact' : 'upload',
+      text,
       title: draft.title,
-      wordCount: extracted.wordCount,
+      wordCount,
+      userFileId: persisted.result.userFileId || fileId || undefined,
       ...persisted.result,
     })
   } catch (error) {

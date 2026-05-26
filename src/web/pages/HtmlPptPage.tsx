@@ -1,9 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { platformApi } from '../../platform'
+import { TASK_TIMEOUTS } from '../../constants/taskTimeouts'
 import { resolveWebApiUrl } from '../../runtime/apiBase'
+import { consumePendingResourceOpen, peekPendingResourceOpen } from '../../services/pendingResourceOpen'
+import { consumePendingReportFromDocument } from '../../services/pendingReportFromDocument'
+import {
+  clearHtmlPptWorkbenchState,
+  loadHtmlPptWorkbenchState,
+  saveHtmlPptWorkbenchState,
+  type PersistedHtmlPptChatMessage,
+  type PersistedHtmlPptExportState,
+} from '../../services/htmlPptWorkbenchState'
 
-type ArtifactJobStatus = 'queued' | 'running' | 'succeeded' | 'failed'
-type UiState = 'idle' | 'generating' | 'succeeded' | 'failed'
+type ArtifactJobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled'
+type QualityMode = 'fast' | 'high'
+type UiState = 'idle' | 'generating' | 'succeeded' | 'failed' | 'canceled'
 
 interface ArtifactJobResponse {
   success: boolean
@@ -12,9 +23,32 @@ interface ArtifactJobResponse {
   type: string
   skillId?: string
   message?: string
+  currentPhase?: string
+  cancellable?: boolean
   error?: string
+  warning?: string
+  fallbackUsed?: boolean
+  fallbackRenderer?: string
+  opencodeTimedOut?: boolean
+  timeoutMs?: number
   artifactId?: string
   artifactFileUrl?: string
+  requestedTemplateSlug?: string
+  selectedTemplateSlug?: string
+  selectedStyleId?: string
+  rendererMode?: string
+  cancelRequestedAt?: string
+  canceledAt?: string
+  cancelReason?: string
+  runnerPid?: number
+  runnerProcessGroupId?: number
+  partialOutput?: boolean
+  htmlPresentationOptions?: {
+    templateSlug?: string
+    enableImages: boolean
+    maxImages: number
+    qualityMode: QualityMode
+  }
   createdAt?: number
   updatedAt?: number
 }
@@ -32,6 +66,9 @@ interface PreviewState {
   url: string
 }
 
+type PptxExportState = PersistedHtmlPptExportState
+type ChatMessage = PersistedHtmlPptChatMessage
+
 interface TemplateOption {
   slug: string
   name: string
@@ -43,6 +80,20 @@ interface TemplateOption {
 interface TemplateListResponse {
   success: boolean
   templates: TemplateOption[]
+}
+
+interface HtmlPptExportResponse {
+  success: boolean
+  exportArtifactId: string
+  filename: string
+  downloadUrl: string
+  cached: boolean
+  artifact?: {
+    id: string
+    title: string
+    exports: Array<{ format: string; filename: string; url: string }>
+  }
+  error?: string
 }
 
 const EXAMPLE_PROMPTS = [
@@ -58,6 +109,31 @@ const GENERATING_STEPS = [
   '正在生成视觉版式',
   '正在完成最终检查',
 ]
+
+const CHAT_QUICK_COMMANDS = [
+  '改成更正式',
+  '增加目录页',
+  '减少文字',
+  '改成无图版本',
+  '导出 PPTX',
+  '更换模板',
+]
+
+const DEFAULT_CHAT_MESSAGES: ChatMessage[] = [{
+  id: 'assistant-default',
+  role: 'assistant',
+  text: '这里可以记录你对当前演示文稿的修改要求。真实局部修改能力正在接入；目前可先通过左侧重新生成、应用模板、下载 HTML/PPTX。',
+  createdAt: '',
+}]
+
+function createChatMessage(role: ChatMessage['role'], text: string): ChatMessage {
+  return {
+    id: `${role}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    role,
+    text,
+    createdAt: new Date().toISOString(),
+  }
+}
 
 function authHeaders(extra?: Record<string, string>): Record<string, string> {
   const token = platformApi.auth.getToken()
@@ -104,8 +180,39 @@ function statusText(status?: ArtifactJobStatus): string {
       return '已完成'
     case 'failed':
       return '生成失败'
+    case 'canceled':
+      return '已停止'
     default:
       return '未开始'
+  }
+}
+
+function phaseText(phase?: string): string {
+  switch (phase) {
+    case 'queued':
+      return '任务排队中'
+    case 'starting':
+      return '正在准备生成环境'
+    case 'opencode':
+      return '正在生成 HTML PPT'
+    case 'repairing-output':
+      return '正在修复输出路径'
+    case 'postprocess':
+      return '正在注入模板与运行时'
+    case 'final-check':
+      return '正在完成最终检查'
+    case 'finalizing':
+      return '正在写入预览产物'
+    case 'canceling':
+      return '正在停止生成'
+    case 'completed':
+      return '生成已完成'
+    case 'failed':
+      return '生成失败'
+    case 'canceled':
+      return '已停止生成'
+    default:
+      return '正在处理中'
   }
 }
 
@@ -128,21 +235,37 @@ function summarizeDebugError(message: string | undefined): string {
   return trimmed.length > 160 ? `${trimmed.slice(0, 160)}…` : trimmed
 }
 
+function buildSuccessWarning(job: ArtifactJobResponse | null): string {
+  if (!job) return ''
+  if (job.warning) return job.warning
+  if (!job.opencodeTimedOut || !job.fallbackUsed) return ''
+  const seconds = job.timeoutMs ? Math.round(job.timeoutMs / 1000) : Math.round(TASK_TIMEOUTS.htmlPpt / 1000)
+  return `PPT 已生成，但 OpenCode 在 ${seconds} 秒内未完成，已使用快速备用渲染器完成初稿。`
+}
+
 export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
   const [inputText, setInputText] = useState('')
   const [templateOptions, setTemplateOptions] = useState<TemplateOption[]>([])
   const [selectedTemplateSlug, setSelectedTemplateSlug] = useState('')
-  const [enableImages, setEnableImages] = useState(true)
-  const [maxImages, setMaxImages] = useState(3)
+  const [qualityMode, setQualityMode] = useState<QualityMode>('fast')
+  const [enableImages, setEnableImages] = useState(false)
+  const [maxImages, setMaxImages] = useState(0)
   const [job, setJob] = useState<ArtifactJobResponse | null>(null)
   const [logs, setLogs] = useState('')
   const [submitError, setSubmitError] = useState('')
+  const [cancelError, setCancelError] = useState('')
   const [previewError, setPreviewError] = useState('')
   const [preview, setPreview] = useState<PreviewState | null>(null)
   const [previewLoaded, setPreviewLoaded] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isCancelling, setIsCancelling] = useState(false)
+  const [isStateReady, setIsStateReady] = useState(false)
+  const [pptxExport, setPptxExport] = useState<PptxExportState | null>(null)
+  const [lastGeneratedAt, setLastGeneratedAt] = useState('')
   const [showDebug, setShowDebug] = useState(false)
   const [generationElapsedMs, setGenerationElapsedMs] = useState(0)
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
+  const [chatInput, setChatInput] = useState('')
   // Retemplate state
   const [retemplateSlug, setRetemplateSlug] = useState('')
   const [isRetemplating, setIsRetemplating] = useState(false)
@@ -153,9 +276,46 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
   const previewIframeRef = useRef<HTMLIFrameElement | null>(null)
   const loadedArtifactIdRef = useRef<string>('')
   const generationStartedAtRef = useRef<number | null>(null)
+  const pendingReportMarkdownRef = useRef('')
+  const pendingReportPromptRef = useRef('')
+  const pendingReportStartedRef = useRef(false)
+  const stateRestoredRef = useRef(false)
 
   useEffect(() => {
     syncPreviewAuthCookie()
+  }, [])
+
+  useEffect(() => {
+    if (stateRestoredRef.current) return
+    stateRestoredRef.current = true
+    const restored = loadHtmlPptWorkbenchState()
+    if (restored) {
+      setInputText(restored.currentPrompt || '')
+      setSelectedTemplateSlug(restored.selectedTemplateId || '')
+      setQualityMode(restored.qualityMode === 'high' ? 'high' : 'fast')
+      setEnableImages(Boolean(restored.enableImages))
+      setMaxImages(typeof restored.maxImages === 'number' ? restored.maxImages : 0)
+      setJob((restored.job as ArtifactJobResponse | null | undefined) ?? null)
+      setLogs(restored.logs || '')
+      setSubmitError(restored.error || '')
+      setRetemplateSlug(restored.retemplateSlug || '')
+      setRetemplateWarning(restored.retemplateWarning || '')
+      setPptxExport(restored.pptxExport || null)
+      setLastGeneratedAt(restored.lastGeneratedAt || '')
+      setChatMessages(Array.isArray(restored.chatMessages) ? restored.chatMessages : [])
+      if (restored.preview?.artifactId) {
+        setPreview({
+          artifactId: restored.preview.artifactId,
+          url: restored.preview.url || buildPreviewUrl(restored.preview.artifactId),
+        })
+        setPreviewLoaded(false)
+      }
+      if (restored.lastGeneratedAt) {
+        const restoredStartedAt = new Date(restored.lastGeneratedAt).getTime()
+        generationStartedAtRef.current = Number.isFinite(restoredStartedAt) ? restoredStartedAt : null
+      }
+    }
+    setIsStateReady(true)
   }, [])
 
   useEffect(() => {
@@ -267,6 +427,13 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
     }
   }, [])
 
+  useEffect(() => {
+    if (qualityMode === 'fast') {
+      setEnableImages(false)
+      setMaxImages(0)
+    }
+  }, [qualityMode])
+
   const loadPreview = useCallback(async (artifactId: string) => {
     if (!artifactId || loadedArtifactIdRef.current === artifactId) return
     syncPreviewAuthCookie()
@@ -279,6 +446,21 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
     })
   }, [])
 
+  useEffect(() => {
+    const pending = peekPendingResourceOpen()
+    if (!pending || pending.kind !== 'html-ppt-artifact') return
+    consumePendingResourceOpen()
+    void loadPreview(pending.artifactId)
+    setLastGeneratedAt(new Date().toISOString())
+    setJob({
+      success: true,
+      jobId: `opened-${pending.artifactId}`,
+      status: 'succeeded',
+      type: 'html_presentation',
+      artifactId: pending.artifactId,
+    })
+  }, [loadPreview])
+
   const loadJob = useCallback(async (jobId: string) => {
     const [jobData, logsData] = await Promise.all([
       apiFetchJson<ArtifactJobResponse>(`/api/artifact-jobs/${jobId}`),
@@ -287,6 +469,16 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
     setJob(jobData)
     setLogs(logsData.logs ?? '')
     if (jobData.status === 'succeeded' && jobData.artifactId) {
+      const completedAt = typeof jobData.updatedAt === 'number'
+        ? new Date(jobData.updatedAt).toISOString()
+        : typeof jobData.updatedAt === 'string'
+          ? jobData.updatedAt
+          : typeof jobData.createdAt === 'number'
+            ? new Date(jobData.createdAt).toISOString()
+            : typeof jobData.createdAt === 'string'
+              ? jobData.createdAt
+              : new Date().toISOString()
+      setLastGeneratedAt(completedAt)
       try {
         await loadPreview(jobData.artifactId)
       } catch (error) {
@@ -303,7 +495,10 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
     const poll = async () => {
       try {
         const next = await loadJob(job.jobId)
-        if (!cancelled && (next.status === 'succeeded' || next.status === 'failed')) return
+        if (!cancelled && (next.status === 'succeeded' || next.status === 'failed' || next.status === 'canceled')) {
+          setIsCancelling(false)
+          return
+        }
       } catch (error) {
         if (!cancelled) setSubmitError(error instanceof Error ? error.message : String(error))
       }
@@ -320,12 +515,69 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
     }
   }, [job, loadJob])
 
+  useEffect(() => {
+    if (job?.status === 'queued' || job?.status === 'running') return
+    setIsCancelling(false)
+  }, [job?.status])
+
   const uiState = useMemo<UiState>(() => {
     if (job?.status === 'queued' || job?.status === 'running' || isSubmitting) return 'generating'
     if (job?.status === 'succeeded') return 'succeeded'
+    if (job?.status === 'canceled') return 'canceled'
     if (job?.status === 'failed' || submitError) return 'failed'
     return 'idle'
   }, [isSubmitting, job?.status, submitError])
+
+  useEffect(() => {
+    if (!isStateReady) return
+    saveHtmlPptWorkbenchState({
+      currentPrompt: inputText,
+      currentJobId: job?.jobId || '',
+      currentDeckId: '',
+      currentArtifactId: preview?.artifactId || job?.artifactId || '',
+      selectedTemplateId: selectedTemplateSlug,
+      generationStatus: job?.status || uiState,
+      htmlPreviewUrl: preview?.url || '',
+      htmlContent: '',
+      pptxExportUrl: pptxExport?.downloadUrl || '',
+      exportStatus: pptxExport?.status || 'idle',
+      lastGeneratedAt,
+      currentStep: job?.currentPhase || '',
+      error: submitError,
+      logs: logs.slice(-20_000),
+      qualityMode,
+      enableImages,
+      maxImages,
+      retemplateSlug,
+      retemplateWarning,
+      job: job as Record<string, unknown> | null,
+      preview,
+      pptxExport,
+      chatMessages,
+    })
+  }, [
+    chatMessages,
+    enableImages,
+    inputText,
+    isStateReady,
+    job,
+    lastGeneratedAt,
+    logs,
+    maxImages,
+    pptxExport,
+    preview,
+    qualityMode,
+    retemplateSlug,
+    retemplateWarning,
+    selectedTemplateSlug,
+    submitError,
+    uiState,
+  ])
+
+  useEffect(() => {
+    if (!preview?.artifactId) return
+    setPptxExport((prev) => (prev && prev.artifactId !== preview.artifactId ? null : prev))
+  }, [preview?.artifactId])
 
   useEffect(() => {
     if (uiState !== 'generating') {
@@ -356,15 +608,23 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
 
   const startGeneration = useCallback(async () => {
     const trimmedInput = inputText.trim()
-    if (!trimmedInput) return
+    const markdown = pendingReportMarkdownRef.current || buildArtifactMarkdown(trimmedInput)
+    const prompt = pendingReportPromptRef.current || buildArtifactPrompt(trimmedInput)
+    if (!markdown.trim() && !trimmedInput) return
 
     setIsSubmitting(true)
     setSubmitError('')
+    setCancelError('')
     setPreviewError('')
     setLogs('')
     setShowDebug(false)
     setRetemplateWarning('')
+    setIsCancelling(false)
+    setPptxExport(null)
     setJob(null)
+    const startedAtIso = new Date().toISOString()
+    setLastGeneratedAt(startedAtIso)
+    generationStartedAtRef.current = new Date(startedAtIso).getTime()
     loadedArtifactIdRef.current = ''
     setPreview(null)
     setPreviewLoaded(false)
@@ -376,13 +636,16 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
         body: JSON.stringify({
           type: 'html_presentation',
           skillId: 'html-ppt-beautiful',
-          prompt: buildArtifactPrompt(trimmedInput),
-          inputMarkdown: buildArtifactMarkdown(trimmedInput),
+          prompt,
+          inputMarkdown: markdown,
           templateSlug: selectedTemplateSlug || undefined,
           enableImages,
           maxImages,
+          qualityMode,
         }),
       })
+      pendingReportMarkdownRef.current = ''
+      pendingReportPromptRef.current = ''
       setJob(created)
       await loadJob(created.jobId)
     } catch (error) {
@@ -390,12 +653,55 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
     } finally {
       setIsSubmitting(false)
     }
-  }, [enableImages, inputText, loadJob, maxImages, selectedTemplateSlug])
+  }, [enableImages, inputText, loadJob, maxImages, qualityMode, selectedTemplateSlug])
+
+  useEffect(() => {
+    if (pendingReportStartedRef.current) return
+    const pending = consumePendingReportFromDocument()
+    if (!pending) return
+    pendingReportStartedRef.current = true
+    pendingReportMarkdownRef.current = pending.inputMarkdown
+    pendingReportPromptRef.current = pending.prompt
+    setInputText(pending.title)
+    void startGeneration()
+  }, [startGeneration])
 
   const handleSubmit = useCallback(async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     await startGeneration()
   }, [startGeneration])
+
+  const handleCancelGeneration = useCallback(async () => {
+    if (!job?.jobId || isCancelling || (job.status !== 'queued' && job.status !== 'running')) return
+    setCancelError('')
+    setIsCancelling(true)
+    try {
+      const result = await apiFetchJson<{
+        success: boolean
+        jobId: string
+        status: ArtifactJobStatus
+        cancelRequestedAt?: string
+        canceledAt?: string
+        alreadyFinished?: boolean
+      }>(`/api/artifact-jobs/${job.jobId}/cancel`, {
+        method: 'POST',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ reason: 'user_cancelled' }),
+      })
+      setJob((prev) => (prev && prev.jobId === job.jobId ? {
+        ...prev,
+        cancelRequestedAt: result.cancelRequestedAt,
+        canceledAt: result.canceledAt,
+        message: '正在停止生成…',
+        currentPhase: 'canceling',
+        cancellable: false,
+      } : prev))
+      void loadJob(job.jobId).catch(() => {})
+    } catch {
+      setIsCancelling(false)
+      setCancelError('停止失败，后端任务可能仍在运行，请稍后重试。')
+    }
+  }, [isCancelling, job?.jobId, job?.status, loadJob])
 
   const handleDownloadHtml = useCallback(async () => {
     if (!job?.artifactId) return
@@ -412,6 +718,55 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
     URL.revokeObjectURL(url)
   }, [inputText, job?.artifactId])
 
+  const handleExportPptx = useCallback(async () => {
+    const artifactId = job?.artifactId || preview?.artifactId
+    if (!artifactId) return
+
+    if (pptxExport?.status === 'ready' && pptxExport.exportArtifactId) {
+      await platformApi.artifacts.download(pptxExport.exportArtifactId, pptxExport.filename || 'presentation.pptx')
+      return
+    }
+
+    setPptxExport({
+      status: 'running',
+      artifactId,
+      error: '',
+      filename: pptxExport?.filename || `${(inputText || '演示文稿').replace(/[^a-zA-Z0-9\u4e00-\u9fa5_-]/g, '_').slice(0, 48)}.pptx`,
+      exportArtifactId: '',
+      downloadUrl: '',
+    })
+
+    try {
+      const result = await apiFetchJson<HtmlPptExportResponse>(`/api/artifacts/${artifactId}/html-presentation/export-pptx`, {
+        method: 'POST',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({}),
+      })
+      if (!result.success || !result.exportArtifactId) {
+        throw new Error(result.error || 'PPTX 转换失败')
+      }
+      const nextState: PptxExportState = {
+        status: 'ready',
+        artifactId,
+        exportArtifactId: result.exportArtifactId,
+        downloadUrl: result.downloadUrl,
+        filename: result.filename,
+        error: '',
+      }
+      setPptxExport(nextState)
+      await platformApi.artifacts.download(result.exportArtifactId, result.filename)
+    } catch (error) {
+      setPptxExport({
+        status: 'failed',
+        artifactId,
+        error: error instanceof Error ? error.message : String(error),
+        filename: pptxExport?.filename || 'presentation.pptx',
+        exportArtifactId: '',
+        downloadUrl: '',
+      })
+    }
+  }, [inputText, job?.artifactId, pptxExport, preview?.artifactId])
+
   const handleRetemplate = useCallback(async () => {
     if (!retemplateSlug || !job?.artifactId) return
     setIsRetemplating(true)
@@ -424,9 +779,25 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
         headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ templateSlug: retemplateSlug }),
       })
-      const data = (await res.json()) as { success?: boolean; previewUrl?: string; error?: string; warning?: string }
+      const data = (await res.json()) as {
+        success?: boolean
+        previewUrl?: string
+        error?: string
+        warning?: string
+        rendererMode?: string
+        fallbackUsed?: boolean
+        templateSlug?: string
+      }
       if (!res.ok || !data.success) throw new Error(data.error ?? '换模板失败')
+      if (data.fallbackUsed || data.rendererMode === 'generic-fallback' || data.rendererMode === 'html-ppt-beautiful-fallback') {
+        throw new Error(data.warning || 'TEMPLATE_RENDERER_NOT_FOUND')
+      }
+      const appliedTemplateSlug = data.templateSlug || retemplateSlug
       setRetemplateWarning(data.warning ?? '')
+      setSelectedTemplateSlug(appliedTemplateSlug)
+      setRetemplateSlug(appliedTemplateSlug)
+      setPptxExport(null)
+      setLastGeneratedAt(new Date().toISOString())
       // Force iframe remount with a cache-buster
       const cacheBuster = `?v=${Date.now()}`
       setPreview((prev) => prev ? { ...prev, url: resolveWebApiUrl(`/api/artifacts/${job.artifactId!}/file`) + cacheBuster } : prev)
@@ -437,24 +808,70 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
     }
   }, [job?.artifactId, retemplateSlug])
 
+  const handleSendChat = useCallback((textOverride?: string) => {
+    const text = (textOverride ?? chatInput).trim()
+    if (!text) return
+    setChatMessages((prev) => [
+      ...prev,
+      createChatMessage('user', text),
+      createChatMessage(
+        'assistant',
+        text.includes('PPTX') && (job?.artifactId || preview?.artifactId)
+          ? '已收到导出请求。请使用左侧“生成 / 下载 PPTX”按钮完成真实导出。'
+          : '修改能力正在接入，可先在左侧重新生成、应用模板或导出 PPTX。',
+      ),
+    ])
+    setChatInput('')
+  }, [chatInput, job?.artifactId, preview?.artifactId])
+
+  const handleQuickChatCommand = useCallback((command: string) => {
+    if (command === '改成无图版本') {
+      setEnableImages(false)
+      setMaxImages(0)
+      setChatInput(command)
+      return
+    }
+    if (command === '导出 PPTX') {
+      if (job?.artifactId || preview?.artifactId) {
+        void handleExportPptx()
+      }
+      handleSendChat(command)
+      return
+    }
+    setChatInput(command)
+  }, [handleExportPptx, handleSendChat, job?.artifactId, preview?.artifactId])
+
   const handleReset = useCallback(() => {
     setInputText('')
     setJob(null)
     setLogs('')
     setSubmitError('')
+    setCancelError('')
     setPreviewError('')
     setShowDebug(false)
     setRetemplateWarning('')
+    setIsCancelling(false)
+    setPptxExport(null)
+    setLastGeneratedAt('')
+    setChatMessages([])
+    setChatInput('')
     loadedArtifactIdRef.current = ''
     setPreview(null)
     setPreviewLoaded(false)
+    generationStartedAtRef.current = null
+    clearHtmlPptWorkbenchState()
   }, [])
 
   const canSubmit = Boolean(inputText.trim()) && uiState !== 'generating'
-  const stageIndex = Math.min(GENERATING_STEPS.length - 1, Math.floor(generationElapsedMs / 2200))
+  const phaseOrder = ['queued', 'starting', 'opencode', 'repairing-output', 'postprocess', 'final-check', 'finalizing']
+  const phaseIndex = job?.currentPhase ? phaseOrder.indexOf(job.currentPhase) : -1
+  const stageIndex = phaseIndex >= 0
+    ? Math.min(GENERATING_STEPS.length - 1, Math.max(0, phaseIndex - 1))
+    : Math.min(GENERATING_STEPS.length - 1, Math.floor(generationElapsedMs / 2200))
   const progressPercent = Math.min(96, 14 + ((stageIndex + 1) / GENERATING_STEPS.length) * 78)
   const activeDot = Math.floor(generationElapsedMs / 500) % 3
   const debugSummary = summarizeDebugError(job?.error || submitError)
+  const successWarning = buildSuccessWarning(job)
 
   const renderComposer = (compact: boolean) => (
     <form onSubmit={handleSubmit} style={{ ...s.composerCard, ...(compact ? s.composerCompact : s.composerHero) }}>
@@ -499,6 +916,19 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
 
       <div style={s.controlRow}>
         <label style={s.controlField}>
+          <span style={s.controlLabel}>质量模式</span>
+          <select
+            value={qualityMode}
+            onChange={(event) => setQualityMode(event.target.value === 'high' ? 'high' : 'fast')}
+            style={s.select}
+            disabled={uiState === 'generating'}
+          >
+            <option value="fast">快速模式（默认）</option>
+            <option value="high">高质量模式</option>
+          </select>
+        </label>
+
+        <label style={s.controlField}>
           <span style={s.controlLabel}>模板</span>
           <select
             value={selectedTemplateSlug}
@@ -520,8 +950,12 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
           <input
             type="checkbox"
             checked={enableImages}
-            onChange={(event) => setEnableImages(event.target.checked)}
-            disabled={uiState === 'generating'}
+            onChange={(event) => {
+              const checked = event.target.checked
+              setEnableImages(checked)
+              setMaxImages((value) => (checked ? (value > 0 ? value : 3) : 0))
+            }}
+            disabled={uiState === 'generating' || qualityMode === 'fast'}
           />
         </label>
 
@@ -534,7 +968,7 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
             value={maxImages}
             onChange={(event) => setMaxImages(Math.max(0, Math.min(6, Number.parseInt(event.target.value || '0', 10) || 0)))}
             style={s.numberInput}
-            disabled={uiState === 'generating' || !enableImages}
+            disabled={uiState === 'generating' || !enableImages || qualityMode === 'fast'}
           />
         </label>
       </div>
@@ -571,6 +1005,11 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
         <p style={s.generatingSubtitle}>
           系统会自动规划页面结构、匹配风格并生成可直接预览的 HTML 演示文稿。
         </p>
+        <div style={s.generatingMetaRow}>
+          <div style={s.generatingMetaChip}>当前阶段：{phaseText(job?.currentPhase)}</div>
+          <div style={s.generatingMetaChip}>已耗时：{Math.max(0, Math.floor(generationElapsedMs / 1000))}s</div>
+          <div style={s.generatingMetaChip}>模式：{qualityMode === 'high' ? '高质量' : '快速'}</div>
+        </div>
 
         <div style={s.progressTrack}>
           <div style={{ ...s.progressFill, width: `${progressPercent}%` }} />
@@ -605,6 +1044,17 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
             )
           })}
         </div>
+        <div style={s.generatingActionRow}>
+          <button
+            type="button"
+            onClick={() => void handleCancelGeneration()}
+            disabled={isCancelling || !job?.jobId}
+            style={isCancelling ? s.stopBtnDisabled : s.stopBtn}
+          >
+            {isCancelling ? '正在停止…' : '停止生成'}
+          </button>
+          {cancelError ? <div style={s.inlineErrorText}>{cancelError}</div> : null}
+        </div>
       </div>
     </section>
   )
@@ -615,7 +1065,7 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
         <div style={s.previewHeader}>
           <div>
             <div style={s.previewTitle}>HTML 演示文稿预览</div>
-            <div style={s.previewSubtitle}>已生成，可直接在浏览器中查看和下载。</div>
+            <div style={s.previewSubtitle}>已生成，可直接预览、下载 HTML，或继续转换为 PPTX。</div>
           </div>
           <div style={s.previewActions}>
             <button type="button" onClick={() => void startGeneration()} style={s.previewGhostBtn}>
@@ -634,6 +1084,18 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
             ) : null}
             <button type="button" onClick={() => void handleDownloadHtml()} style={s.previewPrimaryBtn}>
               下载 HTML
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleExportPptx()}
+              disabled={pptxExport?.status === 'running'}
+              style={pptxExport?.status === 'ready' ? s.previewPrimaryBtn : s.previewGhostBtn}
+            >
+              {pptxExport?.status === 'running'
+                ? '正在转换 PPTX…'
+                : pptxExport?.status === 'ready'
+                  ? '下载 PPTX'
+                  : '生成 / 下载 PPTX'}
             </button>
           </div>
         </div>
@@ -664,7 +1126,11 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
             {retemplateError ? <span style={s.retemplateError}>{retemplateError}</span> : null}
           </div>
         ) : null}
+        {successWarning ? <div style={s.inlineWarnBox}>{successWarning}</div> : null}
         {retemplateWarning ? <div style={s.inlineWarnBox}>{retemplateWarning}</div> : null}
+        {pptxExport?.status === 'running' ? <div style={s.inlineWarnBox}>正在转换 PPTX，请稍候…</div> : null}
+        {pptxExport?.status === 'ready' ? <div style={s.inlineSuccessBox}>PPTX 已生成，可直接下载。</div> : null}
+        {pptxExport?.status === 'failed' && pptxExport.error ? <div style={s.inlineErrorBox}>{pptxExport.error}</div> : null}
 
         {previewError ? (
           <div style={s.inlineErrorBox}>预览加载失败，请点击“在新窗口打开预览”或“下载 HTML”。</div>
@@ -695,7 +1161,7 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
                 <div style={s.previewLoadingMask}>正在加载预览…</div>
               ) : null}
             </div>
-            <div style={s.weakHint}>PPTX 导出即将支持</div>
+            <div style={s.weakHint}>预览支持点击文本块局部编辑；PPTX 导出会基于当前模板结果生成。</div>
           </>
         )}
       </section>
@@ -710,6 +1176,8 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
               <div style={s.debugMetaRow}><strong>Job ID</strong><span>{job?.jobId ?? '-'}</span></div>
               <div style={s.debugMetaRow}><strong>Artifact ID</strong><span>{job?.artifactId ?? '-'}</span></div>
               <div style={s.debugMetaRow}><strong>状态</strong><span>{statusText(job?.status)}</span></div>
+              <div style={s.debugMetaRow}><strong>Warning</strong><span>{job?.warning || '-'}</span></div>
+              <div style={s.debugMetaRow}><strong>Fallback</strong><span>{job?.fallbackUsed ? `${job.fallbackRenderer || 'server'} / ${job.rendererMode || 'n/a'}` : '-'}</span></div>
             </div>
             <pre style={s.logs}>{logs || '暂无日志输出'}</pre>
           </div>
@@ -725,6 +1193,11 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
           <div style={s.failedIcon}>!</div>
           <h2 style={s.failedTitle}>生成失败</h2>
           <p style={s.failedText}>演示文稿未能生成，请稍后重试或简化输入内容。</p>
+          {job?.opencodeTimedOut ? (
+            <div style={s.inlineWarnBox}>
+              OpenCode 在 {job.timeoutMs ? Math.round(job.timeoutMs / 1000) : 90} 秒内未完成。系统已尝试备用渲染，但仍未成功，请重试或切换高质量模式。
+            </div>
+          ) : null}
           <div style={s.failedActions}>
             <button type="button" onClick={() => void startGeneration()} style={s.previewPrimaryBtn}>
               重新生成
@@ -745,6 +1218,7 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
               <div style={s.debugMetaRow}><strong>Artifact ID</strong><span>{job?.artifactId ?? '-'}</span></div>
               <div style={s.debugMetaRow}><strong>状态</strong><span>{statusText(job?.status)}</span></div>
               <div style={s.debugMetaRow}><strong>底层错误</strong><span>{job?.error || submitError || '-'}</span></div>
+              <div style={s.debugMetaRow}><strong>Warning</strong><span>{job?.warning || '-'}</span></div>
             </div>
             <pre style={s.logs}>{logs || '暂无日志输出'}</pre>
           </div>
@@ -753,37 +1227,151 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
     </>
   )
 
+  const renderCanceledView = () => (
+    <>
+      <section style={s.centerStageWrap}>
+        <div style={s.canceledCard}>
+          <div style={s.canceledIcon}>■</div>
+          <h2 style={s.failedTitle}>已停止生成</h2>
+          <p style={s.failedText}>当前任务已经取消，你可以修改需求后立即重新生成。</p>
+          <div style={s.failedActions}>
+            <button type="button" onClick={() => void startGeneration()} style={s.previewPrimaryBtn}>
+              重新生成
+            </button>
+            <button type="button" onClick={() => setShowDebug((value) => !value)} style={s.previewGhostBtn}>
+              查看调试信息
+            </button>
+          </div>
+          <div style={s.canceledSummary}>
+            当前阶段：{phaseText(job?.currentPhase)} {job?.cancelRequestedAt ? `· 请求时间 ${new Date(job.cancelRequestedAt).toLocaleTimeString()}` : ''}
+          </div>
+        </div>
+      </section>
+
+      <section style={s.debugSection}>
+        {showDebug ? (
+          <div style={s.debugCard}>
+            <div style={s.debugMetaGrid}>
+              <div style={s.debugMetaRow}><strong>Job ID</strong><span>{job?.jobId ?? '-'}</span></div>
+              <div style={s.debugMetaRow}><strong>状态</strong><span>{statusText(job?.status)}</span></div>
+              <div style={s.debugMetaRow}><strong>阶段</strong><span>{phaseText(job?.currentPhase)}</span></div>
+              <div style={s.debugMetaRow}><strong>Runner PID</strong><span>{job?.runnerPid ?? '-'}</span></div>
+            </div>
+            <pre style={s.logs}>{logs || '暂无日志输出'}</pre>
+          </div>
+        ) : null}
+      </section>
+    </>
+  )
+
+  const renderChatPanel = () => {
+    const visibleMessages = chatMessages.length > 0
+      ? chatMessages
+      : DEFAULT_CHAT_MESSAGES
+    return (
+      <aside style={s.chatPanel}>
+        <div style={s.chatHeader}>
+          <div style={s.chatTitle}>修改对话</div>
+          <div style={s.chatSubtitle}>继续描述想调整的风格、结构或导出需求。</div>
+        </div>
+        <div style={s.chatQuickRow}>
+          {CHAT_QUICK_COMMANDS.map((command) => (
+            <button
+              key={command}
+              type="button"
+              style={s.chatQuickBtn}
+              onClick={() => handleQuickChatCommand(command)}
+            >
+              {command}
+            </button>
+          ))}
+        </div>
+        <div style={s.chatMessages}>
+          {visibleMessages.map((message) => (
+            <div
+              key={message.id}
+              style={{
+                ...s.chatBubble,
+                ...(message.role === 'user' ? s.chatBubbleUser : s.chatBubbleAssistant),
+              }}
+            >
+              <div style={s.chatBubbleMeta}>{message.role === 'user' ? '你' : 'AI 助手'}</div>
+              <div style={s.chatBubbleText}>{message.text}</div>
+            </div>
+          ))}
+        </div>
+        <form
+          style={s.chatInputWrap}
+          onSubmit={(event) => {
+            event.preventDefault()
+            handleSendChat()
+          }}
+        >
+          <textarea
+            value={chatInput}
+            onChange={(event) => setChatInput(event.target.value)}
+            placeholder="输入修改要求，例如：减少文字、改成正式风格、换成无图版本…"
+            style={s.chatTextarea}
+          />
+          <button type="submit" style={chatInput.trim() ? s.chatSendBtn : s.chatSendBtnDisabled} disabled={!chatInput.trim()}>
+            发送
+          </button>
+        </form>
+      </aside>
+    )
+  }
+
   return (
     <div style={s.shell}>
-      {uiState === 'idle' ? (
-        <div style={s.heroWrap}>
-          {renderComposer(false)}
-        </div>
-      ) : (
-        <>
-          <div style={s.topComposerWrap}>
-            {renderComposer(true)}
+      <main style={s.mainPane}>
+        {uiState === 'idle' ? (
+          <div style={s.heroWrap}>
+            {renderComposer(false)}
           </div>
-          {uiState === 'generating' ? renderGeneratingView() : null}
-          {uiState === 'succeeded' ? renderSucceededView() : null}
-          {uiState === 'failed' ? renderFailedView() : null}
-        </>
-      )}
+        ) : (
+          <>
+            <div style={s.topComposerWrap}>
+              {renderComposer(true)}
+            </div>
+            {uiState === 'generating' ? renderGeneratingView() : null}
+            {uiState === 'succeeded' ? renderSucceededView() : null}
+            {uiState === 'failed' ? renderFailedView() : null}
+            {uiState === 'canceled' ? renderCanceledView() : null}
+          </>
+        )}
+      </main>
+      {renderChatPanel()}
     </div>
   )
 }
 
 const s: Record<string, React.CSSProperties> = {
   shell: {
-    minHeight: '100vh',
-    padding: '36px 28px 56px',
+    width: '100%',
+    height: '100%',
+    minHeight: 0,
+    display: 'grid',
+    gridTemplateColumns: 'minmax(0, 1fr) 380px',
+    gap: 16,
+    padding: 16,
     background: 'linear-gradient(180deg, #f6f8fc 0%, #eef3fb 100%)',
     color: '#0f172a',
     fontFamily: 'system-ui, -apple-system, sans-serif',
     boxSizing: 'border-box',
+    overflow: 'hidden',
+  },
+  mainPane: {
+    minWidth: 0,
+    minHeight: 0,
+    overflowY: 'auto',
+    overflowX: 'hidden',
+    padding: '8px 8px 40px',
+    display: 'flex',
+    flexDirection: 'column',
   },
   heroWrap: {
-    minHeight: 'calc(100vh - 72px)',
+    flex: 1,
+    minHeight: '100%',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -989,6 +1577,7 @@ const s: Record<string, React.CSSProperties> = {
     margin: '28px auto 0',
     display: 'flex',
     justifyContent: 'center',
+    alignItems: 'stretch',
   },
   generatingCard: {
     position: 'relative',
@@ -1033,6 +1622,21 @@ const s: Record<string, React.CSSProperties> = {
     fontSize: 14,
     lineHeight: 1.7,
     color: '#617589',
+  },
+  generatingMetaRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 18,
+  },
+  generatingMetaChip: {
+    padding: '8px 12px',
+    borderRadius: 999,
+    background: '#eef4ff',
+    border: '1px solid #d7e5ff',
+    color: '#36506a',
+    fontSize: 12,
+    fontWeight: 700,
   },
   progressTrack: {
     position: 'relative',
@@ -1110,6 +1714,40 @@ const s: Record<string, React.CSSProperties> = {
     background: '#2563eb',
     transform: 'scale(1.15)',
   },
+  generatingActionRow: {
+    marginTop: 18,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+    flexWrap: 'wrap',
+  },
+  stopBtn: {
+    height: 40,
+    padding: '0 16px',
+    borderRadius: 12,
+    border: '1px solid #f3b8b8',
+    background: '#fff5f5',
+    color: '#b42318',
+    fontSize: 13,
+    fontWeight: 800,
+    cursor: 'pointer',
+  },
+  stopBtnDisabled: {
+    height: 40,
+    padding: '0 16px',
+    borderRadius: 12,
+    border: '1px solid #f1d2d2',
+    background: '#f8eaea',
+    color: '#c27b7b',
+    fontSize: 13,
+    fontWeight: 800,
+    cursor: 'not-allowed',
+  },
+  inlineErrorText: {
+    fontSize: 12,
+    lineHeight: 1.5,
+    color: '#b42318',
+  },
   previewCard: {
     width: '100%',
     maxWidth: 1280,
@@ -1119,6 +1757,7 @@ const s: Record<string, React.CSSProperties> = {
     background: '#ffffff',
     border: '1px solid rgba(214, 225, 238, 0.92)',
     boxShadow: '0 26px 70px rgba(24, 44, 79, 0.10)',
+    boxSizing: 'border-box',
   },
   previewHeader: {
     display: 'flex',
@@ -1190,8 +1829,8 @@ const s: Record<string, React.CSSProperties> = {
     overflow: 'hidden',
     border: '1px solid #e3ebf6',
     background: '#000',
-    minHeight: 620,
-    maxHeight: '78vh',
+    minHeight: 480,
+    maxHeight: '72vh',
     boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.6)',
   },
   iframe: {
@@ -1202,7 +1841,7 @@ const s: Record<string, React.CSSProperties> = {
     background: '#000',
   },
   previewPlaceholder: {
-    minHeight: 620,
+    minHeight: 480,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1242,6 +1881,15 @@ const s: Record<string, React.CSSProperties> = {
     background: '#fff7e6',
     border: '1px solid #f5d28c',
     color: '#8a5600',
+    fontSize: 14,
+    marginBottom: 14,
+  },
+  inlineSuccessBox: {
+    padding: '14px 16px',
+    borderRadius: 14,
+    background: '#ecfdf3',
+    border: '1px solid #86efac',
+    color: '#166534',
     fontSize: 14,
     marginBottom: 14,
   },
@@ -1340,6 +1988,134 @@ const s: Record<string, React.CSSProperties> = {
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-word',
   },
+  chatPanel: {
+    minWidth: 0,
+    minHeight: 0,
+    overflow: 'hidden',
+    display: 'flex',
+    flexDirection: 'column',
+    borderRadius: 24,
+    background: 'rgba(255,255,255,0.96)',
+    border: '1px solid rgba(214, 225, 238, 0.95)',
+    boxShadow: '0 22px 58px rgba(24, 44, 79, 0.08)',
+  },
+  chatHeader: {
+    padding: '20px 20px 14px',
+    borderBottom: '1px solid #e5edf6',
+    flexShrink: 0,
+  },
+  chatTitle: {
+    fontSize: 18,
+    fontWeight: 850,
+    color: '#13233b',
+    marginBottom: 6,
+  },
+  chatSubtitle: {
+    fontSize: 13,
+    lineHeight: 1.6,
+    color: '#6b7f95',
+  },
+  chatQuickRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 8,
+    padding: '14px 16px',
+    borderBottom: '1px solid #e9eff7',
+    flexShrink: 0,
+  },
+  chatQuickBtn: {
+    height: 32,
+    padding: '0 10px',
+    borderRadius: 999,
+    border: '1px solid #d9e4f0',
+    background: '#f8fbff',
+    color: '#38506a',
+    fontSize: 12,
+    fontWeight: 750,
+    cursor: 'pointer',
+  },
+  chatMessages: {
+    flex: 1,
+    minHeight: 0,
+    overflowY: 'auto',
+    padding: '16px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 12,
+    background: 'linear-gradient(180deg, #fbfdff 0%, #f4f8fd 100%)',
+  },
+  chatBubble: {
+    maxWidth: '92%',
+    padding: '11px 12px',
+    borderRadius: 16,
+    fontSize: 13,
+    lineHeight: 1.65,
+    wordBreak: 'break-word',
+  },
+  chatBubbleUser: {
+    alignSelf: 'flex-end',
+    background: '#2563eb',
+    color: '#fff',
+    borderTopRightRadius: 6,
+  },
+  chatBubbleAssistant: {
+    alignSelf: 'flex-start',
+    background: '#fff',
+    color: '#25364a',
+    border: '1px solid #e1e9f3',
+    borderTopLeftRadius: 6,
+  },
+  chatBubbleMeta: {
+    fontSize: 11,
+    fontWeight: 800,
+    opacity: 0.72,
+    marginBottom: 4,
+  },
+  chatBubbleText: {
+    whiteSpace: 'pre-wrap',
+  },
+  chatInputWrap: {
+    flexShrink: 0,
+    padding: 14,
+    borderTop: '1px solid #e1e9f3',
+    display: 'grid',
+    gap: 10,
+    background: '#fff',
+  },
+  chatTextarea: {
+    width: '100%',
+    minHeight: 88,
+    maxHeight: 150,
+    resize: 'vertical',
+    borderRadius: 14,
+    border: '1px solid #d8e2ed',
+    padding: 12,
+    boxSizing: 'border-box',
+    outline: 'none',
+    fontSize: 13,
+    lineHeight: 1.6,
+    color: '#13233b',
+  },
+  chatSendBtn: {
+    height: 40,
+    borderRadius: 12,
+    border: 'none',
+    background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: 800,
+    cursor: 'pointer',
+  },
+  chatSendBtnDisabled: {
+    height: 40,
+    borderRadius: 12,
+    border: 'none',
+    background: '#a7b7cc',
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: 800,
+    cursor: 'not-allowed',
+  },
   failedCard: {
     width: '100%',
     maxWidth: 720,
@@ -1387,6 +2163,38 @@ const s: Record<string, React.CSSProperties> = {
     borderRadius: 14,
     background: '#fff7f7',
     color: '#8f3b3b',
+    fontSize: 13,
+    lineHeight: 1.6,
+    textAlign: 'left',
+  },
+  canceledCard: {
+    width: '100%',
+    maxWidth: 720,
+    padding: '32px 28px 24px',
+    borderRadius: 28,
+    background: 'rgba(255,255,255,0.97)',
+    border: '1px solid rgba(203, 213, 225, 0.95)',
+    boxShadow: '0 22px 64px rgba(51, 65, 85, 0.08)',
+    textAlign: 'center',
+  },
+  canceledIcon: {
+    width: 54,
+    height: 54,
+    margin: '0 auto 14px',
+    borderRadius: '50%',
+    display: 'grid',
+    placeItems: 'center',
+    background: '#e2e8f0',
+    color: '#334155',
+    fontSize: 16,
+    fontWeight: 800,
+  },
+  canceledSummary: {
+    marginTop: 18,
+    padding: '12px 14px',
+    borderRadius: 14,
+    background: '#f8fafc',
+    color: '#475569',
     fontSize: 13,
     lineHeight: 1.6,
     textAlign: 'left',

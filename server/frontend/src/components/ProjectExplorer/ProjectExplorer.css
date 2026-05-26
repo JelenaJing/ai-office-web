@@ -1,0 +1,27 @@
+.project-explorer {
+  display: flex;
+  height: 100%;
+  border-top: 1px solid #ddd;
+}
+
+.project-explorer-tree {
+  flex: 0 0 42%;
+  min-width: 280px;
+  max-width: 420px;
+  border-right: 1px solid #ddd;
+  overflow: hidden;
+}
+
+.project-explorer-viewer {
+  flex: 1 1 auto;
+  min-width: 360px;
+  overflow: hidden;
+}
+
+.project-explorer-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #999;
+}

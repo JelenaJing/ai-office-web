@@ -6,6 +6,7 @@ import {
   loadWebImageSettings,
   type WebImageProvider,
 } from './imageProviderConfig'
+import { resolveTaskTimeoutMs } from '../../../lib/taskTimeouts'
 
 export interface GenerateImagePngInput {
   prompt: string
@@ -57,7 +58,7 @@ interface JsonValueMap {
 
 const NANOBANANA_MAX_ATTEMPTS = 3
 const NANOBANANA_MAX_REFERENCES = 4
-const FETCH_TIMEOUT_MS = 120_000
+const FETCH_TIMEOUT_MS = resolveTaskTimeoutMs('image')
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
 const CRC32_TABLE = buildCrc32Table()
 const FONT_5X7: Record<string, string[]> = {
@@ -129,6 +130,8 @@ export async function generateImagePng(
   console.info('[image:prompt-builder]', JSON.stringify({
     provider: settings.provider,
     model: settings.model,
+    taskType: 'image',
+    timeoutMs: FETCH_TIMEOUT_MS,
     aspectRatio,
     generationMode,
     referenceCount: references.length,
@@ -192,7 +195,7 @@ async function generateNanobananaImage(
   }
 
   console.info(
-    `[ai:image][request-summary] provider=${settings.provider} model=${settings.model} aspectRatio=${aspectRatio} referenceCount=${references.length} outboundImageField=images endpoint=${settings.endpoint}`,
+    `[ai:image][request-summary] provider=${settings.provider} model=${settings.model} taskType=image timeoutMs=${FETCH_TIMEOUT_MS} aspectRatio=${aspectRatio} referenceCount=${references.length} outboundImageField=images endpoint=${settings.endpoint}`,
   )
   console.info('[Image Generation Debug]', JSON.stringify({
     provider: settings.provider,

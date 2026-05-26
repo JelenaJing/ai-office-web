@@ -12,13 +12,21 @@ import { DocumentKnowledgeSourcePicker } from './DocumentKnowledgeSourcePicker'
 import { DocumentTopToolbar } from './DocumentTopToolbar'
 import { DocumentHtmlContextMenu, type DocumentHtmlContextMenuState } from './DocumentHtmlContextMenu'
 import { WebDocChatPanel, type WebDocChatMessage } from './WebDocChatPanel'
+import { WebDocToolPromptDialog, type WebDocToolPromptState } from './WebDocToolPromptDialog'
 import type { DocumentAiScope, SectionHistoryEntry } from './DocumentAiEditPanel'
 import {
-  chatWebDocOpenCode,
+  buildToolInstruction,
+  chatWebDocOpenCodeStream,
   invokeWebDocOpenCode,
   mapWebDocPatchToDocumentPatch,
   type WebDocToolId,
 } from '../services/documentOpenCodeApi'
+import {
+  generateDocumentFigureHtml,
+  shouldGenerateImageForInstruction,
+} from '../services/documentWebImageInsert'
+import { plainTextToDocumentBodyHtml, wrapDocumentBodyHtml } from '../services/documentContentApply'
+import { prepareReportFromDocument } from '../services/documentToReport'
 import {
   analyzeFormalTemplateFlow,
   buildKnowledgeRefsFromSelection,
@@ -37,6 +45,7 @@ import {
   queryKnowledgeCitationChunks,
   routeDocumentTask,
   saveEditableDocument,
+  saveInitialWorkbenchDocument,
   startDocumentTask,
   waitForDocumentTask,
   type DocumentDraft,
@@ -67,6 +76,8 @@ import { runPaperWorkflowGenerate } from '../services/paperWorkflowAdapter'
 import { runAcademicWritingWorkflow } from '../services/academicWritingWorkflow'
 import { fetchContentHandoff } from '../services/contentHandoffApi'
 import { consumePendingDocumentHandoff, peekPendingDocumentHandoff } from '../../../services/pendingDocumentHandoff'
+import { consumePendingResourceOpen, hasPendingDocumentResourceOpen, peekPendingResourceOpen } from '../../../services/pendingResourceOpen'
+import { resolveWebApiUrl } from '../../../runtime/apiBase'
 
 const Shell = styled.div`
   flex: 1;
@@ -74,7 +85,7 @@ const Shell = styled.div`
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: #eef3f8;
+  background: #f0f2f5;
   position: relative;
 `
 
@@ -316,10 +327,18 @@ function buildLocalEditorDraft(input: {
   }
 }
 
+function clearPersistedWorkbenchDraft(workspacePath: string | null): void {
+  if (typeof window === 'undefined') return
+  const key = storageKey(workspacePath)
+  if (key) window.localStorage.removeItem(key)
+  window.localStorage.removeItem(LOCAL_DRAFT_STORAGE_KEY)
+}
+
 function createEmptyEditorState(engine: string): EditableDocumentState {
   const draft = createLocalDocumentDraft(engine, '')
   return {
     documentId: null,
+    userFileId: null,
     artifactId: null,
     exportUrl: null,
     title: '',
@@ -479,10 +498,11 @@ export default function DocumentWorkbench() {
   const [lastCommandOp, setLastCommandOp] = useState<DocumentPatchOperation | null>(null)
   const [chatMessages, setChatMessages] = useState<WebDocChatMessage[]>([])
   const [ctxMenu, setCtxMenu] = useState<DocumentHtmlContextMenuState | null>(null)
-  const [lastOpenCodeSource, setLastOpenCodeSource] = useState<string | null>(null)
+  const [toolPrompt, setToolPrompt] = useState<WebDocToolPromptState | null>(null)
 
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
   const importDocxInputRef = useRef<HTMLInputElement | null>(null)
+  const insertImageInputRef = useRef<HTMLInputElement | null>(null)
   const canvasRef = useRef<DocumentEditorCanvasHandle | null>(null)
 
   useEffect(() => {
@@ -534,7 +554,7 @@ export default function DocumentWorkbench() {
     setHydrated(false)
     setLastAiSnapshot(null)
     setRecentAiChange(null)
-    if (peekPendingDocumentHandoff()) {
+    if (peekPendingDocumentHandoff() || hasPendingDocumentResourceOpen()) {
       setHydrated(true)
       return
     }
@@ -714,6 +734,7 @@ export default function DocumentWorkbench() {
   const syncEditorStateFromTaskResult = useCallback((nextResult: DocumentTaskResult, savedAt?: string) => {
       const nextState = createEditableStateFromTaskResult({
         documentId: nextResult.documentId,
+        userFileId: nextResult.userFileId ?? null,
         artifactId: nextResult.artifactId,
         exportUrl: nextResult.exportUrl,
         engine: nextResult.engine,
@@ -777,69 +798,148 @@ export default function DocumentWorkbench() {
     }
   }, [activeWorkspacePath, hydrated, openWorkspace, syncEditorStateFromTaskResult])
 
+  useEffect(() => {
+    if (!hydrated || !activeWorkspacePath) return
+    const pending = peekPendingResourceOpen()
+    if (!pending || (pending.kind !== 'document-artifact' && pending.kind !== 'document-file')) return
+
+    let disposed = false
+    setBusy(true)
+    setStatusMessage('正在打开资源文件…')
+    setStatusTone(undefined)
+
+    void (async () => {
+      try {
+        consumePendingResourceOpen()
+        clearPersistedWorkbenchDraft(activeWorkspacePath)
+
+        const imported = pending.kind === 'document-file'
+          ? await importDocumentDocx({
+            fileId: pending.fileId,
+            workspacePath: activeWorkspacePath,
+          })
+          : await importDocumentDocx({
+            artifactId: pending.artifactId,
+            workspacePath: activeWorkspacePath,
+          })
+
+        if (disposed) return
+        syncEditorStateFromTaskResult({
+          ...imported,
+          userFileId: imported.userFileId || (pending.kind === 'document-file' ? pending.fileId : undefined),
+        }, new Date().toISOString())
+        if (imported.filename) setArtifactFilename(imported.filename)
+        setStatusMessage(`已打开：${imported.title}`)
+        setStatusTone('ok')
+      } catch (error) {
+        if (disposed) return
+        consumePendingResourceOpen()
+        setStatusMessage(error instanceof Error ? error.message : '打开文件失败')
+        setStatusTone('err')
+      } finally {
+        if (!disposed) setBusy(false)
+      }
+    })()
+
+    return () => {
+      disposed = true
+    }
+  }, [activeWorkspacePath, hydrated, syncEditorStateFromTaskResult])
+
   const saveCurrentDocument = useCallback(async (status = '正在保存文稿…') => {
     if (!editorState.documentDraft) return null
     const latestHtml = stripTransientAiMarkup(canvasRef.current?.getHtml() || editorState.html)
     const latestState = latestHtml !== editorState.html
       ? updateEditableStateFromHtml(editorState, latestHtml)
       : editorState
-    if (!latestState.documentId) {
-      const savedAt = new Date().toISOString()
-      const nextState = {
-        ...latestState,
-        dirty: false,
-        saving: false,
-        lastSavedAt: savedAt,
-      }
-      const key = storageKey(activeWorkspacePath)
-      if (key && typeof window !== 'undefined') {
-        const payload: PersistedWorkbenchState = {
-          templateId: selectedTemplateId,
-          generationPrompt,
-          attachments,
-          editorState: nextState,
-          sectionHistory,
-          modifiedSectionIds,
-          artifactFilename,
-        }
-        window.localStorage.setItem(key, JSON.stringify(payload))
-        window.localStorage.setItem(LOCAL_DRAFT_STORAGE_KEY, JSON.stringify(buildLocalEditorDraft({
-          title: nextState.title,
-          body: nextState.html,
-          updatedAt: savedAt,
-          templateId: selectedTemplateId,
-          generationPrompt,
-          attachments,
-          editorState: nextState,
-          sectionHistory,
-          modifiedSectionIds,
-          artifactFilename,
-        })))
-      }
-      setEditorState(nextState)
-      setStatusMessage('已保存到本地草稿，刷新后可恢复当前 HTML 文稿')
-      setStatusTone('ok')
-      setExportError(null)
+    if (!activeWorkspacePath) {
+      setStatusMessage('请先打开工作区')
+      setStatusTone('err')
       return null
+    }
+    if (!latestState.documentId) {
+      setEditorState((prev) => ({ ...prev, saving: true }))
+      setStatusMessage(status)
+      setStatusTone(undefined)
+      setExportError(null)
+      try {
+        const response = await saveInitialWorkbenchDocument({
+          title: latestState.title || '未命名文稿',
+          html: latestState.html,
+          documentDraft: latestState.documentDraft!,
+          outline: latestState.outline,
+          workspacePath: activeWorkspacePath,
+          userFileId: latestState.userFileId,
+        })
+        const savedAt = response.savedAt || new Date().toISOString()
+        const synced = createEditableStateFromTaskResult({
+          documentId: response.documentId,
+          userFileId: response.userFileId ?? null,
+          artifactId: response.artifactId || response.artifact?.id || '',
+          exportUrl: response.exportUrl || '',
+          engine: latestState.engine,
+          document: response.document || latestState.documentDraft!,
+          html: response.html || latestState.html,
+          documentArtifact: response.documentArtifact,
+        })
+        setEditorState({
+          ...synced,
+          dirty: false,
+          saving: false,
+          lastSavedAt: savedAt,
+        })
+        if (response.filename) setArtifactFilename(response.filename)
+        setStatusMessage(`已保存到「我的文件」：${synced.title}`)
+        setStatusTone('ok')
+        window.dispatchEvent(new CustomEvent('resource-files-changed'))
+        return response
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '保存失败'
+        setEditorState((prev) => ({ ...prev, saving: false }))
+        setExportError(message)
+        setStatusMessage(message)
+        setStatusTone('err')
+        return null
+      }
     }
     setEditorState((prev) => ({ ...prev, saving: true }))
     setStatusMessage(status)
     setStatusTone(undefined)
     setExportError(null)
     try {
-      const response = await saveEditableDocument({
-        documentId: latestState.documentId!,
-        title: latestState.title,
-        html: latestState.html,
-        documentDraft: latestState.documentDraft!,
-        outline: latestState.outline,
-      })
+      let response
+      try {
+        response = await saveEditableDocument({
+          documentId: latestState.documentId!,
+          title: latestState.title,
+          html: latestState.html,
+          documentDraft: latestState.documentDraft!,
+          outline: latestState.outline,
+          userFileId: latestState.userFileId,
+        })
+      } catch (saveError) {
+        const message = saveError instanceof Error ? saveError.message : '保存失败'
+        if (/不存在|404|无权限/.test(message)) {
+          response = await saveInitialWorkbenchDocument({
+            title: latestState.title || '未命名文稿',
+            html: latestState.html,
+            documentDraft: latestState.documentDraft!,
+            outline: latestState.outline,
+            workspacePath: activeWorkspacePath,
+            userFileId: latestState.userFileId,
+          })
+        } else {
+          throw saveError
+        }
+      }
       const savedAt = response.savedAt || new Date().toISOString()
         setEditorState((prev) => ({
           ...latestState,
+          documentId: response.documentId || latestState.documentId,
           dirty: false,
           saving: false,
           lastSavedAt: savedAt,
+          userFileId: response.userFileId || latestState.userFileId,
           artifactId: response.artifactId || response.artifact?.id || prev.artifactId,
           exportUrl: response.exportUrl || prev.exportUrl,
           html: response.html || latestState.html,
@@ -848,8 +948,11 @@ export default function DocumentWorkbench() {
           outline: response.outline || latestState.outline,
         }))
       if (response.filename) setArtifactFilename(response.filename)
-      setStatusMessage('已保存，DOCX 已更新')
+      setStatusMessage(`已保存到「我的文件」：${latestState.title || response.filename || '文稿'}`)
       setStatusTone('ok')
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('resource-files-changed'))
+      }
       return response
     } catch (error) {
       const message = error instanceof Error ? error.message : '保存失败'
@@ -1993,10 +2096,14 @@ export default function DocumentWorkbench() {
     if (!trimmed) return
 
     const latestHtml = stripTransientAiMarkup(canvasRef.current?.getHtml() || editorState.html)
+    const historyForApi = chatMessages.map((item) => ({ role: item.role, text: item.text }))
+    const userTurn: WebDocChatMessage = { id: `user-${Date.now()}`, role: 'user', text: trimmed }
+    const wantsImage = shouldGenerateImageForInstruction(trimmed)
+
     setBusy(true)
     setStatusTone(undefined)
-    setChatMessages((prev) => [...prev, { id: `user-${Date.now()}`, role: 'user', text: trimmed }])
-    appendHistory('document', editorState.selectedSectionId, { role: 'user', text: trimmed })
+    setStatusMessage(tool === 'chat' ? '正在生成…' : '正在处理…')
+    setChatMessages((prev) => [...prev, userTurn])
 
     try {
       const payload = {
@@ -2006,25 +2113,34 @@ export default function DocumentWorkbench() {
         selectedText: editorState.selectedText,
         selectedBlockId: editorState.selectedBlockId,
         selectedSectionId: editorState.selectedSectionId,
+        chatHistory: historyForApi,
       }
-      const result = tool === 'chat'
-        ? await chatWebDocOpenCode(payload)
-        : await invokeWebDocOpenCode({ ...payload, tool })
 
-      setLastOpenCodeSource(result.source || null)
+      let result
+      if (tool === 'chat') {
+        setStatusMessage('正在写入正文…')
+        result = await chatWebDocOpenCodeStream(payload, {
+          onDelta: () => {
+            setStatusMessage('正在写入正文…')
+          },
+        })
+      } else {
+        setStatusMessage('正在处理…')
+        result = await invokeWebDocOpenCode({ ...payload, tool })
+      }
+
+      const assistantText = result.assistantMessage || '已完成。'
       setChatMessages((prev) => [
         ...prev,
-        { id: `assistant-${Date.now()}`, role: 'assistant', text: result.assistantMessage || '已完成。' },
+        { id: `assistant-${Date.now()}`, role: 'assistant', text: assistantText },
       ])
-      appendHistory('document', editorState.selectedSectionId, {
-        role: 'assistant',
-        text: result.assistantMessage || '已完成。',
-      })
 
       const mappedPatch = mapWebDocPatchToDocumentPatch(result.patch, editorState.selectedText)
+      let patchApplied = false
       if (mappedPatch) {
         const applied = canvasRef.current?.applyPatch(mappedPatch)
         if (applied?.applied) {
+          patchApplied = true
           setEditorState((prev) => ({
             ...updateEditableStateFromHtml(prev, applied.html),
             dirty: true,
@@ -2032,25 +2148,56 @@ export default function DocumentWorkbench() {
             selectionRange: mappedPatch.type === 'replace_selection' ? undefined : prev.selectionRange,
           }))
           markSectionModified(applied.affectedSectionId || editorState.selectedSectionId)
-          setRecentAiChange({
-            token: Date.now(),
-            scope: mappedPatch.type === 'replace_selection' ? 'selection' : 'document',
-            sectionId: applied.affectedSectionId || editorState.selectedSectionId,
-          })
         }
       }
 
-      setStatusMessage(result.success ? result.assistantMessage : (result.error || result.assistantMessage))
-      setStatusTone(result.success ? 'ok' : 'err')
+      if (!patchApplied && assistantText.length > 80 && /写|生成|撰写|续写|介绍|描述|正文/.test(trimmed)) {
+        const bodyHtml = plainTextToDocumentBodyHtml(assistantText)
+        const fullHtml = wrapDocumentBodyHtml(editorState.title || '未命名文稿', bodyHtml)
+        const applied = canvasRef.current?.applyPatch({ type: 'replace_document', html: fullHtml })
+        if (applied?.applied) {
+          patchApplied = true
+          setEditorState((prev) => ({
+            ...updateEditableStateFromHtml(prev, applied.html),
+            dirty: true,
+          }))
+        }
+      }
+
+      if (wantsImage && activeWorkspacePath) {
+        setStatusMessage('正在生成配图…')
+        const figureHtml = await generateDocumentFigureHtml(trimmed, activeWorkspacePath)
+        if (figureHtml) {
+          const imageApplied = canvasRef.current?.applyPatch({ type: 'insert_at_cursor', html: figureHtml })
+          if (imageApplied?.applied) {
+            patchApplied = true
+            setEditorState((prev) => ({
+              ...updateEditableStateFromHtml(prev, imageApplied.html),
+              dirty: true,
+            }))
+          }
+        }
+      }
+
+      if (!result.success) {
+        setStatusMessage(result.error || assistantText)
+        setStatusTone('err')
+      } else if (patchApplied) {
+        setStatusMessage(wantsImage ? '已更新正文并插入配图' : '已写入正文')
+        setStatusTone('ok')
+      } else {
+        setStatusMessage('已完成')
+        setStatusTone('ok')
+      }
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'OpenCode 请求失败'
+      const message = error instanceof Error ? error.message : '请求失败'
       setChatMessages((prev) => [...prev, { id: `err-${Date.now()}`, role: 'assistant', text: message }])
       setStatusMessage(message)
       setStatusTone('err')
     } finally {
       setBusy(false)
     }
-  }, [appendHistory, editorState, markSectionModified])
+  }, [activeWorkspacePath, chatMessages, editorState, markSectionModified])
 
   const handleCanvasContextMenu = useCallback((event: MouseEvent) => {
     const selection = window.getSelection()
@@ -2059,33 +2206,119 @@ export default function DocumentWorkbench() {
       x: event.clientX,
       y: event.clientY,
       hasSelection: selectedText.length > 0,
+      selectedText,
     })
   }, [editorState.selectedText])
+
+  const handleInsertImageClick = useCallback(() => {
+    insertImageInputRef.current?.click()
+  }, [])
+
+  const handleInsertImageFile = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file || !activeWorkspacePath) return
+    setBusy(true)
+    setStatusMessage('正在插入图片…')
+    try {
+      const entry = await platformApi.files.upload(file)
+      const token = platformApi.auth.getToken()
+      const downloadRes = await fetch(resolveWebApiUrl(`/api/files/${encodeURIComponent(entry.id)}/download`), {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (!downloadRes.ok) throw new Error('图片上传成功但无法读取预览')
+      const blob = await downloadRes.blob()
+      const url = URL.createObjectURL(blob)
+      const figureHtml = `<figure class="ai-inserted-figure" contenteditable="false"><img src="${url}" alt="${file.name}" style="max-width:100%;height:auto;display:block;margin:12px auto;border-radius:8px;" /><figcaption contenteditable="true">${file.name}</figcaption></figure>`
+      const applied = canvasRef.current?.applyPatch({ type: 'insert_at_cursor', html: figureHtml })
+      if (applied?.applied) {
+        setEditorState((prev) => ({ ...updateEditableStateFromHtml(prev, applied.html), dirty: true }))
+        setStatusMessage('已插入图片')
+        setStatusTone('ok')
+      } else {
+        setStatusMessage('插入图片失败')
+        setStatusTone('err')
+      }
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : '插入图片失败')
+      setStatusTone('err')
+    } finally {
+      setBusy(false)
+    }
+  }, [activeWorkspacePath])
+
+  const handleInsertAiImage = useCallback(async () => {
+    const prompt = window.prompt('描述要生成的配图（将插入到光标处）', editorState.title || '配图')
+    if (!prompt?.trim() || !activeWorkspacePath) return
+    setBusy(true)
+    setStatusMessage('正在生成配图…')
+    try {
+      const figureHtml = await generateDocumentFigureHtml(prompt.trim(), activeWorkspacePath)
+      if (!figureHtml) {
+        setStatusMessage('图片生成失败，请稍后重试')
+        setStatusTone('err')
+        return
+      }
+      const applied = canvasRef.current?.applyPatch({ type: 'insert_at_cursor', html: figureHtml })
+      if (applied?.applied) {
+        setEditorState((prev) => ({ ...updateEditableStateFromHtml(prev, applied.html), dirty: true }))
+        setStatusMessage('已插入配图')
+        setStatusTone('ok')
+      }
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : '配图生成失败')
+      setStatusTone('err')
+    } finally {
+      setBusy(false)
+    }
+  }, [activeWorkspacePath, editorState.title])
+
+  const handleConvertToReport = useCallback(async () => {
+    if (!activeWorkspacePath) {
+      setStatusMessage('请先打开工作区')
+      setStatusTone('err')
+      return
+    }
+    const latestHtml = stripTransientAiMarkup(canvasRef.current?.getHtml() || editorState.html)
+    if (!latestHtml.trim() || latestHtml.includes('从这里开始写作')) {
+      setStatusMessage('请先撰写或生成文稿正文，再转为汇报')
+      setStatusTone('err')
+      return
+    }
+    setBusy(true)
+    setStatusMessage('正在准备汇报材料…')
+    try {
+      await prepareReportFromDocument({
+        title: editorState.title || '未命名文稿',
+        html: latestHtml,
+        workspacePath: activeWorkspacePath,
+      })
+      window.dispatchEvent(new CustomEvent('ai-office-open-report'))
+      setStatusMessage('正在打开汇报生成…')
+      setStatusTone('ok')
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : '转为汇报失败')
+      setStatusTone('err')
+    } finally {
+      setBusy(false)
+    }
+  }, [activeWorkspacePath, editorState.html, editorState.title])
 
   return (
     <Shell data-testid="document-workbench">
       <DocumentTopToolbar
-        engineLabel={activeEngineLabel}
-        templateLabel={activeTemplateLabel}
-        knowledgeCount={workspaceKbIds.length}
-        fallbackReason={editorState.fallbackReason || null}
-        dirty={editorState.dirty}
-        saving={editorState.saving}
-        lastSavedAt={editorState.lastSavedAt || null}
-        exportError={exportError}
-        onOpenOutline={() => {}}
-        onOpenTemplate={() => {}}
-        onOpenKnowledge={() => setKbPickerOpen(true)}
-        onOpenAcademicWriting={() => {}}
         onImportDocx={handleImportDocx}
         onDownloadDocx={() => void handleDownloadDocx()}
         onExportPdf={handleExportPdf}
         onSave={() => void saveCurrentDocument()}
-        onRegenerate={() => void handleGenerate()}
-        onViewVersions={() => {}}
+        onConvertToReport={() => void handleConvertToReport()}
+        onInsertImage={() => {
+          const mode = window.confirm('确定：使用 AI 根据描述生成配图？\n点击「取消」改为从本地上传图片。')
+          if (mode) void handleInsertAiImage()
+          else handleInsertImageClick()
+        }}
         busy={busy}
         docxDisabled={!hasActiveDocument}
-        regenerateDisabled={!editorState.documentId}
       />
 
       <Body>
@@ -2103,9 +2336,7 @@ export default function DocumentWorkbench() {
         </EditorArea>
 
         <WebDocChatPanel
-          messages={chatMessages}
           busy={busy}
-          lastSource={lastOpenCodeSource}
           onSend={(instruction) => handleOpenCodeInvoke(instruction, 'chat')}
         />
       </Body>
@@ -2113,8 +2344,22 @@ export default function DocumentWorkbench() {
       <DocumentHtmlContextMenu
         menu={ctxMenu}
         busy={busy}
-        onInvokeTool={(tool, instruction) => void handleOpenCodeInvoke(instruction, tool)}
+        onRequestTool={(tool, label, placeholder, selectedText) => {
+          setToolPrompt({ tool, label, placeholder, selectedText })
+        }}
         onClose={() => setCtxMenu(null)}
+      />
+
+      <WebDocToolPromptDialog
+        state={toolPrompt}
+        busy={busy}
+        onClose={() => setToolPrompt(null)}
+        onConfirm={(userRequirement) => {
+          if (!toolPrompt) return
+          const instruction = buildToolInstruction(toolPrompt.tool, userRequirement)
+          setToolPrompt(null)
+          void handleOpenCodeInvoke(instruction, toolPrompt.tool)
+        }}
       />
 
       {statusMessage ? <StatusBar $tone={statusTone}>{statusMessage}</StatusBar> : null}
@@ -2147,6 +2392,14 @@ export default function DocumentWorkbench() {
         type="file"
         accept=".docx"
         onChange={(event) => void handleImportDocxFileChange(event)}
+      />
+      <input
+        ref={insertImageInputRef}
+        data-testid="document-insert-image-input"
+        style={hiddenInputStyles}
+        type="file"
+        accept="image/png,image/jpeg,image/jpg,image/webp"
+        onChange={(event) => void handleInsertImageFile(event)}
       />
     </Shell>
   )

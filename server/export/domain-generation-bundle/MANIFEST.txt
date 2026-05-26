@@ -1,0 +1,33 @@
+域生成接口相关文件清单（相对 paper-remake-service 仓库根目录）
+
+【核心逻辑】
+  backend/app/agents/domain_generator.py
+  backend/app/services/draw_gateway_client.py
+  backend/app/services/llm_stream.py
+
+【项目目录与存图】
+  backend/app/project_manager.py   （完整类；域生成用到 create_project / get_project_dir / save_generated_image / get_file_content / list_project_files 等）
+
+【数据模型】（并入现有 app 时通常在 models.py 中，勿重复定义）
+  backend/app/models.py 中的：
+    RemakeResponse（基类）
+    DomainGenerateRequest
+    DomainGenerateResponse
+    ProjectFile, ProjectFileList, ProjectFileContent
+
+【路由】（主仓库已内嵌于）
+  backend/app/routers/remake.py   → POST /api/v1/remake/domain
+  backend/app/routers/paper.py    → GET .../files 与 download（image_file_url 依赖）
+
+【配置环境变量】
+  backend/app/config.py 中的 DEEPSEEK_*、DRAW_GATEWAY_*、PROJECTS_ROOT（及 PAPER_REMAKE_DATA_DIR）
+  backend/.env.example
+
+【文档】
+  docs/domain_generation_handover.md
+
+本 bundle 目录结构：
+  docs/                     手交文档副本
+  mirror/app/               可与 backend/app 对照合并的源码副本 + 可选独立路由
+  standalone_minimal/       无其它 remake 依赖时可单独 uvicorn 运行
+  requirements-minimal.txt  仅域生成+网关+DeepSeek 所需 pip

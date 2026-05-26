@@ -6,12 +6,13 @@ export interface DocumentHtmlContextMenuState {
   x: number
   y: number
   hasSelection: boolean
+  selectedText?: string
 }
 
 interface DocumentHtmlContextMenuProps {
   menu: DocumentHtmlContextMenuState | null
   busy?: boolean
-  onInvokeTool: (tool: WebDocToolId, instruction: string) => void
+  onRequestTool: (tool: WebDocToolId, label: string, placeholder: string, selectedText?: string) => void
   onClose: () => void
 }
 
@@ -26,27 +27,19 @@ const Menu = styled.div<{ $x: number; $y: number }>`
   left: ${({ $x }) => $x}px;
   top: ${({ $y }) => $y}px;
   z-index: 9999;
-  min-width: 200px;
+  min-width: 168px;
   padding: 4px 0;
   background: #fff;
-  border: 1px solid #cfd9e6;
-  border-radius: 10px;
-  box-shadow: 0 12px 32px rgba(19, 41, 61, 0.14);
+  border: 1px solid #d0dce9;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
   font-size: 13px;
-`
-
-const Label = styled.div`
-  padding: 6px 16px 4px;
-  font-size: 11px;
-  font-weight: 700;
-  color: #8a9bab;
-  letter-spacing: 0.04em;
 `
 
 const Item = styled.button<{ $disabled?: boolean }>`
   display: block;
   width: 100%;
-  padding: 8px 16px;
+  padding: 8px 14px;
   border: none;
   background: none;
   text-align: left;
@@ -54,17 +47,11 @@ const Item = styled.button<{ $disabled?: boolean }>`
   color: ${({ $disabled }) => ($disabled ? '#b8c5d2' : '#2a4055')};
 
   &:hover {
-    background: ${({ $disabled }) => ($disabled ? 'transparent' : '#eef4fb')};
+    background: ${({ $disabled }) => ($disabled ? 'transparent' : '#f3f7fb')};
   }
 `
 
-const Divider = styled.div`
-  height: 1px;
-  margin: 4px 0;
-  background: #e8eef4;
-`
-
-export function DocumentHtmlContextMenu({ menu, busy, onInvokeTool, onClose }: DocumentHtmlContextMenuProps) {
+export function DocumentHtmlContextMenu({ menu, busy, onRequestTool, onClose }: DocumentHtmlContextMenuProps) {
   const ref = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -94,7 +81,6 @@ export function DocumentHtmlContextMenu({ menu, busy, onInvokeTool, onClose }: D
     <>
       <Overlay onClick={onClose} onContextMenu={(event) => { event.preventDefault(); onClose() }} />
       <Menu ref={ref} $x={menu.x} $y={menu.y} role="menu">
-        <Label>OpenCode 工具</Label>
         {WEBDOC_CONTEXT_MENU_ACTIONS.map((action) => {
           const disabled = busy || (action.needsSelection && !menu.hasSelection)
           return (
@@ -104,7 +90,7 @@ export function DocumentHtmlContextMenu({ menu, busy, onInvokeTool, onClose }: D
               $disabled={disabled}
               onClick={() => {
                 if (disabled) return
-                onInvokeTool(action.tool, action.instruction)
+                onRequestTool(action.tool, action.label, action.placeholder, menu.selectedText)
                 onClose()
               }}
             >
@@ -112,10 +98,6 @@ export function DocumentHtmlContextMenu({ menu, busy, onInvokeTool, onClose }: D
             </Item>
           )
         })}
-        <Divider />
-        <Item type="button" $disabled={busy} onClick={onClose}>
-          关闭
-        </Item>
       </Menu>
     </>
   )

@@ -3,6 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import { spawnSync } from 'child_process'
 import { tmpdir } from 'os'
+import { resolveTaskTimeoutMs } from '../../../lib/taskTimeouts'
 import {
   buildOfficialSlidevApp,
   getDeckDistDirForServe,
@@ -12,6 +13,7 @@ import {
 
 const SERVER_ROOT = path.resolve(__dirname, '../../../../')
 const SLIDEV_RUNTIME_DIR = path.join(SERVER_ROOT, 'slidev-runtime')
+const PPT_TASK_TIMEOUT_MS = resolveTaskTimeoutMs('ppt')
 
 function resolveSlidevCliBin(): string {
   const localBin = path.join(SLIDEV_RUNTIME_DIR, 'node_modules', '.bin', 'slidev')
@@ -63,7 +65,7 @@ export function zipOfficialSlidevDist(deckId: string): { success: boolean; zipPa
   const zip = spawnSync('zip', ['-r', '-q', zipPath, '.'], {
     cwd: distDir,
     encoding: 'utf-8',
-    timeout: 120_000,
+    timeout: PPT_TASK_TIMEOUT_MS,
   })
   if (zip.status !== 0) {
     const message = (zip.stderr || zip.stdout || '').trim() || `zip exited with code ${zip.status ?? 'unknown'}`
@@ -99,7 +101,7 @@ export function exportOfficialSlidevPdf(input: {
       stdio: 'pipe',
       encoding: 'utf-8',
       env: { ...process.env, CI: 'true' },
-      timeout: 300_000,
+      timeout: PPT_TASK_TIMEOUT_MS,
     },
   )
 

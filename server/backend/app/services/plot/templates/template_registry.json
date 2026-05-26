@@ -1,0 +1,239 @@
+{
+  "templates": [
+    {
+      "template_id": "raman_line",
+      "data_types": ["raman_spectrum"],
+      "chart_type": "line",
+      "axis_spec": {
+        "x": {"name": "Raman Shift", "unit": "cm^-1", "scale": "linear"},
+        "y": {"name": "Intensity", "unit": "a.u.", "scale": "linear"}
+      },
+      "series_spec": {"mode": "single_or_grouped", "group_column_hint": ["sample", "condition", "group"]},
+      "style_defaults": {"style": "publication"},
+      "required_characteristics": ["two_numeric_columns"],
+      "parameter_hints": {}
+    },
+    {
+      "template_id": "pl_line",
+      "data_types": ["pl_spectrum"],
+      "chart_type": "line",
+      "axis_spec": {
+        "x": {"name": "Wavelength", "unit": "nm", "scale": "linear"},
+        "y": {"name": "PL Intensity", "unit": "a.u.", "scale": "linear"}
+      },
+      "series_spec": {"mode": "single_or_grouped", "group_column_hint": ["sample", "condition", "group"]},
+      "style_defaults": {"style": "publication"},
+      "required_characteristics": ["two_numeric_columns"],
+      "parameter_hints": {}
+    },
+    {
+      "template_id": "mass_spectrum_stem_like",
+      "data_types": ["mass_spectrum"],
+      "chart_type": "scatter",
+      "axis_spec": {
+        "x": {"name": "m/z", "unit": null, "scale": "linear"},
+        "y": {"name": "Relative Intensity", "unit": "%", "scale": "linear"}
+      },
+      "series_spec": {"mode": "single"},
+      "style_defaults": {"style": "publication"},
+      "required_characteristics": ["two_numeric_columns"],
+      "parameter_hints": {}
+    },
+    {
+      "template_id": "uv_vis_line",
+      "data_types": ["uv_vis_spectrum"],
+      "chart_type": "line",
+      "axis_spec": {
+        "x": {"name": "Wavelength", "unit": "nm", "scale": "linear"},
+        "y": {"name": "Absorbance", "unit": "a.u.", "scale": "linear"}
+      },
+      "series_spec": {"mode": "single_or_grouped"},
+      "style_defaults": {"style": "publication"},
+      "required_characteristics": ["two_numeric_columns"],
+      "parameter_hints": {}
+    },
+    {
+      "template_id": "ftir_line",
+      "data_types": ["ftir_spectrum"],
+      "chart_type": "line",
+      "axis_spec": {
+        "x": {"name": "Wavenumber", "unit": "cm^-1", "scale": "linear"},
+        "y": {"name": "Transmittance", "unit": "%", "scale": "linear"}
+      },
+      "series_spec": {"mode": "single_or_grouped"},
+      "style_defaults": {"style": "publication"},
+      "required_characteristics": ["two_numeric_columns"],
+      "parameter_hints": {}
+    },
+    {
+      "template_id": "xrd_line",
+      "data_types": ["xrd_pattern"],
+      "chart_type": "line",
+      "axis_spec": {
+        "x": {"name": "2-Theta", "unit": "deg", "scale": "linear"},
+        "y": {"name": "Intensity", "unit": "a.u.", "scale": "linear"}
+      },
+      "series_spec": {"mode": "single_or_grouped"},
+      "style_defaults": {"style": "publication"},
+      "required_characteristics": ["two_numeric_columns"],
+      "parameter_hints": {}
+    },
+    {
+      "template_id": "volcano_default",
+      "data_types": ["volcano_analysis"],
+      "chart_type": "volcano",
+      "axis_spec": {
+        "x": {"name": "Log2 Fold Change", "unit": null, "scale": "linear"},
+        "y": {"name": "-log10(P-value)", "unit": null, "scale": "linear"}
+      },
+      "series_spec": {"mode": "single"},
+      "style_defaults": {"style": "publication"},
+      "required_characteristics": ["differential_expression_data"],
+      "parameter_hints": {"pvalue_threshold": 0.05, "foldchange_threshold": 1.0}
+    },
+    {
+      "template_id": "time_series_line",
+      "data_types": ["time_series"],
+      "chart_type": "line",
+      "axis_spec": {
+        "x": {"name": "Time", "unit": "s", "scale": "linear"},
+        "y": {"name": "Value", "unit": null, "scale": "linear"}
+      },
+      "series_spec": {"mode": "single_or_grouped"},
+      "style_defaults": {"style": "default"},
+      "required_characteristics": ["has_time_series"],
+      "parameter_hints": {}
+    },
+    {
+      "template_id": "categorical_bar",
+      "data_types": ["categorical_comparison"],
+      "chart_type": "bar",
+      "axis_spec": {
+        "x": {"name": "Category", "unit": null, "scale": "ordinal"},
+        "y": {"name": "Value", "unit": null, "scale": "linear"}
+      },
+      "series_spec": {"mode": "grouped_optional"},
+      "style_defaults": {"style": "default"},
+      "required_characteristics": ["has_categorical_data"],
+      "parameter_hints": {}
+    },
+    {
+      "template_id": "distribution_histogram",
+      "data_types": ["distribution"],
+      "chart_type": "histogram",
+      "axis_spec": {
+        "x": {"name": "Value", "unit": null, "scale": "linear"},
+        "y": {"name": "Count", "unit": null, "scale": "linear"}
+      },
+      "series_spec": {"mode": "single"},
+      "style_defaults": {"style": "default"},
+      "required_characteristics": ["single_numeric_column"],
+      "parameter_hints": {}
+    },
+    {
+      "template_id": "correlation_heatmap",
+      "data_types": ["correlation_matrix"],
+      "chart_type": "heatmap",
+      "axis_spec": {
+        "x": {"name": "Features", "unit": null, "scale": "ordinal"},
+        "y": {"name": "Features", "unit": null, "scale": "ordinal"}
+      },
+      "series_spec": {"mode": "matrix"},
+      "style_defaults": {"style": "default"},
+      "required_characteristics": ["multiple_numeric_columns"],
+      "parameter_hints": {}
+    },
+    {
+      "template_id": "generic_scatter",
+      "data_types": ["generic_tabular"],
+      "chart_type": "scatter",
+      "axis_spec": {
+        "x": {"name": "X", "unit": null, "scale": "linear"},
+        "y": {"name": "Y", "unit": null, "scale": "linear"}
+      },
+      "series_spec": {"mode": "single_or_grouped"},
+      "style_defaults": {"style": "default"},
+      "required_characteristics": ["two_numeric_columns"],
+      "parameter_hints": {}
+    },
+    {
+      "template_id": "ohlc_candlestick",
+      "data_types": ["ohlc_data"],
+      "chart_type": "candlestick",
+      "axis_spec": {
+        "x": {"name": "Date", "unit": null, "scale": "ordinal"},
+        "y": {"name": "Price", "unit": null, "scale": "linear"}
+      },
+      "series_spec": {"mode": "single"},
+      "style_defaults": {"style": "publication"},
+      "required_characteristics": ["ohlc_data"],
+      "parameter_hints": {}
+    },
+    {
+      "template_id": "vector_field_stream",
+      "data_types": ["vector_field_data"],
+      "chart_type": "stream",
+      "axis_spec": {
+        "x": {"name": "X", "unit": null, "scale": "linear"},
+        "y": {"name": "Y", "unit": null, "scale": "linear"}
+      },
+      "series_spec": {"mode": "grid"},
+      "style_defaults": {"style": "publication"},
+      "required_characteristics": ["vector_field_data"],
+      "parameter_hints": {"density": 1.2}
+    },
+    {
+      "template_id": "directional_wind_rose",
+      "data_types": ["directional_data"],
+      "chart_type": "wind_rose",
+      "axis_spec": {
+        "x": {"name": "Direction", "unit": "deg", "scale": "polar"},
+        "y": {"name": "Magnitude", "unit": null, "scale": "linear"}
+      },
+      "series_spec": {"mode": "single"},
+      "style_defaults": {"style": "publication"},
+      "required_characteristics": ["has_directional_data"],
+      "parameter_hints": {}
+    },
+    {
+      "template_id": "edge_list_network",
+      "data_types": ["edge_list_data"],
+      "chart_type": "network_graph",
+      "axis_spec": {
+        "x": {"name": "Source", "unit": null, "scale": "ordinal"},
+        "y": {"name": "Target", "unit": null, "scale": "ordinal"}
+      },
+      "series_spec": {"mode": "edge_list"},
+      "style_defaults": {"style": "publication"},
+      "required_characteristics": ["has_edge_data"],
+      "parameter_hints": {"layout": "spring"}
+    },
+    {
+      "template_id": "high_dim_parallel",
+      "data_types": ["high_dimensional_data"],
+      "chart_type": "parallel_coordinates",
+      "axis_spec": {
+        "x": {"name": "Features", "unit": null, "scale": "ordinal"},
+        "y": {"name": "Value", "unit": null, "scale": "linear"}
+      },
+      "series_spec": {"mode": "multi_axis"},
+      "style_defaults": {"style": "publication"},
+      "required_characteristics": ["multiple_numeric_columns"],
+      "parameter_hints": {}
+    },
+    {
+      "template_id": "three_dim_scatter3d",
+      "data_types": ["three_dimensional_data"],
+      "chart_type": "3d_scatter",
+      "axis_spec": {
+        "x": {"name": "X", "unit": null, "scale": "linear"},
+        "y": {"name": "Y", "unit": null, "scale": "linear"},
+        "z": {"name": "Z", "unit": null, "scale": "linear"}
+      },
+      "series_spec": {"mode": "single_or_grouped"},
+      "style_defaults": {"style": "publication"},
+      "required_characteristics": ["multiple_numeric_columns"],
+      "parameter_hints": {}
+    }
+  ]
+}

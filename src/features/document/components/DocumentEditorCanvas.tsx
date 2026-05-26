@@ -24,8 +24,8 @@ const CanvasShell = styled.div`
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 28px;
-  background: linear-gradient(180deg, #e8eef5 0%, #dfe7ef 100%);
+  padding: 24px 20px;
+  background: #e8ecf1;
 `
 
 const EditorToolbar = styled.div`
@@ -110,12 +110,11 @@ const EditableRoot = styled.div`
   }
 
   section[data-section-id] {
-    margin-bottom: 18px;
-    padding: 14px 18px;
-    border-radius: 18px;
-    border: 1px solid transparent;
-    transition: background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
-    position: relative;
+    margin: 0;
+    padding: 0;
+    border: none;
+    background: transparent;
+    box-shadow: none;
   }
 
   section[data-document-body="true"] {
@@ -124,28 +123,10 @@ const EditableRoot = styled.div`
 
   section[data-document-body="true"][data-placeholder-visible="true"]::before {
     content: '${BODY_PLACEHOLDER}';
-    position: absolute;
-    top: 14px;
-    left: 18px;
-    right: 18px;
+    display: block;
     color: #98a9b8;
     pointer-events: none;
-  }
-
-  section[data-section-id][data-active="true"] {
-    border-color: #7eaee3;
-    background: rgba(236, 245, 255, 0.82);
-    box-shadow: inset 0 0 0 1px rgba(126, 174, 227, 0.12);
-  }
-
-  section[data-section-id][data-modified="true"] {
-    border-style: dashed;
-  }
-
-  section[data-section-id][data-ai-highlight="true"] {
-    border-color: #5aa3eb;
-    background: rgba(226, 239, 255, 0.9);
-    box-shadow: 0 0 0 2px rgba(90, 163, 235, 0.12);
+    margin-bottom: 8px;
   }
 
   h2[data-section-heading="true"],
@@ -697,27 +678,8 @@ export const DocumentEditorCanvas = forwardRef<DocumentEditorCanvasHandle, Docum
     useEffect(() => {
       const root = rootRef.current
       if (!root) return
-      root.querySelectorAll<HTMLElement>('section[data-section-id]').forEach((section) => {
-        const sectionId = section.dataset.sectionId || ''
-        section.dataset.active = state.selectedSectionId === sectionId ? 'true' : 'false'
-        section.dataset.modified = modifiedSectionIds.includes(sectionId) ? 'true' : 'false'
-        section.dataset.aiHighlight = 'false'
-      })
       updatePlaceholderState(root)
-    }, [modifiedSectionIds, state.selectedSectionId, state.html])
-
-    useEffect(() => {
-      const root = rootRef.current
-      if (!root || !recentAiChange) return
-      const targets = recentAiChange.scope === 'document'
-        ? Array.from(root.querySelectorAll<HTMLElement>('section[data-section-id]'))
-        : recentAiChange.sectionId
-          ? [root.querySelector<HTMLElement>(`section[data-section-id="${CSS.escape(recentAiChange.sectionId)}"]`)].filter(Boolean) as HTMLElement[]
-          : []
-      targets.forEach((section) => {
-        section.dataset.aiHighlight = 'true'
-      })
-    }, [recentAiChange, state.html])
+    }, [state.html])
 
     const emitSelection = useCallback((target?: EventTarget | null) => {
       const root = rootRef.current

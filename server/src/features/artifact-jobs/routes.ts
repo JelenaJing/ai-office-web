@@ -3,13 +3,18 @@ import { randomUUID } from 'crypto'
 import { Router, type Response } from 'express'
 import { requireAccountUser } from '../../lib/authUser'
 import { enqueueArtifactJob } from './services/artifactJobQueue'
-import { getArtifactJob, registerArtifactJob } from './services/artifactJobStore'
+import {
+  getArtifactJob,
+  registerArtifactJob,
+  requestArtifactJobCancel,
+} from './services/artifactJobStore'
 import { prepareArtifactJobWorkspace } from './services/opencodeHtmlArtifactRunner'
 import { getSkill } from '../skills/skillRegistry'
 import {
   listAvailableHtmlPresentationTemplates,
   normalizeHtmlPresentationJobOptions,
 } from './services/htmlPresentationTemplates'
+import { resolveTaskTimeoutMs } from '../../lib/taskTimeouts'
 
 const router = Router()
 
@@ -56,6 +61,7 @@ router.post('/', async (req, res) => {
     templateSlug: req.body?.templateSlug,
     enableImages: req.body?.enableImages,
     maxImages: req.body?.maxImages,
+    qualityMode: req.body?.qualityMode,
   })
 
   if (!type) {
@@ -107,6 +113,10 @@ router.post('/', async (req, res) => {
       logPath: workspace.logPath,
       errorPath: workspace.errorPath,
     })
+    const timeoutMs = htmlPresentationOptions.enableImages
+      ? resolveTaskTimeoutMs('image')
+      : resolveTaskTimeoutMs(type === 'html_presentation' ? 'html_ppt' : 'default')
+    console.info(`[artifact-job] jobId=${job.id} type=${job.type} skillId=${job.skillId || ''} status=${job.status} timeoutMs=${timeoutMs} startedAt=${new Date(job.createdAt).toISOString()}`)
     enqueueArtifactJob(job.id)
     res.status(202).json({
       success: true,
@@ -116,6 +126,17 @@ router.post('/', async (req, res) => {
       skillId: job.skillId,
       htmlPresentationOptions: job.htmlPresentationOptions,
       message: job.message,
+      currentPhase: job.currentPhase,
+      cancellable: job.cancellable,
+      warning: job.warning,
+      fallbackUsed: job.fallbackUsed,
+      fallbackRenderer: job.fallbackRenderer,
+      opencodeTimedOut: job.opencodeTimedOut,
+      timeoutMs: job.timeoutMs,
+      requestedTemplateSlug: job.requestedTemplateSlug,
+      selectedTemplateSlug: job.selectedTemplateSlug,
+      selectedStyleId: job.selectedStyleId,
+      rendererMode: job.rendererMode,
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
@@ -140,15 +161,65 @@ router.get('/:jobId', async (req, res) => {
     success: true,
     jobId: job.id,
     status: job.status,
-      type: job.type,
-      skillId: job.skillId,
-      htmlPresentationOptions: job.htmlPresentationOptions,
-      message: job.message,
+    type: job.type,
+    skillId: job.skillId,
+    htmlPresentationOptions: job.htmlPresentationOptions,
+    message: job.message,
+    currentPhase: job.currentPhase,
+    cancellable: job.cancellable,
     error: job.error,
+    warning: job.warning,
+    fallbackUsed: job.fallbackUsed,
+    fallbackRenderer: job.fallbackRenderer,
+    opencodeTimedOut: job.opencodeTimedOut,
+    timeoutMs: job.timeoutMs,
     artifactId: job.artifactId,
     artifactFileUrl: job.artifactFileUrl,
+    requestedTemplateSlug: job.requestedTemplateSlug,
+    selectedTemplateSlug: job.selectedTemplateSlug,
+    selectedStyleId: job.selectedStyleId,
+    rendererMode: job.rendererMode,
+    cancelRequestedAt: job.cancelRequestedAt,
+    canceledAt: job.canceledAt,
+    cancelReason: job.cancelReason,
+    runnerPid: job.runnerPid,
+    runnerProcessGroupId: job.runnerProcessGroupId,
+    partialOutput: job.partialOutput,
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
+  })
+})
+
+router.post('/:jobId/cancel', async (req, res) => {
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+  const job = getArtifactJob(req.params.jobId)
+  if (!job) {
+    sendNotFound(res)
+    return
+  }
+  if (job.userId !== userId) {
+    sendForbidden(res)
+    return
+  }
+
+  const reason = typeof req.body?.reason === 'string' && req.body.reason.trim()
+    ? req.body.reason.trim()
+    : 'user_cancelled'
+  const result = requestArtifactJobCancel(job.id, reason)
+  if (!result) {
+    sendNotFound(res)
+    return
+  }
+
+  res.setHeader('Cache-Control', 'no-store')
+  res.json({
+    success: true,
+    jobId: result.job.id,
+    status: result.job.status,
+    cancelRequestedAt: result.job.cancelRequestedAt,
+    canceledAt: result.job.canceledAt,
+    alreadyFinished: result.alreadyFinished,
   })
 })
 

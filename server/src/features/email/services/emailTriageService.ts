@@ -29,8 +29,20 @@ interface RunEmailTriageInput {
   userId: string
   limit?: number
   messageIds?: string[]
+  requestedMails?: RequestedMailRef[]
   force?: boolean
   isCancelled?: () => boolean
+}
+
+interface RequestedMailRef {
+  mailId: string
+  messageId?: string
+  sourceMailKey?: string
+  accountId?: string
+  folder?: string
+  uid?: string
+  uidValidity?: string
+  subject?: string
 }
 
 interface NormalizedEmailForAnalysis {
@@ -111,6 +123,37 @@ function shortHash(value: string): string {
   return sha256(value).slice(0, 16)
 }
 
+function toSafeString(value: unknown): string {
+  return typeof value === 'string' ? value : ''
+}
+
+function buildSourceMailKey(input: {
+  accountId?: string
+  folder?: string
+  uidValidity?: string
+  uid?: string
+  mailId?: string
+  messageId?: string
+}): string {
+  return [
+    toSafeString(input.accountId),
+    toSafeString(input.folder).toLowerCase(),
+    toSafeString(input.uidValidity),
+    toSafeString(input.uid || input.mailId || input.messageId),
+  ].join(':')
+}
+
+function resolveRequestedSourceMailKey(mail: RequestedMailRef, accountId: string): string {
+  return mail.sourceMailKey || buildSourceMailKey({
+    accountId: mail.accountId || accountId,
+    folder: mail.folder || 'inbox',
+    uidValidity: mail.uidValidity,
+    uid: mail.uid,
+    mailId: mail.mailId,
+    messageId: mail.messageId,
+  })
+}
+
 function previewText(value: string, max = 500): string {
   return String(value || '').replace(/\s+/g, ' ').trim().slice(0, max)
 }
@@ -127,20 +170,25 @@ function reasonLabel(code: EmailAnalysisErrorCode): string {
   switch (code) {
     case 'FETCH_BODY_FAILED':
     case 'BODY_INCOMPLETE':
+    case 'MESSAGE_NOT_FOUND':
       return '正文获取失败'
     case 'BODY_EMPTY':
+    case 'EMPTY_BODY':
       return '正文为空'
     case 'HTML_CLEAN_FAILED':
       return 'HTML 清洗失败'
     case 'BODY_TOO_LONG':
       return '正文过长'
     case 'LLM_TIMEOUT':
+    case 'TIMEOUT':
       return '模型超时'
     case 'MODEL_UNAVAILABLE':
+    case 'AI_MODEL_ERROR':
       return '模型服务不可用'
     case 'LLM_NON_JSON':
       return '模型返回非 JSON'
     case 'JSON_PARSE_FAILED':
+    case 'RESPONSE_PARSE_FAILED':
       return 'JSON 解析失败'
     case 'SAVE_FAILED':
       return '保存失败'
@@ -150,6 +198,12 @@ function reasonLabel(code: EmailAnalysisErrorCode): string {
       return '附件邮件已跳过'
     case 'SYSTEM_DELIVERY_NOTICE':
       return '系统退信已跳过'
+    case 'MISSING_MAIL_ID':
+      return '缺少 mailId'
+    case 'MISSING_SOURCE_MAIL_KEY':
+      return '缺少 sourceMailKey'
+    case 'INVALID_ANALYSIS_PAYLOAD':
+      return '分析结果格式错误'
     default:
       return '分析失败'
   }
@@ -576,7 +630,9 @@ function buildTodos(
 
 function buildSuccessResult(input: {
   accountId: string
-  messageId: string
+  mailId: string
+  messageId?: string
+  sourceMailKey?: string
   folder: string
   normalized: NormalizedEmailForAnalysis
   core: AnalysisCoreResult
@@ -584,7 +640,10 @@ function buildSuccessResult(input: {
 }): Record<string, unknown> {
   const createdAt = nowIso()
   return {
+    mailId: input.mailId,
     messageId: input.messageId,
+    sourceMailKey: input.sourceMailKey,
+    mailKey: input.sourceMailKey,
     accountId: input.accountId,
     folder: input.folder,
     promptVersion: MAIL_ANALYSIS_PROMPT_VERSION,
@@ -609,7 +668,7 @@ function buildSuccessResult(input: {
       /\.(docx?|pdf|pptx?|xlsx?|csv)$/i.test(attachment.fileName),
     ),
     suggestedKnowledgeQueries: [],
-    todos: buildTodos(input.messageId, input.accountId, input.core),
+    todos: buildTodos(input.mailId, input.accountId, input.core),
     replyIntent: input.core.needsReply ? (input.normalized.attachmentsSummary.length > 0 ? 'send_attachment' : 'direct_answer') : 'none',
     draftReply: undefined,
     riskFlags: input.core.riskLevel !== 'none' ? [`风险等级：${input.core.riskLevel}`] : [],
@@ -626,7 +685,9 @@ function buildSuccessResult(input: {
 
 function buildSkippedResult(input: {
   accountId: string
-  messageId: string
+  mailId: string
+  messageId?: string
+  sourceMailKey?: string
   folder: string
   bodyHash?: string
   code: 'BODY_EMPTY' | 'ATTACHMENT_ONLY' | 'SYSTEM_DELIVERY_NOTICE'
@@ -642,7 +703,10 @@ function buildSkippedResult(input: {
         ? 'system_delivery_notice'
         : 'empty_mail'
   return {
+    mailId: input.mailId,
     messageId: input.messageId,
+    sourceMailKey: input.sourceMailKey,
+    mailKey: input.sourceMailKey,
     accountId: input.accountId,
     folder: input.folder,
     promptVersion: MAIL_ANALYSIS_PROMPT_VERSION,
@@ -681,7 +745,9 @@ function buildSkippedResult(input: {
 
 function buildFailedResult(input: {
   accountId: string
-  messageId: string
+  mailId: string
+  messageId?: string
+  sourceMailKey?: string
   folder: string
   bodyHash?: string
   message: string
@@ -692,7 +758,10 @@ function buildFailedResult(input: {
 }): Record<string, unknown> {
   const createdAt = nowIso()
   return {
+    mailId: input.mailId,
     messageId: input.messageId,
+    sourceMailKey: input.sourceMailKey,
+    mailKey: input.sourceMailKey,
     accountId: input.accountId,
     folder: input.folder,
     promptVersion: MAIL_ANALYSIS_PROMPT_VERSION,
@@ -832,6 +901,9 @@ function logJobEvent(input: {
   accountId: string
   mailbox: string
   folder: string
+  mailId: string
+  messageId?: string
+  sourceMailKey?: string
   messageUid: string
   subject?: string
   bodyLength?: number
@@ -848,6 +920,9 @@ function logJobEvent(input: {
       accountId: input.accountId,
       mailbox: input.mailbox,
       folder: input.folder,
+      mailId: input.mailId,
+      messageId: input.messageId,
+      sourceMailKey: input.sourceMailKey,
       messageUid: input.messageUid,
       subjectHash: input.subject ? shortHash(input.subject) : undefined,
       subjectPreview: input.subject ? previewText(input.subject, 50) : undefined,
@@ -862,6 +937,22 @@ function logJobEvent(input: {
   )
 }
 
+function classifyUnexpectedFetchError(error: unknown): EmailAnalysisStageError {
+  const message = error instanceof Error ? error.message : String(error)
+  if (/邮件不存在|not found|does not exist/i.test(message)) {
+    return new EmailAnalysisStageError({
+      stage: 'fetch_body',
+      code: 'MESSAGE_NOT_FOUND',
+      message: `MESSAGE_NOT_FOUND: ${message}`,
+    })
+  }
+  return new EmailAnalysisStageError({
+    stage: 'fetch_body',
+    code: 'FETCH_BODY_FAILED',
+    message,
+  })
+}
+
 async function processJob(
   input: RunEmailTriageInput,
   job: EmailAnalysisJobRecord,
@@ -872,7 +963,16 @@ async function processJob(
   job.updatedAt = job.startedAt
   syncTask(input.taskId)
   try {
-    const detail = await fetchMessage(input.account, job.messageUid)
+    console.info('[EmailTriage] analyze request', stringifyJsonSafe({
+      taskId: input.taskId,
+      mailId: job.mailId,
+      messageId: job.messageId,
+      sourceMailKey: job.sourceMailKey,
+      accountId: job.accountId,
+      folder: job.folder,
+      messageUid: job.messageUid,
+    }))
+    const detail = await fetchMessage(input.account, job.messageUid || job.mailId)
     if (!detail.body && !detail.bodyText && !detail.bodyHtml && !detail.htmlBody) {
       throw new EmailAnalysisStageError({
         stage: 'fetch_body',
@@ -881,6 +981,7 @@ async function processJob(
       })
     }
     job.subject = detail.subject || job.subject
+    job.messageId = job.messageId || detail.messageId
     job.subjectHash = detail.subject ? shortHash(detail.subject) : job.subjectHash
     const normalized = normalizeEmailForAnalysis({
       subject: detail.subject || '',
@@ -915,7 +1016,13 @@ async function processJob(
         job.status = 'skipped'
         job.cacheHit = true
         job.errorCode = 'ALREADY_ANALYZED'
-        job.result = cached.result
+        job.result = {
+          ...cached.result,
+          mailId: job.mailId,
+          messageId: job.messageId ?? (typeof cached.result.messageId === 'string' ? cached.result.messageId : undefined),
+          sourceMailKey: job.sourceMailKey || (typeof cached.result.sourceMailKey === 'string' ? cached.result.sourceMailKey : undefined),
+          mailKey: job.sourceMailKey || (typeof cached.result.mailKey === 'string' ? cached.result.mailKey : undefined),
+        }
         job.retryCount = 0
         job.finishedAt = nowIso()
         job.durationMs = Date.now() - startedAtMs
@@ -924,6 +1031,9 @@ async function processJob(
           accountId: job.accountId,
           mailbox: input.account.user,
           folder: job.folder,
+          mailId: job.mailId,
+          messageId: job.messageId,
+          sourceMailKey: job.sourceMailKey,
           messageUid: job.messageUid,
           subject: job.subject,
           bodyLength: job.bodyLength,
@@ -942,7 +1052,9 @@ async function processJob(
       job.errorCode = 'ATTACHMENT_ONLY'
       job.result = buildSkippedResult({
         accountId: job.accountId,
+        mailId: job.mailId,
         messageId: job.messageId,
+        sourceMailKey: job.sourceMailKey,
         folder: job.folder,
         bodyHash: normalized.bodyHash,
         code: 'ATTACHMENT_ONLY',
@@ -953,12 +1065,15 @@ async function processJob(
       job.finishedAt = nowIso()
       job.durationMs = Date.now() - startedAtMs
       job.updatedAt = job.finishedAt
-      logJobEvent({
-        accountId: job.accountId,
-        mailbox: input.account.user,
-        folder: job.folder,
-        messageUid: job.messageUid,
-        subject: job.subject,
+        logJobEvent({
+          accountId: job.accountId,
+          mailbox: input.account.user,
+          folder: job.folder,
+          mailId: job.mailId,
+          messageId: job.messageId,
+          sourceMailKey: job.sourceMailKey,
+          messageUid: job.messageUid,
+          subject: job.subject,
         bodyLength: job.bodyLength,
         truncated: job.truncated,
         status: job.status,
@@ -974,7 +1089,9 @@ async function processJob(
       job.errorCode = 'SYSTEM_DELIVERY_NOTICE'
       job.result = buildSkippedResult({
         accountId: job.accountId,
+        mailId: job.mailId,
         messageId: job.messageId,
+        sourceMailKey: job.sourceMailKey,
         folder: job.folder,
         bodyHash: normalized.bodyHash,
         code: 'SYSTEM_DELIVERY_NOTICE',
@@ -985,12 +1102,15 @@ async function processJob(
       job.finishedAt = nowIso()
       job.durationMs = Date.now() - startedAtMs
       job.updatedAt = job.finishedAt
-      logJobEvent({
-        accountId: job.accountId,
-        mailbox: input.account.user,
-        folder: job.folder,
-        messageUid: job.messageUid,
-        subject: job.subject,
+        logJobEvent({
+          accountId: job.accountId,
+          mailbox: input.account.user,
+          folder: job.folder,
+          mailId: job.mailId,
+          messageId: job.messageId,
+          sourceMailKey: job.sourceMailKey,
+          messageUid: job.messageUid,
+          subject: job.subject,
         bodyLength: job.bodyLength,
         truncated: job.truncated,
         status: job.status,
@@ -1004,7 +1124,9 @@ async function processJob(
     const analyzed = await analyzeWithRetries(normalized)
     const result = buildSuccessResult({
       accountId: job.accountId,
+      mailId: job.mailId,
       messageId: job.messageId,
+      sourceMailKey: job.sourceMailKey,
       folder: job.folder,
       normalized,
       core: analyzed.core,
@@ -1041,12 +1163,15 @@ async function processJob(
     job.finishedAt = nowIso()
     job.durationMs = Date.now() - startedAtMs
     job.updatedAt = job.finishedAt
-    logJobEvent({
-      accountId: job.accountId,
-      mailbox: input.account.user,
-      folder: job.folder,
-      messageUid: job.messageUid,
-      subject: job.subject,
+      logJobEvent({
+        accountId: job.accountId,
+        mailbox: input.account.user,
+        folder: job.folder,
+        mailId: job.mailId,
+        messageId: job.messageId,
+        sourceMailKey: job.sourceMailKey,
+        messageUid: job.messageUid,
+        subject: job.subject,
       bodyLength: job.bodyLength,
       truncated: job.truncated,
       status: job.status,
@@ -1057,30 +1182,45 @@ async function processJob(
   } catch (error) {
     const stageError = error instanceof EmailAnalysisStageError
       ? error
-      : new EmailAnalysisStageError({
-          stage: 'fetch_body',
-          code: 'FETCH_BODY_FAILED',
-          message: error instanceof Error ? error.message : String(error),
-        })
+      : classifyUnexpectedFetchError(error)
     job.status = stageError.status
     job.stage = stageError.stage
     job.errorCode = stageError.code
     job.error = stageError.message
     job.rawOutputPreview = stageError.rawOutputPreview
+    console.warn('[EmailTriage] analyze failed', stringifyJsonSafe({
+      taskId: input.taskId,
+      requestedMailId: job.mailId,
+      requestedSourceMailKey: job.sourceMailKey,
+      requestedMessageId: job.messageId,
+      messageUid: job.messageUid,
+      reason: stageError.message,
+      errorCode: stageError.code,
+      stage: stageError.stage,
+    }))
     job.result = stageError.status === 'skipped'
       ? buildSkippedResult({
           accountId: job.accountId,
+          mailId: job.mailId,
           messageId: job.messageId,
+          sourceMailKey: job.sourceMailKey,
           folder: job.folder,
           bodyHash: job.bodyHash,
-          code: stageError.code === 'BODY_EMPTY' ? 'BODY_EMPTY' : 'ATTACHMENT_ONLY',
+          code:
+            stageError.code === 'BODY_EMPTY' || stageError.code === 'EMPTY_BODY'
+              ? 'BODY_EMPTY'
+              : stageError.code === 'SYSTEM_DELIVERY_NOTICE'
+                ? 'SYSTEM_DELIVERY_NOTICE'
+                : 'ATTACHMENT_ONLY',
           message: stageError.message,
           bodyLength: job.bodyLength,
           truncated: job.truncated,
         })
       : buildFailedResult({
           accountId: job.accountId,
+          mailId: job.mailId,
           messageId: job.messageId,
+          sourceMailKey: job.sourceMailKey,
           folder: job.folder,
           bodyHash: job.bodyHash,
           message: stageError.message,
@@ -1096,6 +1236,9 @@ async function processJob(
       accountId: job.accountId,
       mailbox: input.account.user,
       folder: job.folder,
+      mailId: job.mailId,
+      messageId: job.messageId,
+      sourceMailKey: job.sourceMailKey,
       messageUid: job.messageUid,
       subject: job.subject,
       bodyLength: job.bodyLength,
@@ -1123,7 +1266,9 @@ function markRemainingJobsModelUnavailable(input: RunEmailTriageInput): void {
     job.error = '模型服务暂不可用'
     job.result = buildFailedResult({
       accountId: job.accountId,
+      mailId: job.mailId,
       messageId: job.messageId,
+      sourceMailKey: job.sourceMailKey,
       folder: job.folder,
       bodyHash: job.bodyHash,
       message: '模型服务暂不可用',
@@ -1151,32 +1296,105 @@ export async function runEmailUnreadTriage(input: RunEmailTriageInput): Promise<
     promptVersion: MAIL_ANALYSIS_PROMPT_VERSION,
   })
 
-  const inbox = await fetchInbox(input.account, input.limit ?? 30)
-  assertNotCancelled(input)
-  const targetIds = Array.isArray(input.messageIds) && input.messageIds.length > 0
-    ? new Set(input.messageIds.map((id) => String(id)))
-    : null
-  const selected = targetIds
-    ? inbox.filter((mail) => targetIds.has(mail.id))
-    : inbox.filter((mail) => mail.unread)
+  let selectedJobs: EmailAnalysisJobRecord[] = []
+  if (Array.isArray(input.requestedMails) && input.requestedMails.length > 0) {
+    selectedJobs = input.requestedMails.map((mail) => {
+      const mailId = String(mail.mailId || '').trim()
+      const sourceMailKey = resolveRequestedSourceMailKey(mail, input.account.user)
+      if (!mailId) {
+        const createdAt = nowIso()
+        return {
+          jobId: `invalid-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          accountId: input.account.user,
+          folder: (mail.folder || 'INBOX').toUpperCase(),
+          mailId: '',
+          messageId: mail.messageId,
+          sourceMailKey,
+          messageUid: String(mail.uid || ''),
+          status: 'failed',
+          subject: mail.subject,
+          retryCount: 0,
+          errorCode: 'MISSING_MAIL_ID',
+          error: 'MISSING_MAIL_ID: 分析请求缺少 mailId',
+          result: buildFailedResult({
+            accountId: input.account.user,
+            mailId: '',
+            messageId: mail.messageId,
+            sourceMailKey,
+            folder: (mail.folder || 'INBOX').toUpperCase(),
+            message: 'MISSING_MAIL_ID: 分析请求缺少 mailId',
+            code: 'MISSING_MAIL_ID',
+            stage: 'fetch_body',
+          }),
+          createdAt,
+          updatedAt: createdAt,
+          finishedAt: createdAt,
+        }
+      }
+      if (!mail.sourceMailKey) {
+        console.warn('[EmailTriage] request missing sourceMailKey', stringifyJsonSafe({
+          taskId: input.taskId,
+          mailId,
+          messageId: mail.messageId,
+          accountId: input.account.user,
+          folder: mail.folder || 'inbox',
+        }))
+      }
+      return {
+        jobId: `${mailId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        accountId: input.account.user,
+        folder: (mail.folder || 'INBOX').toUpperCase(),
+        mailId,
+        messageId: mail.messageId,
+        sourceMailKey,
+        messageUid: String(mail.uid || mailId),
+        status: 'pending',
+        subject: mail.subject,
+        subjectHash: mail.subject ? shortHash(mail.subject) : undefined,
+        retryCount: 0,
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+      }
+    })
+  } else {
+    const inbox = await fetchInbox(input.account, input.limit ?? 30)
+    assertNotCancelled(input)
+    const targetIds = Array.isArray(input.messageIds) && input.messageIds.length > 0
+      ? new Set(input.messageIds.map((id) => String(id)))
+      : null
+    const selected = targetIds
+      ? inbox.filter((mail) => targetIds.has(mail.id))
+      : inbox.filter((mail) => mail.unread)
 
-  task.jobs = selected.map((mail) => ({
-    jobId: `${mail.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    accountId: input.account.user,
-    folder: 'INBOX',
-    messageId: mail.id,
-    messageUid: mail.id,
-    status: 'pending',
-    subject: mail.subject,
-    subjectHash: mail.subject ? shortHash(mail.subject) : undefined,
-    retryCount: 0,
-    createdAt: nowIso(),
-    updatedAt: nowIso(),
-  }))
-  task.sourceMessageCount = selected.length
-  syncTask(input.taskId, selected.length > 0 ? '正在分析邮件…' : '没有需要分析的未读邮件')
+    selectedJobs = selected.map((mail) => ({
+      jobId: `${mail.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      accountId: input.account.user,
+      folder: 'INBOX',
+      mailId: mail.id,
+      messageId: mail.messageId,
+      sourceMailKey: buildSourceMailKey({
+        accountId: input.account.user,
+        folder: 'inbox',
+        uidValidity: mail.uidValidity,
+        uid: mail.uid,
+        mailId: mail.id,
+        messageId: mail.messageId,
+      }),
+      messageUid: mail.uid || mail.id,
+      status: 'pending',
+      subject: mail.subject,
+      subjectHash: mail.subject ? shortHash(mail.subject) : undefined,
+      retryCount: 0,
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    }))
+  }
 
-  if (selected.length === 0) {
+  task.jobs = selectedJobs
+  task.sourceMessageCount = selectedJobs.length
+  syncTask(input.taskId, selectedJobs.length > 0 ? '正在分析邮件…' : '没有需要分析的未读邮件')
+
+  if (selectedJobs.length === 0) {
     updateEmailTriageTask(input.taskId, {
       status: 'completed',
       progress: 100,
@@ -1187,7 +1405,7 @@ export async function runEmailUnreadTriage(input: RunEmailTriageInput): Promise<
 
   let stopForModelUnavailable = false
   let cursor = 0
-  const workers = Array.from({ length: Math.min(MAX_CONCURRENCY, selected.length) }, async () => {
+  const workers = Array.from({ length: Math.min(MAX_CONCURRENCY, selectedJobs.length) }, async () => {
     while (true) {
       assertNotCancelled(input)
       if (stopForModelUnavailable) return
@@ -1196,6 +1414,7 @@ export async function runEmailUnreadTriage(input: RunEmailTriageInput): Promise<
       const current = taskState.jobs[cursor]
       cursor += 1
       if (!current) return
+      if (current.status !== 'pending') continue
       const { modelUnavailable } = await processJob(input, current)
       if (modelUnavailable) {
         stopForModelUnavailable = true

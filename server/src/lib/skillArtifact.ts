@@ -9,7 +9,7 @@ import {
   type ArtifactSourceRef,
 } from '../artifacts/ArtifactStore'
 import { assertWorkspaceAccess } from './workspaceAccess'
-import { GENERATED_FILE_MIRROR_EXTS, registerUserFile } from './userFiles'
+import { GENERATED_FILE_MIRROR_EXTS, registerUserFile, updateUserFileContent } from './userFiles'
 
 export interface SaveSkillArtifactInput {
   userId: string
@@ -28,6 +28,8 @@ export interface SaveSkillArtifactInput {
   emailId?: string
   deckId?: string
   documentId?: string
+  /** 若提供则更新该「我的文件」条目，而不是新建一条。 */
+  userFileId?: string
 }
 
 export function saveSkillArtifact(input: SaveSkillArtifactInput): Artifact {
@@ -84,14 +86,30 @@ export function saveSkillArtifact(input: SaveSkillArtifactInput): Artifact {
       const buffer = typeof input.content === 'string'
         ? Buffer.from(input.content, 'utf-8')
         : input.content
-      registerUserFile({
-        userId: input.userId,
-        workspacePath: input.workspacePath,
-        filename: input.filename,
-        content: buffer,
-        sourceArtifactId: artifactId,
-        generated: true,
-      })
+      const userFileId = String(input.userFileId || '').trim()
+      if (userFileId) {
+        updateUserFileContent({
+          userId: input.userId,
+          fileId: userFileId,
+          workspacePath: input.workspacePath,
+          filename: input.filename,
+          content: buffer,
+          sourceArtifactId: artifactId,
+          documentId: input.documentId,
+          artifactId,
+        })
+      } else {
+        registerUserFile({
+          userId: input.userId,
+          workspacePath: input.workspacePath,
+          filename: input.filename,
+          content: buffer,
+          sourceArtifactId: artifactId,
+          generated: true,
+          documentId: input.documentId,
+          artifactId,
+        })
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       console.warn(`[artifact-mirror] failed to mirror ${artifactId} to user files: ${message}`)

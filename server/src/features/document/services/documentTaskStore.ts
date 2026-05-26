@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto'
 import type { DocumentRecord, DocumentTaskRecord } from '../types'
+import { loadDocumentRecordFromDisk, persistDocumentRecordToDisk } from './documentRecordPersistence'
 
 const tasks = new Map<string, DocumentTaskRecord>()
 const documents = new Map<string, DocumentRecord>()
@@ -43,9 +44,23 @@ export function updateDocumentTask(taskId: string, patch: Partial<DocumentTaskRe
 
 export function saveDocumentRecord(record: DocumentRecord): DocumentRecord {
   documents.set(record.documentId, record)
+  try {
+    persistDocumentRecordToDisk(record)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.warn(`[document-record] persist failed for ${record.documentId}: ${message}`)
+  }
   return record
 }
 
-export function getDocumentRecord(documentId: string): DocumentRecord | undefined {
-  return documents.get(documentId)
+export function getDocumentRecord(documentId: string, userId?: string): DocumentRecord | undefined {
+  const cached = documents.get(documentId)
+  if (cached) return cached
+  if (!userId) return undefined
+  const loaded = loadDocumentRecordFromDisk(userId, documentId)
+  if (loaded) {
+    documents.set(loaded.documentId, loaded)
+    return loaded
+  }
+  return undefined
 }

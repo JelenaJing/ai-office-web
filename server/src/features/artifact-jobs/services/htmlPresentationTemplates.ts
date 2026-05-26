@@ -5,6 +5,7 @@ export interface HtmlPresentationJobOptions {
   templateSlug?: string
   enableImages: boolean
   maxImages: number
+  qualityMode: 'fast' | 'high'
 }
 
 export interface TemplateIndexEntry {
@@ -278,7 +279,7 @@ function buildTemplateProfile(candidate: CandidateTemplateRecord, options: HtmlP
     templateSlug: candidate.slug,
     templateName: candidate.name,
     templateFile,
-    rendererMode: fallbackUsed ? 'html-ppt-beautiful-fallback' : 'html-ppt-beautiful-fallback',
+    rendererMode: fallbackUsed ? 'html-ppt-beautiful-fallback' : 'beautiful-template',
     availableLayouts: [],
     colorScheme: candidate.scheme,
     density: candidate.density,
@@ -351,21 +352,24 @@ export function resolveTemplateSelection(input: {
 
 export function normalizeHtmlPresentationJobOptions(value: unknown): HtmlPresentationJobOptions {
   const input = (value && typeof value === 'object') ? (value as Record<string, unknown>) : {}
+  const qualityMode = input.qualityMode === 'high' ? 'high' : 'fast'
   const templateSlug = typeof input.templateSlug === 'string' && input.templateSlug.trim()
     ? input.templateSlug.trim()
     : undefined
-  const enableImages = typeof input.enableImages === 'boolean' ? input.enableImages : true
+  const enableImages = typeof input.enableImages === 'boolean' ? input.enableImages : qualityMode === 'high'
   const rawMaxImages = typeof input.maxImages === 'number'
     ? input.maxImages
     : typeof input.maxImages === 'string'
       ? Number.parseInt(input.maxImages, 10)
       : 3
+  const normalizedDefaultMaxImages = qualityMode === 'high' ? 3 : 0
   const maxImages = Number.isFinite(rawMaxImages)
     ? Math.max(0, Math.min(6, Math.trunc(rawMaxImages)))
-    : 3
+    : normalizedDefaultMaxImages
   return {
     templateSlug,
     enableImages,
-    maxImages: maxImages || 0,
+    maxImages: enableImages ? maxImages : 0,
+    qualityMode,
   }
 }

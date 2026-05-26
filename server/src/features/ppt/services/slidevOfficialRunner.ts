@@ -2,9 +2,11 @@ import { randomUUID } from 'crypto'
 import { spawnSync } from 'child_process'
 import fs from 'fs'
 import path from 'path'
+import { resolveTaskTimeoutMs } from '../../../lib/taskTimeouts'
 
 const SERVER_ROOT = path.resolve(__dirname, '../../../../')
 const SLIDEV_RUNTIME_DIR = path.join(SERVER_ROOT, 'slidev-runtime')
+const PPT_TASK_TIMEOUT_MS = resolveTaskTimeoutMs('ppt')
 const SLIDEV_APPS_ROOT = path.join(
   process.env.AIOFFICE_SLIDEV_APPS_DIR || path.join(SERVER_ROOT, 'data', 'slidev-apps'),
 )
@@ -38,7 +40,7 @@ function ensureRuntimeDependencies(): string | null {
     stdio: 'pipe',
     encoding: 'utf-8',
     env: { ...process.env, CI: 'true' },
-    timeout: 300_000,
+    timeout: PPT_TASK_TIMEOUT_MS,
   })
   if (install.status !== 0) {
     return install.stderr || install.stdout || 'Slidev runtime npm install failed'
@@ -111,7 +113,7 @@ export function buildOfficialSlidevApp(input: {
       stdio: 'pipe',
       encoding: 'utf-8',
       env: { ...process.env, CI: 'true', NODE_ENV: 'production' },
-      timeout: 180_000,
+      timeout: PPT_TASK_TIMEOUT_MS,
     },
   )
 

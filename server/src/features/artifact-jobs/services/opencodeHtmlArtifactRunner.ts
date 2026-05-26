@@ -1,12 +1,28 @@
 import fs from 'fs'
 import path from 'path'
 import { spawn } from 'child_process'
-import type { ArtifactJobRecord } from './artifactJobStore'
+import {
+  ArtifactJobCanceledError,
+  assertArtifactJobNotCanceled,
+  clearArtifactJobRuntime,
+  isArtifactJobCanceledError,
+  registerArtifactJobRuntime,
+  updateArtifactJob,
+  type ArtifactJobRecord,
+} from './artifactJobStore'
 import { createHtmlArtifact } from './htmlArtifactStore'
 import { registerUserFile } from '../../../lib/userFiles'
 import { bootstrapWorkspaceForUser } from '../../../lib/workspaceAccess'
-import { postProcessHtmlPresentationOutput } from './htmlPresentationPostProcess'
 import {
+  postProcessHtmlPresentationOutput,
+  type ContentModelBlock,
+  type ContentModelRecord,
+  type ContentModelSlide,
+} from './htmlPresentationPostProcess'
+import { renderHtmlPresentationFromContentModel } from './htmlPresentationRetemplateService'
+import { resolveTaskTimeoutMs } from '../../../lib/taskTimeouts'
+import {
+  resolveBeautifulTemplateFile,
   normalizeHtmlPresentationJobOptions,
   resolveTemplateSelection,
   type CandidateTemplateRecord,
@@ -18,7 +34,9 @@ export const ARTIFACT_JOB_ROOT = '/data/darebug/aios-agent-jobs'
 export const AIOS_SKILLS_ROOT = '/data/darebug/aios-skills'
 
 const OPENCODE_BIN = '/data/darebug/tools/bin/opencode'
-const OPENCODE_TIMEOUT_MS = 120_000
+const HTML_PPT_TIMEOUT_MS = resolveTaskTimeoutMs('html_ppt')
+const FINAL_CHECK_TIMEOUT_MS = 8_000
+const PROCESS_KILL_GRACE_MS = 5_000
 const HTML_PPT_BEAUTIFUL_SKILL_ID = 'html-ppt-beautiful'
 const MAX_SKILL_TEXT_FILE_BYTES = 40 * 1024
 const MAX_SKILL_TOTAL_TARGET_BYTES = 150 * 1024
@@ -96,6 +114,40 @@ interface HtmlPptPreparedSelection {
   candidateTemplates: CandidateTemplateRecord[]
 }
 
+interface OpenCodeTimeoutConfig {
+  timeoutMs: number
+  fallbackAfterMs: number
+}
+
+interface OpenCodeExecutionResult {
+  timeoutMs: number
+  fallbackAfterMs: number
+}
+
+interface HtmlPresentationJobSummary {
+  message?: string
+  warning?: string
+  fallbackUsed?: boolean
+  fallbackRenderer?: string
+  opencodeTimedOut?: boolean
+  timeoutMs?: number
+  requestedTemplateSlug?: string
+  selectedTemplateSlug?: string
+  selectedStyleId?: string
+  rendererMode?: string
+}
+
+export class OpenCodeTimeoutError extends Error {
+  readonly code = 'OPENCODE_TIMEOUT'
+  readonly timeoutMs: number
+
+  constructor(timeoutMs: number) {
+    super(`OpenCode 在 ${Math.round(timeoutMs / 1000)} 秒内未完成`)
+    this.name = 'OpenCodeTimeoutError'
+    this.timeoutMs = timeoutMs
+  }
+}
+
 function safeSegment(value: string, maxLen = 96): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, maxLen)
 }
@@ -113,6 +165,84 @@ function ensureWithinBaseDir(baseDir: string, targetDir: string): string {
 
 function appendLog(logPath: string, content: string): void {
   fs.appendFileSync(logPath, content, 'utf-8')
+}
+
+function logHtmlArtifactTask(job: ArtifactJobRecord, patch: {
+  status: string
+  timeoutMs?: number
+  startedAt?: string
+  elapsedMs?: number
+}): void {
+  const parts = [
+    `[html-artifact-job]`,
+    `jobId=${job.id}`,
+    `skillId=${job.skillId || ''}`,
+    `status=${patch.status}`,
+    `taskType=html_ppt`,
+    `timeoutMs=${patch.timeoutMs ?? HTML_PPT_TIMEOUT_MS}`,
+    `startedAt=${patch.startedAt || new Date(job.createdAt).toISOString()}`,
+  ]
+  if (typeof patch.elapsedMs === 'number') parts.push(`elapsedMs=${patch.elapsedMs}`)
+  console.info(parts.join(' '))
+}
+
+function markJobPhase(jobId: string, phase: string, message: string): void {
+  updateArtifactJob(jobId, { currentPhase: phase, message })
+}
+
+function markPartialOutput(job: ArtifactJobRecord): void {
+  updateArtifactJob(job.id, { partialOutput: ensureRegularFile(job.outputPath) })
+}
+
+function getOpenCodeTimeoutConfig(job: ArtifactJobRecord): OpenCodeTimeoutConfig {
+  return {
+    timeoutMs: HTML_PPT_TIMEOUT_MS,
+    fallbackAfterMs: HTML_PPT_TIMEOUT_MS,
+  }
+}
+
+function ignoreMissingProcessError(error: unknown): void {
+  if (
+    error
+    && typeof error === 'object'
+    && 'code' in error
+    && (error as { code?: string }).code === 'ESRCH'
+  ) {
+    return
+  }
+  throw error
+}
+
+function killProcessTree(pid: number | undefined, reason: string): void {
+  if (!pid || pid <= 0) return
+  try {
+    if (process.platform === 'linux') process.kill(-pid, 'SIGTERM')
+    else process.kill(pid, 'SIGTERM')
+  } catch (error) {
+    ignoreMissingProcessError(error)
+  }
+  setTimeout(() => {
+    try {
+      if (process.platform === 'linux') process.kill(-pid, 'SIGKILL')
+      else process.kill(pid, 'SIGKILL')
+    } catch (error) {
+      ignoreMissingProcessError(error)
+    }
+  }, PROCESS_KILL_GRACE_MS).unref()
+  void reason
+}
+
+async function runFinalCheck(job: ArtifactJobRecord): Promise<string | null> {
+  return Promise.race([
+    Promise.resolve().then(() => {
+      assertArtifactJobNotCanceled(job.id, 'final-check')
+      ensureOutputFile(job.outputPath)
+      return null
+    }),
+    new Promise<string>((resolve) => {
+      setTimeout(() => resolve(`final check exceeded ${FINAL_CHECK_TIMEOUT_MS}ms and was skipped`), FINAL_CHECK_TIMEOUT_MS).unref()
+    }),
+  ])
 }
 
 function copyDirRecursive(src: string, dest: string): void {
@@ -159,7 +289,7 @@ function buildDefaultOpenCodePrompt(userPrompt: string): string {
   ].join('\n')
 }
 
-function buildHtmlPptLiteOpenCodePrompt(userPrompt: string, repairOnly = false): string {
+function buildHtmlPptLiteOpenCodePrompt(userPrompt: string, options: HtmlPresentationJobOptions, repairOnly = false): string {
   const repairLines = repairOnly
     ? [
       '你正在执行一次仅修复输出路径的重试。',
@@ -171,6 +301,14 @@ function buildHtmlPptLiteOpenCodePrompt(userPrompt: string, repairOnly = false):
       '控制在 7-10 页，HTML 总体尽量约 80KB-200KB。',
       '不要生成超长 JS，不要内联超大 base64 资源。',
     ]
+  const imageLines = !options.enableImages || options.maxImages <= 0
+    ? [
+      '8. 当前为无图模式：不要生成图片区域、封面图、章节图、配图区域、figure、img、image placeholder、visual placeholder、media placeholder、空白图片框或“图片待生成”等文字。',
+      '8.1 无图模式下只允许纯文本、标题页、目录页、列表页、数据页、流程页、结论页等无图布局；如果模板暗示图片槽位，必须折叠图片槽位并让文本自然扩展。',
+    ]
+    : [
+      `8. 当前允许图片规划，最多 ${options.maxImages} 张；优先为封面页、场景页、概念页预留可视区域；图片失败时允许使用内联 SVG placeholder。`,
+    ]
 
   return [
     '请严格执行以下任务：',
@@ -181,8 +319,8 @@ function buildHtmlPptLiteOpenCodePrompt(userPrompt: string, repairOnly = false):
     '4. 不要读取 job 目录之外的文件，不要访问网络，不要安装依赖。',
     '5. 生成单文件 HTML PPT，适合 iframe sandbox 预览，必须是 16:9 横向页面。',
     '6. 每个 slide 根节点必须优先使用 <section class="slide">。',
-    '7. 每个 slide 尽量直接带 data-slide-id；每个文本块尽量带 data-block-id、data-block-type="text"、data-block-role；每个图片块尽量带 data-block-id、data-block-type="image"、data-block-role="visual"。',
-    '8. 如果存在图片规划，请优先为封面页、场景页、概念页预留可视区域；图片失败时允许使用内联 SVG placeholder。',
+    '7. 每个 slide 尽量直接带 data-slide-id；每个文本块尽量带 data-block-id、data-block-type="text"、data-block-role；仅在非无图模式下才允许图片块带 data-block-id、data-block-type="image"、data-block-role="visual"。',
+    ...imageLines,
     '9. 必须把完整结果写入 output/index.html。',
     '10. 不要只在回复中输出 HTML。',
     '11. 不要输出到 index.html、presentation.html、slides.html、output.html；如果误写到这些名字，结束前必须复制为 output/index.html。',
@@ -195,7 +333,7 @@ function buildHtmlPptLiteOpenCodePrompt(userPrompt: string, repairOnly = false):
 
 function buildOpenCodePrompt(job: ArtifactJobRecord, repairOnly = false): string {
   if (job.skillId === HTML_PPT_BEAUTIFUL_SKILL_ID) {
-    return buildHtmlPptLiteOpenCodePrompt(job.prompt, repairOnly)
+    return buildHtmlPptLiteOpenCodePrompt(job.prompt, normalizeHtmlPresentationJobOptions(job.htmlPresentationOptions), repairOnly)
   }
   return buildDefaultOpenCodePrompt(job.prompt)
 }
@@ -325,6 +463,254 @@ function chooseHtmlPptStyle(prompt: string, inputMarkdown: string): HtmlPptStyle
   }
 }
 
+function pad(value: number, size = 3): string {
+  return String(value).padStart(size, '0')
+}
+
+function slideId(index: number): string {
+  return `slide-${pad(index + 1)}`
+}
+
+function blockId(slideIndex: number, blockIndex: number): string {
+  return `block-${pad(slideIndex + 1)}-${pad(blockIndex + 1)}`
+}
+
+function stripMarkdownLine(value: string): string {
+  return value
+    .replace(/^#{1,6}\s*/, '')
+    .replace(/^\s*[-*+]\s+/, '')
+    .replace(/^\s*\d+\.\s+/, '')
+    .replace(/[*_`>#]/g, '')
+    .trim()
+}
+
+function splitSentences(value: string): string[] {
+  return value
+    .split(/[。！？!?；;\n]/)
+    .map((item) => stripMarkdownLine(item))
+    .filter(Boolean)
+}
+
+function truncateLine(value: string, maxLength = 88): string {
+  return value.length <= maxLength ? value : `${value.slice(0, Math.max(0, maxLength - 1)).trim()}…`
+}
+
+function uniqueItems(values: string[]): string[] {
+  return Array.from(new Set(values.map((item) => item.trim()).filter(Boolean)))
+}
+
+interface MarkdownSectionDraft {
+  title: string
+  bullets: string[]
+  paragraphs: string[]
+}
+
+function parseFallbackOutline(inputMarkdown: string, prompt: string): {
+  title: string
+  subtitle: string
+  sections: MarkdownSectionDraft[]
+} {
+  const lines = inputMarkdown.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+  const headingLine = lines.find((line) => /^#\s+/.test(line))
+  const title = truncateLine(stripMarkdownLine(headingLine || prompt || 'HTML 演示文稿'))
+  const sections: MarkdownSectionDraft[] = []
+  let current: MarkdownSectionDraft | null = null
+
+  for (const line of lines) {
+    if (/^#\s+/.test(line)) continue
+    if (/^##+\s+/.test(line)) {
+      current = {
+        title: truncateLine(stripMarkdownLine(line)),
+        bullets: [],
+        paragraphs: [],
+      }
+      sections.push(current)
+      continue
+    }
+
+    const text = truncateLine(stripMarkdownLine(line))
+    if (!text) continue
+    if (!current) {
+      current = {
+        title: '核心内容',
+        bullets: [],
+        paragraphs: [],
+      }
+      sections.push(current)
+    }
+
+    if (/^\s*([-*+]|\d+\.)\s+/.test(line)) current.bullets.push(text)
+    else current.paragraphs.push(text)
+  }
+
+  const narrative = uniqueItems(splitSentences(`${prompt}\n${inputMarkdown}`))
+  if (sections.length === 0) {
+    const defaults = [
+      '项目背景与目标',
+      '方案架构',
+      '核心能力',
+      '实施路径',
+    ]
+    for (const [index, sectionTitle] of defaults.entries()) {
+      sections.push({
+        title: sectionTitle,
+        bullets: narrative.slice(index * 2, index * 2 + 3),
+        paragraphs: narrative.slice(index, index + 2),
+      })
+    }
+  }
+
+  for (const section of sections) {
+    if (section.bullets.length === 0) {
+      section.bullets = narrative
+        .filter((item) => item !== title && item !== section.title)
+        .slice(0, 4)
+    }
+    if (section.paragraphs.length === 0) {
+      section.paragraphs = section.bullets.slice(0, 2)
+    }
+  }
+
+  const subtitle = truncateLine(
+    uniqueItems([
+      ...sections.flatMap((section) => section.paragraphs),
+      ...narrative,
+    ])[0] || `围绕“${title}”生成的快速备用初稿`,
+    96,
+  )
+
+  return {
+    title,
+    subtitle,
+    sections,
+  }
+}
+
+function buildFallbackTextBlock(slideIndex: number, blockIndex: number, role: ContentModelBlock['role'], text: string): ContentModelBlock {
+  return {
+    id: blockId(slideIndex, blockIndex),
+    type: 'text',
+    role,
+    text: truncateLine(text, role === 'title' ? 80 : 140),
+    assetPath: '',
+    imagePrompt: '',
+  }
+}
+
+function buildFallbackSlide(input: {
+  slideIndex: number
+  role: ContentModelSlide['role']
+  title: string
+  subtitle: string
+  bullets: string[]
+  body: string[]
+  layoutHint: string
+}): ContentModelSlide {
+  const blocks: ContentModelBlock[] = [
+    buildFallbackTextBlock(input.slideIndex, 0, 'title', input.title),
+  ]
+
+  if (input.subtitle) {
+    blocks.push(buildFallbackTextBlock(input.slideIndex, blocks.length, 'subtitle', input.subtitle))
+  }
+  for (const bullet of input.bullets.slice(0, 4)) {
+    blocks.push(buildFallbackTextBlock(input.slideIndex, blocks.length, 'body', bullet))
+  }
+  for (const paragraph of input.body.slice(0, 2)) {
+    blocks.push(buildFallbackTextBlock(input.slideIndex, blocks.length, 'body', paragraph))
+  }
+
+  return {
+    id: slideId(input.slideIndex),
+    index: input.slideIndex,
+    role: input.role,
+    title: input.title,
+    subtitle: input.subtitle,
+    bullets: input.bullets.slice(0, 5),
+    layoutHint: input.layoutHint,
+    blocks,
+    visual: {
+      type: 'none',
+      prompt: '',
+      assetPath: '',
+      placement: 'card',
+    },
+  }
+}
+
+function buildServerFallbackContentModel(input: {
+  prompt: string
+  inputMarkdown: string
+  selectedTemplateSlug: string
+  templateProfile: TemplateProfileRecord
+}): ContentModelRecord {
+  const outline = parseFallbackOutline(input.inputMarkdown, input.prompt)
+  const sections = outline.sections.slice(0, 4)
+  const agendaItems = uniqueItems(sections.map((section) => section.title)).slice(0, 5)
+  const createdAt = new Date().toISOString()
+  const slides: ContentModelSlide[] = []
+
+  slides.push(buildFallbackSlide({
+    slideIndex: slides.length,
+    role: 'cover',
+    title: outline.title,
+    subtitle: outline.subtitle,
+    bullets: agendaItems,
+    body: [outline.subtitle],
+    layoutHint: 'cover-hero',
+  }))
+
+  if (agendaItems.length > 1) {
+    slides.push(buildFallbackSlide({
+      slideIndex: slides.length,
+      role: 'agenda',
+      title: '汇报目录',
+      subtitle: '基于原始需求快速整理的内容结构',
+      bullets: agendaItems,
+      body: agendaItems,
+      layoutHint: 'agenda-list',
+    }))
+  }
+
+  for (const [index, section] of sections.entries()) {
+    slides.push(buildFallbackSlide({
+      slideIndex: slides.length,
+      role: index === sections.length - 1 ? 'timeline' : 'content',
+      title: section.title,
+      subtitle: section.paragraphs[0] || section.bullets[0] || outline.subtitle,
+      bullets: uniqueItems(section.bullets).slice(0, 4),
+      body: uniqueItems(section.paragraphs).slice(0, 3),
+      layoutHint: index === sections.length - 1 ? 'timeline-track' : 'content-split',
+    }))
+  }
+
+  slides.push(buildFallbackSlide({
+    slideIndex: slides.length,
+    role: 'closing',
+    title: '下一步建议',
+    subtitle: '当前为快速备用渲染初稿，可继续换模板、编辑文本并重新生成高质量版本。',
+    bullets: [
+      '确认页面结构与重点章节',
+      '继续局部编辑与模板切换',
+      '需要更完整视觉时可切换高质量模式',
+    ],
+    body: [outline.title],
+    layoutHint: 'closing-statement',
+  }))
+
+  return {
+    deckId: `fallback-${safeSegment(outline.title || 'deck', 48)}`,
+    title: outline.title,
+    subtitle: outline.subtitle,
+    templateSlug: input.selectedTemplateSlug,
+    theme: input.templateProfile.colorScheme,
+    slides,
+    assets: [],
+    createdAt,
+    updatedAt: createdAt,
+  }
+}
+
 function buildTemplateStyleMarkdown(
   selection: HtmlPptStyleProfile,
   prepared: HtmlPptPreparedSelection,
@@ -339,8 +725,10 @@ function buildTemplateStyleMarkdown(
     `selectedTemplateSlug: ${prepared.selectedTemplateSlug}`,
     `candidateTemplateSlugs: ${prepared.candidateTemplateSlugs.join(', ')}`,
     `fallbackUsed: ${prepared.fallbackUsed}`,
+    `qualityMode: ${options.qualityMode}`,
     `enableImages: ${options.enableImages}`,
     `maxImages: ${options.maxImages}`,
+    `imageMode: ${!options.enableImages || options.maxImages <= 0 ? 'none' : 'planned'}`,
     '',
     '## Visual Direction',
     ...selection.visualDirection.map((item) => `- ${item}`),
@@ -357,6 +745,14 @@ function buildTemplateStyleMarkdown(
     '- 不安装依赖',
     '- 不读取任何 template.html',
     '- 只输出到 output/index.html',
+    ...(!options.enableImages || options.maxImages <= 0
+      ? [
+        '- 无图模式：不要生成 img、figure、image placeholder、visual placeholder、media placeholder、SVG 图片占位或空白图片框',
+        '- 无图模式：只选择纯文本 / 列表 / 数据 / 流程 / 结论类布局，并让文本区域占满可用空间',
+      ]
+      : [
+        `- 图片模式：最多 ${options.maxImages} 张图片，图片区必须是明确 visual slot，不要堆叠到正文上`,
+      ]),
   ].join('\n')
 }
 
@@ -368,12 +764,14 @@ function formatSkillPrepareLog(
   options: HtmlPresentationJobOptions,
 ): string {
   const lines = [
+    `requestedTemplateSlug: ${options.templateSlug || ''}`,
     `selectedStyleId: ${selection.styleId}`,
     `selectedStyleReason: ${selection.reason}`,
     `inspirationTemplates: ${selection.inspirationTemplates.join(', ')}`,
     `selectedTemplateSlug: ${prepared.selectedTemplateSlug}`,
+    `templateSelectionFallbackUsed: ${prepared.fallbackUsed}`,
     `candidateTemplateSlugs: ${prepared.candidateTemplateSlugs.join(', ')}`,
-    `fallbackUsed: ${prepared.fallbackUsed}`,
+    'fallbackUsed: false',
     `imagePlanningEnabled: ${options.enableImages}`,
     `maxImages: ${options.maxImages}`,
     'templateHtmlSkipped: true',
@@ -564,18 +962,25 @@ function tryMaterializeFallbackOutput(job: ArtifactJobRecord): boolean {
   return false
 }
 
-function runOpenCode(job: ArtifactJobRecord, repairOnly = false): Promise<void> {
+function runOpenCode(job: ArtifactJobRecord, abortController: AbortController, repairOnly = false): Promise<OpenCodeExecutionResult> {
   return new Promise((resolve, reject) => {
     if (!fs.existsSync(OPENCODE_BIN)) {
       reject(new Error(`未找到 OpenCode 可执行文件：${OPENCODE_BIN}`))
       return
     }
+    assertArtifactJobNotCanceled(job.id, repairOnly ? 'opencode-repair-start' : 'opencode-start')
 
     const attachments = buildOpenCodeAttachments(job)
+    const timeoutConfig = getOpenCodeTimeoutConfig(job)
+    logHtmlArtifactTask(job, {
+      status: repairOnly ? 'repairing-output' : 'running',
+      timeoutMs: timeoutConfig.timeoutMs,
+    })
     appendLog(
       job.logPath,
       `[${new Date().toISOString()}] Starting OpenCode in ${job.jobDir}${repairOnly ? ' (repair)' : ''}\n`
-      + `[${new Date().toISOString()}] Attached files:\n${attachments.map((filePath) => `- ${path.relative(job.jobDir, filePath)}`).join('\n')}\n`,
+      + `[${new Date().toISOString()}] Attached files:\n${attachments.map((filePath) => `- ${path.relative(job.jobDir, filePath)}`).join('\n')}\n`
+      + `[${new Date().toISOString()}] OpenCode timeout budget=${timeoutConfig.timeoutMs}ms fallbackAfter=${timeoutConfig.fallbackAfterMs}ms\n`,
     )
 
     const args = ['run', '--pure', '--dir', job.jobDir]
@@ -591,26 +996,51 @@ function runOpenCode(job: ArtifactJobRecord, repairOnly = false): Promise<void> 
         cwd: job.jobDir,
         env: { ...process.env },
         stdio: ['ignore', 'pipe', 'pipe'],
+        detached: process.platform === 'linux',
       },
     )
 
+    updateArtifactJob(job.id, {
+      runnerPid: child.pid,
+      runnerProcessGroupId: process.platform === 'linux' ? child.pid : undefined,
+      cancellable: true,
+      currentPhase: repairOnly ? 'repairing-output' : 'opencode',
+      message: repairOnly ? '正在修复输出路径…' : '正在调用 OpenCode 生成 HTML Artifact…',
+    })
+
+    registerArtifactJobRuntime(job.id, {
+      abortController,
+      terminate: (reason) => {
+        appendLog(job.logPath, `[${new Date().toISOString()}] terminating runner: ${reason}\n`)
+        killProcessTree(child.pid, reason)
+      },
+    })
+
     let finished = false
     let timedOut = false
+    let canceled = abortController.signal.aborted
 
     const settle = (callback: () => void) => {
       if (finished) return
       finished = true
+      clearArtifactJobRuntime(job.id)
       callback()
     }
 
     const timeout = setTimeout(() => {
       timedOut = true
-      appendLog(job.logPath, `\n[${new Date().toISOString()}] OpenCode timeout after 120 seconds\n`)
-      child.kill('SIGTERM')
-      setTimeout(() => {
-        if (!finished) child.kill('SIGKILL')
-      }, 5_000).unref()
-    }, OPENCODE_TIMEOUT_MS)
+      appendLog(job.logPath, `\n[${new Date().toISOString()}] OpenCode timeout after ${timeoutConfig.fallbackAfterMs} ms\n`)
+      killProcessTree(child.pid, 'timeout')
+    }, timeoutConfig.fallbackAfterMs)
+
+    const handleAbort = () => {
+      canceled = true
+      appendLog(job.logPath, `[${new Date().toISOString()}] abort signal received\n`)
+      killProcessTree(child.pid, job.cancelReason || 'user_cancelled')
+    }
+
+    if (abortController.signal.aborted) handleAbort()
+    else abortController.signal.addEventListener('abort', handleAbort, { once: true })
 
     const writeChunk = (chunk: Buffer | string) => {
       appendLog(job.logPath, typeof chunk === 'string' ? chunk : chunk.toString('utf-8'))
@@ -621,22 +1051,116 @@ function runOpenCode(job: ArtifactJobRecord, repairOnly = false): Promise<void> 
 
     child.on('error', (error) => {
       clearTimeout(timeout)
+      abortController.signal.removeEventListener('abort', handleAbort)
       settle(() => reject(error))
     })
 
     child.on('close', (code, signal) => {
       clearTimeout(timeout)
+      abortController.signal.removeEventListener('abort', handleAbort)
+      updateArtifactJob(job.id, {
+        runnerPid: undefined,
+        runnerProcessGroupId: undefined,
+      })
+      if (canceled || abortController.signal.aborted) {
+        settle(() => reject(new ArtifactJobCanceledError(job.cancelReason || 'Artifact job canceled')))
+        return
+      }
       if (timedOut) {
-        settle(() => reject(new Error('OpenCode 执行超时（120 秒）')))
+        settle(() => reject(new OpenCodeTimeoutError(timeoutConfig.fallbackAfterMs)))
         return
       }
       if (code !== 0) {
         settle(() => reject(new Error(`OpenCode 执行失败（exit=${code ?? 'null'}, signal=${signal ?? 'none'}）`)))
         return
       }
-      settle(resolve)
+      settle(() => resolve(timeoutConfig))
     })
   })
+}
+
+function isOpenCodeTimeoutError(error: unknown): error is OpenCodeTimeoutError {
+  return error instanceof OpenCodeTimeoutError
+}
+
+function createTimeoutFallbackArtifact(job: ArtifactJobRecord, timeoutError: OpenCodeTimeoutError): HtmlPresentationJobSummary {
+  const inputMarkdown = fs.readFileSync(job.inputPath, 'utf-8')
+  const options = normalizeHtmlPresentationJobOptions(job.htmlPresentationOptions)
+  const styleSelection = chooseHtmlPptStyle(job.prompt, inputMarkdown)
+  const templateSelection = resolveTemplateSelection({
+    prompt: job.prompt,
+    inputMarkdown,
+    options,
+  })
+  const contentModel = buildServerFallbackContentModel({
+    prompt: job.prompt,
+    inputMarkdown,
+    selectedTemplateSlug: templateSelection.selectedTemplateSlug,
+    templateProfile: templateSelection.templateProfile,
+  })
+  const templateFile = resolveBeautifulTemplateFile(templateSelection.selectedTemplateSlug) || templateSelection.templateProfile.templateFile
+  const renderResult = renderHtmlPresentationFromContentModel({
+    contentModel,
+    templateProfile: {
+      ...templateSelection.templateProfile,
+      templateFile,
+    },
+    artifactId: '',
+  })
+  const profile: TemplateProfileRecord = {
+    ...templateSelection.templateProfile,
+    templateFile,
+    rendererMode: renderResult.rendererMode,
+    warning: renderResult.warning,
+  }
+  const outputDir = path.join(job.jobDir, 'output')
+  const candidatePayload = {
+    selectedTemplateSlug: templateSelection.selectedTemplateSlug,
+    fallbackUsed: templateSelection.fallbackUsed,
+    candidates: templateSelection.candidateTemplates,
+  }
+  fs.mkdirSync(outputDir, { recursive: true })
+  fs.writeFileSync(job.outputPath, renderResult.html, 'utf-8')
+  fs.writeFileSync(path.join(outputDir, 'content-model.json'), JSON.stringify(contentModel, null, 2), 'utf-8')
+  fs.writeFileSync(path.join(outputDir, 'template-profile.json'), JSON.stringify(profile, null, 2), 'utf-8')
+  fs.writeFileSync(path.join(outputDir, 'candidate-templates.json'), JSON.stringify(candidatePayload, null, 2), 'utf-8')
+
+  const warningLines = [
+    `PPT 已生成，但 OpenCode 在 ${Math.round(timeoutError.timeoutMs / 1000)} 秒内未完成，已使用快速备用渲染器完成初稿。`,
+  ]
+  if (renderResult.warning) warningLines.push(renderResult.warning)
+  const warning = warningLines.join(' ')
+
+  appendLog(
+    job.logPath,
+    [
+      '',
+      `[${new Date().toISOString()}] opencode_timeout=true`,
+      `[${new Date().toISOString()}] fallbackUsed=true`,
+      `[${new Date().toISOString()}] fallbackRenderer=server`,
+      `[${new Date().toISOString()}] timeoutMs=${timeoutError.timeoutMs}`,
+      `[${new Date().toISOString()}] requestedTemplateSlug=${options.templateSlug || ''}`,
+      `[${new Date().toISOString()}] selectedTemplateSlug=${templateSelection.selectedTemplateSlug}`,
+      `[${new Date().toISOString()}] selectedStyleId=${styleSelection.styleId}`,
+      `[${new Date().toISOString()}] rendererMode=${renderResult.rendererMode}`,
+      `[${new Date().toISOString()}] imagePlanningEnabled=${String(options.enableImages)}`,
+      `[${new Date().toISOString()}] maxImages=${options.maxImages}`,
+      renderResult.warning ? `[${new Date().toISOString()}] warning=${renderResult.warning}` : '',
+    ].filter(Boolean).join('\n') + '\n',
+  )
+
+  return {
+    message: 'HTML Artifact 生成完成（已使用快速备用渲染器）',
+    warning,
+    fallbackUsed: true,
+    fallbackRenderer: 'server',
+    opencodeTimedOut: true,
+    timeoutMs: timeoutError.timeoutMs,
+    requestedTemplateSlug: options.templateSlug || '',
+    selectedTemplateSlug: templateSelection.selectedTemplateSlug,
+    selectedStyleId: styleSelection.styleId,
+    rendererMode: renderResult.rendererMode,
+  }
 }
 
 export function prepareArtifactJobWorkspace(input: {
@@ -716,11 +1240,59 @@ export function recordArtifactJobFailure(job: ArtifactJobRecord, message: string
 export async function runHtmlArtifactJob(job: ArtifactJobRecord): Promise<{
   artifactId: string
   artifactFileUrl: string
+  message?: string
+  warning?: string
+  fallbackUsed?: boolean
+  fallbackRenderer?: string
+  opencodeTimedOut?: boolean
+  timeoutMs?: number
+  requestedTemplateSlug?: string
+  selectedTemplateSlug?: string
+  selectedStyleId?: string
+  rendererMode?: string
 }> {
+  const abortController = new AbortController()
+  let jobSummary: HtmlPresentationJobSummary = {}
+  const startedAt = Date.now()
+
   try {
-    await runOpenCode(job)
+    markJobPhase(job.id, 'opencode', '正在调用 OpenCode 生成 HTML Artifact…')
+    await runOpenCode(job, abortController)
   } catch (error) {
-    if (!tryMaterializeFallbackOutput(job)) {
+    if (isArtifactJobCanceledError(error)) {
+      markPartialOutput(job)
+      throw error
+    }
+    if (job.skillId === HTML_PPT_BEAUTIFUL_SKILL_ID && isOpenCodeTimeoutError(error)) {
+      assertArtifactJobNotCanceled(job.id, 'timeout-fallback')
+      markJobPhase(job.id, 'postprocess', 'OpenCode 超时，正在切换备用渲染器…')
+      updateArtifactJob(job.id, {
+        opencodeTimedOut: true,
+        timeoutMs: error.timeoutMs,
+      })
+      try {
+        jobSummary = createTimeoutFallbackArtifact(job, error)
+      } catch (fallbackError) {
+        markPartialOutput(job)
+        const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
+        throw new Error(
+          `OpenCode 在 ${Math.round(error.timeoutMs / 1000)} 秒内未完成。系统已尝试备用渲染，但未成功：${fallbackMessage}`,
+        )
+      }
+      updateArtifactJob(job.id, {
+        warning: jobSummary.warning,
+        fallbackUsed: jobSummary.fallbackUsed,
+        fallbackRenderer: jobSummary.fallbackRenderer,
+        opencodeTimedOut: jobSummary.opencodeTimedOut,
+        timeoutMs: jobSummary.timeoutMs,
+        requestedTemplateSlug: jobSummary.requestedTemplateSlug,
+        selectedTemplateSlug: jobSummary.selectedTemplateSlug,
+        selectedStyleId: jobSummary.selectedStyleId,
+        rendererMode: jobSummary.rendererMode,
+        message: jobSummary.message,
+      })
+    } else if (!tryMaterializeFallbackOutput(job)) {
+      markPartialOutput(job)
       const message = error instanceof Error ? error.message : String(error)
       const detailedMessage = job.skillId === HTML_PPT_BEAUTIFUL_SKILL_ID
         ? buildHtmlPptFailureMessage(
@@ -734,14 +1306,18 @@ export async function runHtmlArtifactJob(job: ArtifactJobRecord): Promise<{
     }
   }
 
-  if (!tryMaterializeFallbackOutput(job)) {
+  assertArtifactJobNotCanceled(job.id, 'after-opencode')
+
+  if (!jobSummary.fallbackUsed && !tryMaterializeFallbackOutput(job)) {
     const firstPassTail = readLogTail(job.logPath)
     if (job.skillId === HTML_PPT_BEAUTIFUL_SKILL_ID && isContextLimitError(firstPassTail)) {
       throw new Error(buildHtmlPptFailureMessage(job, 'OpenCode context length exceeded'))
     }
 
     appendLog(job.logPath, `\n[${new Date().toISOString()}] Missing output/index.html after first pass, retrying once with repair prompt\n`)
-    await runOpenCode(job, true).catch((error) => {
+    markJobPhase(job.id, 'repairing-output', '正在修复输出路径…')
+    await runOpenCode(job, abortController, true).catch((error) => {
+      if (isArtifactJobCanceledError(error)) throw error
       if (!tryMaterializeFallbackOutput(job)) {
         const message = error instanceof Error ? error.message : String(error)
         const detailedMessage = job.skillId === HTML_PPT_BEAUTIFUL_SKILL_ID
@@ -757,6 +1333,7 @@ export async function runHtmlArtifactJob(job: ArtifactJobRecord): Promise<{
     })
   }
 
+  assertArtifactJobNotCanceled(job.id, 'before-final-check')
   tryMaterializeFallbackOutput(job)
   ensureOutputFile(job.outputPath)
 
@@ -782,33 +1359,58 @@ export async function runHtmlArtifactJob(job: ArtifactJobRecord): Promise<{
           }
         })()
 
-    const postProcessed = postProcessHtmlPresentationOutput({
-      jobId: job.id,
-      outputDir: path.join(job.jobDir, 'output'),
-      htmlPath: job.outputPath,
-      title: titleFromPrompt(job.prompt),
-      templateProfile,
-      candidateTemplates: candidatePayload.candidates,
-      selectedTemplateSlug: candidatePayload.selectedTemplateSlug,
-      fallbackUsed: candidatePayload.fallbackUsed,
-      options,
-    })
+    if (!jobSummary.fallbackUsed) {
+      markJobPhase(job.id, 'postprocess', '正在注入模板与编辑运行时…')
+      const postProcessed = postProcessHtmlPresentationOutput({
+        jobId: job.id,
+        outputDir: path.join(job.jobDir, 'output'),
+        htmlPath: job.outputPath,
+        title: titleFromPrompt(job.prompt),
+        templateProfile,
+        candidateTemplates: candidatePayload.candidates,
+        selectedTemplateSlug: candidatePayload.selectedTemplateSlug,
+        fallbackUsed: candidatePayload.fallbackUsed,
+        options,
+        assertNotCanceled: () => assertArtifactJobNotCanceled(job.id, 'postprocess'),
+      })
 
-    appendLog(
-      job.logPath,
-      [
-        '',
-        `[${new Date().toISOString()}] selectedTemplateSlug=${postProcessed.selectedTemplateSlug}`,
-        `[${new Date().toISOString()}] candidateTemplateSlugs=${postProcessed.candidateTemplateSlugs.join(',')}`,
-        `[${new Date().toISOString()}] fallbackUsed=${String(postProcessed.fallbackUsed)}`,
-        `[${new Date().toISOString()}] imagePlanningEnabled=${String(postProcessed.imagePlanningEnabled)}`,
-        `[${new Date().toISOString()}] plannedImageCount=${postProcessed.plannedImageCount}`,
-        `[${new Date().toISOString()}] generatedImageCount=${postProcessed.generatedImageCount}`,
-        `[${new Date().toISOString()}] placeholderCount=${postProcessed.placeholderCount}`,
-      ].join('\n'),
-    )
+      appendLog(
+        job.logPath,
+        [
+          '',
+          `[${new Date().toISOString()}] requestedTemplateSlug=${options.templateSlug || ''}`,
+          `[${new Date().toISOString()}] selectedTemplateSlug=${postProcessed.selectedTemplateSlug}`,
+          `[${new Date().toISOString()}] candidateTemplateSlugs=${postProcessed.candidateTemplateSlugs.join(',')}`,
+          `[${new Date().toISOString()}] templateSelectionFallbackUsed=${String(postProcessed.fallbackUsed)}`,
+          `[${new Date().toISOString()}] fallbackUsed=${String(jobSummary.fallbackUsed ?? false)}`,
+          `[${new Date().toISOString()}] qualityMode=${options.qualityMode}`,
+          `[${new Date().toISOString()}] imagePlanningEnabled=${String(postProcessed.imagePlanningEnabled)}`,
+          `[${new Date().toISOString()}] plannedImageCount=${postProcessed.plannedImageCount}`,
+          `[${new Date().toISOString()}] generatedImageCount=${postProcessed.generatedImageCount}`,
+          `[${new Date().toISOString()}] placeholderCount=${postProcessed.placeholderCount}`,
+        ].join('\n'),
+      )
+    }
+
+    if (!jobSummary.selectedTemplateSlug) {
+      jobSummary = {
+        ...jobSummary,
+        requestedTemplateSlug: options.templateSlug || '',
+        selectedTemplateSlug: candidatePayload.selectedTemplateSlug,
+        selectedStyleId: chooseHtmlPptStyle(job.prompt, fs.readFileSync(job.inputPath, 'utf-8')).styleId,
+        rendererMode: templateProfile.rendererMode,
+      }
+    }
   }
 
+  markJobPhase(job.id, 'final-check', '正在完成最终检查…')
+  const finalCheckWarning = await runFinalCheck(job)
+  if (finalCheckWarning) {
+    appendLog(job.logPath, `[${new Date().toISOString()}] warning: ${finalCheckWarning}\n`)
+  }
+
+  assertArtifactJobNotCanceled(job.id, 'before-artifact-create')
+  markJobPhase(job.id, 'finalizing', '正在写入预览产物…')
   const artifact = createHtmlArtifact({
     userId: job.userId,
     jobId: job.id,
@@ -825,6 +1427,7 @@ export async function runHtmlArtifactJob(job: ArtifactJobRecord): Promise<{
     ],
   })
 
+  assertArtifactJobNotCanceled(job.id, 'before-user-file-mirror')
   try {
     const workspace = bootstrapWorkspaceForUser(job.userId)
     const stem = sanitizeFileStem(titleFromPrompt(job.prompt))
@@ -839,10 +1442,19 @@ export async function runHtmlArtifactJob(job: ArtifactJobRecord): Promise<{
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     console.warn(`[html-artifact-mirror] failed for job ${job.id}: ${message}`)
+  } finally {
+    clearArtifactJobRuntime(job.id)
   }
+
+  logHtmlArtifactTask(job, {
+    status: 'succeeded',
+    timeoutMs: jobSummary.timeoutMs ?? HTML_PPT_TIMEOUT_MS,
+    elapsedMs: Date.now() - startedAt,
+  })
 
   return {
     artifactId: artifact.id,
     artifactFileUrl: `/api/artifacts/${artifact.id}/file`,
+    ...jobSummary,
   }
 }

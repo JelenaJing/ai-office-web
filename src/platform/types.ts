@@ -34,6 +34,10 @@ export interface FileEntry {
   mimeType: string
   size: number
   uploadedAt: string
+  sourceArtifactId?: string
+  generated?: boolean
+  documentId?: string
+  artifactId?: string
 }
 
 export interface ArtifactExport {
@@ -249,6 +253,8 @@ export interface PlatformApi {
   artifacts: {
     /** Lists all AI-generated artifacts for the current user. */
     list(): Promise<Artifact[]>
+    /** Fetches artifact metadata by id. */
+    get(artifactId: string): Promise<Artifact>
     /** Downloads an artifact via fetch+blob (sends Authorization header). */
     download(artifactId: string, filename: string): Promise<void>
     /** Deletes an artifact by id. */

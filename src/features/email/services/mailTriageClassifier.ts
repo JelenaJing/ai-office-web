@@ -25,6 +25,7 @@ import type {
   EmailTimeIntent,
 } from '../../../types/mailTriage'
 import { computeBodyHash } from './mailTriageCache'
+import { getMailKey } from '../utils/mailIdentity'
 import { stripThinkTags } from '../../../utils/StreamThinkFilter'
 import { inferRelativeChineseDateTimeFromText } from '../../../calendar/chineseDateTimeParser'
 import { isWebShim } from '../../../platform/detect'
@@ -899,7 +900,10 @@ function baseResult(
   overrides: Partial<AiMailTriageResult>,
 ): AiMailTriageResult {
   const result: AiMailTriageResult = {
-    messageId: mail.id,
+    mailId: mail.id,
+    messageId: mail.messageId,
+    sourceMailKey: mail.mailKey || getMailKey(mail),
+    mailKey: mail.mailKey || getMailKey(mail),
     threadId: mail.threadId,
     accountId,
     bodyHash: computeBodyHash(mail.body),
@@ -1165,7 +1169,10 @@ function parseLLMResponse(
         : undefined
 
     return enrichResult(mail, {
-      messageId: mail.id,
+      mailId: mail.id,
+      messageId: mail.messageId,
+      sourceMailKey: mail.mailKey || getMailKey(mail),
+      mailKey: mail.mailKey || getMailKey(mail),
       threadId: mail.threadId,
       accountId,
       bodyHash,

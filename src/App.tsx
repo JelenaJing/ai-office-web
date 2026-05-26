@@ -44,6 +44,9 @@ import { DISABLE_FORCE_PASSWORD_CHANGE } from './config'
 import { DEFAULT_APP_ROUTE } from './config/productFeatures'
 import { bootstrapHandoffEntry, clearHandoffQueryFromLocation, readHandoffIdFromLocation } from './services/handoffBootstrap'
 import { peekPendingDocumentHandoff } from './services/pendingDocumentHandoff'
+import { setPendingResourceOpen } from './services/pendingResourceOpen'
+import { resolveArtifactOpenKind } from './services/openResourceIntent'
+import type { Artifact, FileEntry } from './platform/types'
 
 const WEB_SECTION_ROUTE_MAP: Partial<Record<PrimarySection, string>> = {
   home: '/home',
@@ -274,7 +277,8 @@ const ScenarioArea = styled.div`
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 `
 
 const SettingsEntryBtn = styled.button<{ $active?: boolean }>`
@@ -553,7 +557,7 @@ function WriterWorkspaceRuntime({
   closeWorkspace,
   markdown,
 }: WriterWorkspaceRuntimeProps) {
-  const { mode, currentMode, generationMode, enterFreeMode } = useWorkspaceMode()
+  const { mode, currentMode, generationMode, enterFreeMode, enterPptGenerationMode } = useWorkspaceMode()
   const { generationStatus } = useGenerationWorkbench()
   const { departments, selectedDepartmentId, selectDepartment, loading: deptLoading } = useDepartment()
   const { activeWorkspaceName } = useWorkspace()
@@ -572,12 +576,57 @@ function WriterWorkspaceRuntime({
     setPrimarySection('workspace')
   }, [primarySection])
 
+  const handleOpenResourceFile = useCallback((file: FileEntry) => {
+    if (file.ext === 'pptx' && file.sourceArtifactId) {
+      setPendingResourceOpen({ kind: 'html-ppt-artifact', artifactId: file.sourceArtifactId })
+      setReturnToScene(primarySection)
+      setPrimarySection('html-ppt')
+      return
+    }
+    setPendingResourceOpen({ kind: 'document-file', fileId: file.id })
+    enterFreeMode()
+    goToWorkspace()
+  }, [enterFreeMode, goToWorkspace, primarySection])
+
+  const handleOpenResourceArtifact = useCallback((artifact: Artifact) => {
+    const openKind = resolveArtifactOpenKind(artifact)
+    const meta = artifact.metadata as Record<string, unknown> | undefined
+    if (openKind === 'html-ppt') {
+      setPendingResourceOpen({ kind: 'html-ppt-artifact', artifactId: artifact.id })
+      setReturnToScene(primarySection)
+      setPrimarySection('html-ppt')
+      return
+    }
+    if (openKind === 'ppt') {
+      enterPptGenerationMode()
+      setPendingResourceOpen({
+        kind: 'ppt-artifact',
+        artifactId: artifact.id,
+        deckId: typeof meta?.deckId === 'string' ? meta.deckId : undefined,
+      })
+      goToWorkspace()
+      return
+    }
+    setPendingResourceOpen({ kind: 'document-artifact', artifactId: artifact.id })
+    enterFreeMode()
+    goToWorkspace()
+  }, [enterFreeMode, enterPptGenerationMode, goToWorkspace, primarySection])
+
   useEffect(() => {
     if (!peekPendingDocumentHandoff()) return
     enterFreeMode()
     setReturnToScene(primarySection)
     setPrimarySection('workspace')
   }, [enterFreeMode, primarySection])
+
+  useEffect(() => {
+    const handler = () => {
+      setReturnToScene(primarySection)
+      setPrimarySection('html-ppt')
+    }
+    window.addEventListener('ai-office-open-report', handler)
+    return () => window.removeEventListener('ai-office-open-report', handler)
+  }, [primarySection])
   const [outputPanelOpen, setOutputPanelOpen] = useState(false)
   const [outputEntries, setOutputEntries] = useState<RuntimeOutputEntry[]>([])
   const [latestAiStep, setLatestAiStep] = useState<number | null>(null)
@@ -867,7 +916,11 @@ function WriterWorkspaceRuntime({
           )}
           {primarySection === 'resource' && (
             <ScenarioArea>
-              <ResourceWorkspace onGoToWorkspace={goToWorkspace} />
+              <ResourceWorkspace
+                onGoToWorkspace={goToWorkspace}
+                onOpenFile={handleOpenResourceFile}
+                onOpenArtifact={handleOpenResourceArtifact}
+              />
             </ScenarioArea>
           )}
           {primarySection === 'chat' && (
@@ -906,7 +959,7 @@ function WriterWorkspaceRuntime({
                   新建文稿
                 </WorkspaceActionBtn>
               ) : null}
-              {generationMode === 'ppt' ? (
+              {mode !== 'free' && generationMode === 'ppt' ? (
                 <WorkspaceActionBtn
                   type="button"
                   onClick={() => window.dispatchEvent(new CustomEvent('workspace-new-ppt'))}

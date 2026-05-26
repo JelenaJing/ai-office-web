@@ -1,0 +1,73 @@
+.resizable-panel {
+  position: relative;
+  display: flex;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.resizable-panel-left {
+  border-right: 1px solid #e0e0e0;
+}
+
+.resizable-panel-right {
+  border-left: 1px solid #e0e0e0;
+}
+
+.resizable-panel-content {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 10;
+  background: transparent;
+  transition: background-color 0.15s;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.resize-handle-left {
+  right: -3px;
+  left: auto;
+}
+
+.resize-handle-right {
+  left: -3px;
+  right: auto;
+}
+
+.resize-handle:hover {
+  background: rgba(24, 144, 255, 0.3);
+}
+
+.resize-handle.resizing {
+  background: #1890ff;
+  width: 6px;
+  box-shadow: 0 0 4px rgba(24, 144, 255, 0.5);
+}
+
+/* 拖拽时的视觉反馈 */
+body.resizing {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+body.resizing * {
+  cursor: col-resize !important;
+}
+
+/* 确保拖拽手柄始终可见且可交互 */
+.resizable-panel {
+  position: relative;
+}
+
+.resizable-panel:hover .resize-handle {
+  background: rgba(24, 144, 255, 0.2);
+}

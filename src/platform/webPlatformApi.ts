@@ -28,6 +28,7 @@ import {
   readCurrentWorkspaceState,
 } from '../services/workspaceBootstrapClient'
 import { resolveWebApiUrl } from '../runtime/apiBase'
+import { DEFAULT_TASK_POLL_INTERVAL_MS, TASK_TIMEOUTS } from '../constants/taskTimeouts'
 
 // ── Token storage ─────────────────────────────────────────────────────────────
 // Check all known token keys so that sessions created by the legacy login flow
@@ -292,6 +293,12 @@ export const webPlatformApi: PlatformApi = {
     async delete(artifactId: string): Promise<void> {
       await apiFetch<void>(`/api/artifacts/${artifactId}`, { method: 'DELETE' })
     },
+
+    async get(artifactId: string): Promise<Artifact> {
+      const data = await apiFetch<{ artifact: Artifact }>(`/api/artifacts/${encodeURIComponent(artifactId)}`)
+      if (!data.artifact) throw new Error('未找到生成记录')
+      return data.artifact
+    },
   },
 
   // ── excel ───────────────────────────────────────────────────────────────────
@@ -325,8 +332,9 @@ export const webPlatformApi: PlatformApi = {
       }
 
       let result: { artifactId?: string; artifact?: Artifact; summary?: string; imageUrls?: string[] } | null = null
-      for (let i = 0; i < 120; i++) {
-        await new Promise((resolve) => setTimeout(resolve, 1500))
+      const maxPollAttempts = Math.ceil(TASK_TIMEOUTS.default / DEFAULT_TASK_POLL_INTERVAL_MS)
+      for (let i = 0; i < maxPollAttempts; i++) {
+        await new Promise((resolve) => setTimeout(resolve, DEFAULT_TASK_POLL_INTERVAL_MS))
         const task = await apiFetch<{
           success: boolean
           status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
@@ -352,7 +360,7 @@ export const webPlatformApi: PlatformApi = {
       }
 
       if (!result) {
-        throw new Error('表格分析任务超时：分析时间过长，请重试。')
+        throw new Error(`表格分析任务超时：${Math.round(TASK_TIMEOUTS.default / 1000)} 秒内未完成。触发了前端轮询超时，请重试。`)
       }
       const artifactId = result.artifactId ?? result.artifact?.id
       if (!artifactId) {

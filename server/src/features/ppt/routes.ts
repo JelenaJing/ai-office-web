@@ -34,6 +34,7 @@ import { generateSlidevHtmlPreview } from './services/slidevHtmlPreview'
 import { compileDeckToSlidevMarkdown } from './services/slidevMarkdownCompiler'
 import type { WebDeckDocument, WebDeckSlide, WebDeckTaskResult, PptEngine, PptOutputMode } from './types'
 import { assertWorkspaceAccess, WorkspaceAccessError } from '../../lib/workspaceAccess'
+import { resolveTaskTimeoutMs } from '../../lib/taskTimeouts'
 
 const router = Router()
 const nodeRequire = createRequire(__filename)
@@ -304,10 +305,13 @@ router.post('/decks/start', async (req, res) => {
     : (requestedOutputMode === 'editable_pptx' ? 'editable_pptx' : defaultOutputMode === 'editable_pptx' ? 'editable_pptx' : 'editable_pptx')
 
   const task = createDeckTask()
+  const timeoutMs = resolveTaskTimeoutMs(activeEngine === 'slidev' ? 'deck' : 'ppt')
   console.info('[ppt-runtime] route=/api/ppt/decks/start')
   console.info(`[ppt-runtime] engine=${activeEngine}`)
   console.info(`[ppt-runtime] outputMode=${activeOutputMode}`)
   console.info(`[ppt-runtime] taskId=${task.taskId}`)
+  console.info(`[ppt-runtime] timeoutMs=${timeoutMs}`)
+  console.info(`[ppt-runtime] startedAt=${new Date(task.createdAt).toISOString()}`)
   console.info(`[ppt-runtime] skillId=${activeEngine === 'minimax_pptx_generator' ? 'minimax.pptx-generator' : activeEngine === 'slidev' ? 'web.ppt.slidev' : 'web.ppt.deck.create'}`)
   console.info(`[ppt-runtime] usingMinimaxSkill=${activeEngine === 'minimax_pptx_generator'}`)
   updateDeckTask(task.taskId, { status: 'running', message: '正在启动 PPT DeckDocument 任务…', progress: 5 })

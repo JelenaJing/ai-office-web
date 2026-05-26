@@ -31,6 +31,13 @@ export interface RetemplateResult {
   }
 }
 
+export interface RenderHtmlPresentationResult {
+  html: string
+  rendererMode: TemplateProfileRecord['rendererMode']
+  fallbackUsed: boolean
+  warning?: string
+}
+
 function artifactIdFromDir(artifactDir: string): string {
   return path.basename(artifactDir)
 }
@@ -61,6 +68,13 @@ function visualPlacement(slide: ContentModelSlide): NonNullable<ContentModelSlid
   return slide.visual?.placement ?? visualBlock(slide)?.placement ?? 'right'
 }
 
+function templateSlideClassNames(templateHtml: string): string[] {
+  const matches = Array.from(templateHtml.matchAll(/<(?:section|div)\b[^>]*class=(["'])([^"']*\bslide\b[^"']*)\1[^>]*>/gi))
+  return matches
+    .map((match) => match[2].trim())
+    .filter((className) => /\bslide\b/.test(className) && !/\bslides\b|\bslide-counter\b|\bslides-container\b/.test(className))
+}
+
 function renderVisual(slide: ContentModelSlide, artifactId: string, fallbackPlacement?: ContentModelSlide['visual']['placement']): string {
   const block = visualBlock(slide)
   if (!block?.assetPath) return ''
@@ -74,6 +88,46 @@ function renderVisual(slide: ContentModelSlide, artifactId: string, fallbackPlac
 function renderTextBlock(tag: string, blockId: string, role: string, text: string, className = ''): string {
   const cls = className ? ` class="${className}"` : ''
   return `<${tag}${cls} data-block-id="${blockId}" data-block-type="text" data-block-role="${role}">${escapeHtml(text)}</${tag}>`
+}
+
+function renderGenericBeautifulTemplateSlide(
+  slide: ContentModelSlide,
+  index: number,
+  total: number,
+  artifactId: string,
+  className: string,
+): string {
+  const title = slide.title || `Slide ${index + 1}`
+  const subtitle = slide.subtitle || joinText(bodyTexts(slide).slice(0, 1))
+  const textBlocks = slide.blocks.filter((block) => block.type === 'text')
+  const bodyBlocks = textBlocks.filter((block) => !['title', 'subtitle'].includes(block.role))
+  const titleBlockId = textBlocks.find((block) => block.role === 'title')?.id ?? `${slide.id}-title`
+  const subtitleBlockId = textBlocks.find((block) => block.role === 'subtitle')?.id ?? `${slide.id}-subtitle`
+  const items = (slide.bullets.length > 0 ? slide.bullets : bodyBlocks.map((block) => block.text)).slice(0, 6)
+  const activeClass = index === 0 && !/\b(active|is-active)\b/.test(className) ? ' is-active active' : ''
+  const normalizedClassName = `${className || 'slide'}${activeClass}`.trim()
+  const leftItems = items.slice(0, Math.max(1, Math.ceil(items.length / 2)))
+  const rightItems = items.slice(leftItems.length)
+  const fallbackParagraphs = bodyBlocks
+    .slice(0, 3)
+    .map((block) => `<p data-block-id="${block.id}" data-block-type="text" data-block-role="${block.role}">${escapeHtml(block.text)}</p>`)
+    .join('')
+  const listMarkup = (list: string[], offset: number) => list.length > 0
+    ? `<ul>${list.map((item, itemIndex) => `<li data-block-id="${bodyBlocks[offset + itemIndex]?.id ?? `${slide.id}-item-${offset + itemIndex + 1}`}" data-block-type="text" data-block-role="body">${escapeHtml(item)}</li>`).join('')}</ul>`
+    : fallbackParagraphs
+
+  return `<section class="${escapeAttribute(normalizedClassName)}" data-index="${index}" data-slide-id="${slide.id}" data-aios-has-visual="${visualBlock(slide) ? 'true' : 'false'}" data-aios-visual-placement="${visualPlacement(slide)}">
+    <div class="aios-template-content">
+      <div class="aios-template-kicker">AI OFFICE · ${String(index + 1).padStart(2, '0')} / ${String(total).padStart(2, '0')}</div>
+      ${renderTextBlock(index === 0 ? 'h1' : 'h2', titleBlockId, 'title', title, 'aios-template-title display display-md')}
+      ${subtitle ? renderTextBlock('p', subtitleBlockId, 'subtitle', subtitle, 'aios-template-subtitle') : ''}
+      <div class="aios-template-grid">
+        <div class="aios-template-card"><div class="aios-template-index">${String(index + 1).padStart(2, '0')}</div>${listMarkup(leftItems, 0)}</div>
+        <div class="aios-template-card">${listMarkup(rightItems.length > 0 ? rightItems : bodyBlocks.slice(0, 3).map((block) => block.text), leftItems.length)}</div>
+      </div>
+      ${renderVisual(slide, artifactId, slide.role === 'cover' ? 'hero' : 'card')}
+    </div>
+  </section>`
 }
 
 function renderBlueProfessionalSlide(slide: ContentModelSlide, index: number, total: number, artifactId: string): string {
@@ -232,7 +286,21 @@ function extractSlidesEnvelope(templateHtml: string): { prefix: string; suffix: 
   return null
 }
 
-function renderBeautifulTemplateHtml(input: {
+function extractSectionSlidesEnvelope(templateHtml: string): { prefix: string; suffix: string } | null {
+  const matches = Array.from(templateHtml.matchAll(/<section\b[^>]*class=(["'])[^"']*\bslide\b[^"']*\1[^>]*>[\s\S]*?<\/section>/gi))
+  if (matches.length === 0) return null
+  const first = matches[0]
+  const last = matches[matches.length - 1]
+  const firstIndex = first.index ?? -1
+  const lastIndex = last.index ?? -1
+  if (firstIndex < 0 || lastIndex < 0) return null
+  return {
+    prefix: templateHtml.slice(0, firstIndex),
+    suffix: templateHtml.slice(lastIndex + last[0].length),
+  }
+}
+
+export function renderBeautifulTemplateHtml(input: {
   templateSlug: string
   templateFile: string
   contentModel: ContentModelRecord
@@ -240,18 +308,89 @@ function renderBeautifulTemplateHtml(input: {
 }): string | null {
   const templateHtml = fs.readFileSync(input.templateFile, 'utf-8')
     .replace(/<title>[\s\S]*?<\/title>/i, `<title>${escapeHtml(input.contentModel.title || 'HTML PPT')}</title>`)
-  const envelope = extractSlidesEnvelope(templateHtml)
+  const envelope = extractSlidesEnvelope(templateHtml) ?? extractSectionSlidesEnvelope(templateHtml)
   if (!envelope) return null
+  const classNames = templateSlideClassNames(templateHtml)
   const renderSlide = input.templateSlug === 'bold-poster'
     ? renderBoldPosterSlide
     : input.templateSlug === 'blue-professional'
       ? renderBlueProfessionalSlide
       : null
-  if (!renderSlide) return null
   const slidesHtml = input.contentModel.slides
-    .map((slide, index, allSlides) => renderSlide(slide, index, allSlides.length, input.artifactId))
+    .map((slide, index, allSlides) => {
+      if (renderSlide) return renderSlide(slide, index, allSlides.length, input.artifactId)
+      return renderGenericBeautifulTemplateSlide(
+        slide,
+        index,
+        allSlides.length,
+        input.artifactId,
+        classNames[index % Math.max(1, classNames.length)] ?? 'slide',
+      )
+    })
     .join('\n')
   return `${envelope.prefix}\n${slidesHtml}\n${envelope.suffix}`
+}
+
+export function renderHtmlPresentationFromContentModel(input: {
+  contentModel: ContentModelRecord
+  templateProfile: TemplateProfileRecord
+  artifactId: string
+  currentHtml?: string
+}): RenderHtmlPresentationResult {
+  const templateFile = resolveBeautifulTemplateFile(input.templateProfile.templateSlug) || input.templateProfile.templateFile
+  let html = ''
+  let rendererMode: TemplateProfileRecord['rendererMode'] = 'beautiful-template'
+  let fallbackUsed = false
+  let warning = input.templateProfile.warning?.trim() || ''
+
+  if (templateFile) {
+    const rendered = renderBeautifulTemplateHtml({
+      templateSlug: input.templateProfile.templateSlug,
+      templateFile,
+      contentModel: input.contentModel,
+      artifactId: input.artifactId,
+    })
+    if (rendered) {
+      html = injectEditRuntime(injectSharedStyles(rendered), input.contentModel.deckId || input.contentModel.title || 'deck')
+    } else if (input.currentHtml) {
+      fallbackUsed = true
+      rendererMode = 'html-ppt-beautiful-fallback'
+      warning = warning || '该模板暂不支持精确换肤，已保留当前渲染样式。'
+      html = input.currentHtml
+    }
+  }
+
+  if (!html) {
+    fallbackUsed = true
+    rendererMode = input.currentHtml ? 'html-ppt-beautiful-fallback' : 'generic-fallback'
+    warning = warning || (rendererMode === 'generic-fallback'
+      ? '该模板暂不支持精确换肤，已退回通用渲染。'
+      : '该模板暂不支持精确换肤，已保留当前渲染样式。')
+    html = rendererMode === 'generic-fallback'
+      ? injectEditRuntime(
+        injectSharedStyles(
+          rebuildHtmlPresentationFromContentModel({
+            contentModel: input.contentModel,
+            templateProfile: {
+              ...input.templateProfile,
+              templateFile,
+              rendererMode: 'generic-fallback',
+              warning,
+            },
+            artifactId: input.artifactId,
+          }),
+        ),
+        input.contentModel.deckId || input.contentModel.title || 'deck',
+      )
+      : input.currentHtml || ''
+  }
+
+  return {
+    html,
+    rendererMode,
+    fallbackUsed,
+    warning: warning || undefined,
+  }
 }
 
 export function retemplateHtmlPresentationFromContentModel(input: {
@@ -272,6 +411,7 @@ export function retemplateHtmlPresentationFromContentModel(input: {
       templateSlug: input.nextTemplateSlug,
       enableImages: true,
       maxImages: 3,
+      qualityMode: 'high',
     } satisfies HtmlPresentationJobOptions,
   })
   const artifactId = artifactIdFromDir(input.artifactDir)
@@ -282,63 +422,25 @@ export function retemplateHtmlPresentationFromContentModel(input: {
     theme: selection.templateProfile.colorScheme,
     updatedAt: new Date().toISOString(),
   }
-
-  let html = ''
-  let rendererMode: TemplateProfileRecord['rendererMode'] = 'beautiful-template'
-  let fallbackUsed = false
-  let warning = ''
-
-  if (templateFile) {
-    const rendered = renderBeautifulTemplateHtml({
-      templateSlug: selection.selectedTemplateSlug,
+  const renderResult = renderHtmlPresentationFromContentModel({
+    contentModel: nextContentModel,
+    templateProfile: {
+      ...selection.templateProfile,
       templateFile,
-      contentModel: nextContentModel,
-      artifactId,
-    })
-    if (rendered) {
-      html = injectEditRuntime(injectSharedStyles(rendered), contentModel.deckId || contentModel.title || 'deck')
-    } else {
-      fallbackUsed = true
-      rendererMode = 'html-ppt-beautiful-fallback'
-      warning = '该模板暂不支持精确换肤，已保留当前渲染样式。'
-      html = fs.existsSync(input.outputHtmlPath) ? fs.readFileSync(input.outputHtmlPath, 'utf-8') : ''
-    }
-  }
-
-  if (!html) {
-    fallbackUsed = true
-    rendererMode = fs.existsSync(input.outputHtmlPath) ? 'html-ppt-beautiful-fallback' : 'generic-fallback'
-    warning = warning || (rendererMode === 'generic-fallback'
-      ? '该模板暂不支持精确换肤，已退回通用渲染。'
-      : '该模板暂不支持精确换肤，已保留当前渲染样式。')
-    html = rendererMode === 'generic-fallback'
-      ? injectEditRuntime(
-        injectSharedStyles(
-          rebuildHtmlPresentationFromContentModel({
-            contentModel: nextContentModel,
-            templateProfile: {
-              ...selection.templateProfile,
-              templateFile,
-              rendererMode: 'generic-fallback',
-              warning,
-            },
-            artifactId,
-          }),
-        ),
-        contentModel.deckId || contentModel.title || 'deck',
-      )
-      : fs.readFileSync(input.outputHtmlPath, 'utf-8')
-  }
+    },
+    artifactId,
+    currentHtml: fs.existsSync(input.outputHtmlPath) ? fs.readFileSync(input.outputHtmlPath, 'utf-8') : '',
+  })
 
   const profile: TemplateProfileRecord = {
     ...selection.templateProfile,
     templateFile,
-    rendererMode,
-    warning: warning || undefined,
+    rendererMode: renderResult.rendererMode,
+    warning: renderResult.warning,
   }
 
   fs.mkdirSync(path.dirname(input.outputHtmlPath), { recursive: true })
-  fs.writeFileSync(input.outputHtmlPath, html, 'utf-8')
+  fs.writeFileSync(input.outputHtmlPath, renderResult.html, 'utf-8')
 
   let contentModelSaved = false
   let templateProfileSaved = false
@@ -356,9 +458,9 @@ export function retemplateHtmlPresentationFromContentModel(input: {
     outputPath: input.outputHtmlPath,
     templateSlug: selection.selectedTemplateSlug,
     tokenUsed: false,
-    rendererMode,
-    fallbackUsed,
-    warning: warning || undefined,
+    rendererMode: renderResult.rendererMode,
+    fallbackUsed: renderResult.fallbackUsed,
+    warning: renderResult.warning,
     sidecars: {
       contentModel: contentModelSaved,
       templateProfile: templateProfileSaved,

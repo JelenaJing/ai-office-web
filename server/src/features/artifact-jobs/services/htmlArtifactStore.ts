@@ -12,6 +12,11 @@ export interface HtmlArtifactRecord {
   title: string
   filename: 'index.html'
   createdAt: string
+  metadata?: {
+    pptxExportArtifactId?: string
+    pptxFilename?: string
+    pptxGeneratedAt?: string
+  }
 }
 
 const ARTIFACTS_ROOT = '/data/darebug/aios-artifacts'
@@ -38,6 +43,11 @@ function artifactDir(artifactId: string): string {
 export function getHtmlArtifactDir(artifactId: string): string {
   return artifactDir(artifactId)
 }
+
+function saveHtmlArtifactRecord(record: HtmlArtifactRecord): void {
+  fs.writeFileSync(path.join(artifactDir(record.id), 'artifact.json'), JSON.stringify(record, null, 2), 'utf-8')
+}
+
 export function createHtmlArtifact(input: {
   userId: string
   jobId: string
@@ -74,7 +84,7 @@ export function createHtmlArtifact(input: {
       fs.copyFileSync(path.join(sidecarDirPath, entry.name), path.join(targetDir, entry.name))
     }
   }
-  fs.writeFileSync(path.join(dir, 'artifact.json'), JSON.stringify(artifact, null, 2), 'utf-8')
+  saveHtmlArtifactRecord(artifact)
   return artifact
 }
 
@@ -94,6 +104,24 @@ export function getHtmlArtifactFilePath(artifactId: string): string {
 
 export function getHtmlArtifactSidecarPath(artifactId: string, filename: string): string {
   return path.join(artifactDir(artifactId), filename)
+}
+
+export function updateHtmlArtifact(
+  artifactId: string,
+  patch: Partial<Pick<HtmlArtifactRecord, 'title' | 'metadata'>>,
+): HtmlArtifactRecord | null {
+  const current = getHtmlArtifact(artifactId)
+  if (!current) return null
+  const updated: HtmlArtifactRecord = {
+    ...current,
+    ...patch,
+    metadata: {
+      ...(current.metadata ?? {}),
+      ...(patch.metadata ?? {}),
+    },
+  }
+  saveHtmlArtifactRecord(updated)
+  return updated
 }
 
 const DEFAULT_HTML_ARTIFACT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000

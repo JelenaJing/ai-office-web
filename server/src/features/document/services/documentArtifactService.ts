@@ -16,6 +16,7 @@ export async function saveDocumentDraftDocxArtifact(input: {
   knowledgeRefs: DocumentKnowledgeRef[]
   html?: string
   documentArtifact?: DocumentWorkbenchArtifact
+  userFileId?: string
 }): Promise<{
   artifact: ReturnType<typeof saveSkillArtifact>
   exportUrl: string
@@ -23,6 +24,7 @@ export async function saveDocumentDraftDocxArtifact(input: {
   documentSession: ReturnType<typeof buildDocumentSessionFromDraft>
   html: string
   documentArtifact: DocumentWorkbenchArtifact
+  userFileId?: string
 }> {
   const filename = sanitizeFilename(input.draft.title, 'docx')
   const buffer = await buildDocumentDraftDocxBuffer(input.draft)
@@ -46,6 +48,7 @@ export async function saveDocumentDraftDocxArtifact(input: {
     sourceRefs,
     knowledgeRefs,
     documentId: input.documentId,
+    userFileId: input.userFileId,
   })
   const exportUrl = artifact.exports[0]?.url || `/api/artifacts/${artifact.id}/download`
   const timestamp = new Date().toISOString()
@@ -79,5 +82,6 @@ export async function saveDocumentDraftDocxArtifact(input: {
     }),
     html: documentArtifact.html,
     documentArtifact,
+    userFileId: input.userFileId,
   }
 }

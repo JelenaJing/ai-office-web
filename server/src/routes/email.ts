@@ -24,8 +24,10 @@ import {
 import type { Artifact } from '../artifacts/ArtifactStore'
 import {
   createEmailTriageTask,
+  emptyEmailAnalysisSummary,
   getEmailTriageTask,
   requestEmailTriageCancel,
+  updateEmailTriageTask,
 } from '../features/email/services/emailTriageTaskStore'
 import { runEmailUnreadTriage } from '../features/email/services/emailTriageService'
 import { assertWorkspaceAccess, WorkspaceAccessError } from '../lib/workspaceAccess'
@@ -468,16 +470,96 @@ router.post('/triage/start', async (req, res) => {
     return
   }
 
+  const requestedMails: Array<{
+    mailId: string
+    messageId?: string
+    sourceMailKey?: string
+    accountId?: string
+    folder?: string
+    uid?: string
+    uidValidity?: string
+    subject?: string
+  }> | undefined = Array.isArray(req.body?.requestedMails)
+    ? req.body.requestedMails
+      .filter((item: unknown) => item && typeof item === 'object')
+      .map((item: unknown) => {
+        const record = item as Record<string, unknown>
+        return {
+          mailId: typeof record.mailId === 'string' ? record.mailId.trim() : '',
+          messageId: typeof record.messageId === 'string' ? record.messageId.trim() : undefined,
+          sourceMailKey: typeof record.sourceMailKey === 'string' ? record.sourceMailKey.trim() : undefined,
+          accountId: typeof record.accountId === 'string' ? record.accountId.trim() : undefined,
+          folder: typeof record.folder === 'string' ? record.folder.trim() : undefined,
+          uid: typeof record.uid === 'string' ? record.uid.trim() : undefined,
+          uidValidity: typeof record.uidValidity === 'string' ? record.uidValidity.trim() : undefined,
+          subject: typeof record.subject === 'string' ? record.subject.trim() : undefined,
+        }
+      })
+    : undefined
+  const acceptedRequestedMails = requestedMails?.filter((mail) => mail.mailId) ?? []
+  const skippedRequestedMails = Math.max(0, (requestedMails?.length ?? 0) - acceptedRequestedMails.length)
+  const requestedMessageIds = Array.isArray(req.body?.messageIds)
+    ? req.body.messageIds.map((id: unknown) => String(id)).filter(Boolean)
+    : []
+  if (acceptedRequestedMails.length === 0 && requestedMessageIds.length === 0) {
+    return sendEmailJson(req, res, {
+      success: false,
+      error: 'EMPTY_ANALYSIS_TARGETS',
+      message: 'No emails selected for triage',
+    }, 400)
+  }
   const task = createEmailTriageTask()
+  if (acceptedRequestedMails.length > 0) {
+    const now = new Date().toISOString()
+    updateEmailTriageTask(task.taskId, {
+      message: '任务已创建，等待分析器处理',
+      sourceMessageCount: acceptedRequestedMails.length + skippedRequestedMails,
+      jobs: acceptedRequestedMails.map((mail) => ({
+        jobId: `${mail.mailId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        accountId: account.user,
+        folder: (mail.folder || 'INBOX').toUpperCase(),
+        mailId: mail.mailId,
+        messageId: mail.messageId,
+        sourceMailKey: mail.sourceMailKey,
+        messageUid: String(mail.uid || mail.mailId),
+        status: 'pending',
+        subject: mail.subject,
+        retryCount: 0,
+        createdAt: now,
+        updatedAt: now,
+      })),
+      summary: {
+        ...emptyEmailAnalysisSummary(),
+        total: acceptedRequestedMails.length,
+        pending: acceptedRequestedMails.length,
+      },
+    })
+  }
+
+  console.info('[EmailTriageRoute] start request', stringifyJsonSafe({
+    taskId: task.taskId,
+    userId,
+    mailbox: account.user,
+    limit: Number(req.body?.limit) || 20,
+    requestedMessageIds,
+    requestedMails: requestedMails?.map((mail) => ({
+      mailId: mail.mailId,
+      messageId: mail.messageId,
+      sourceMailKey: mail.sourceMailKey,
+      accountId: mail.accountId,
+      folder: mail.folder,
+      uid: mail.uid,
+      subject: mail.subject,
+    })),
+  }))
 
   void runEmailUnreadTriage({
     taskId: task.taskId,
     account,
     userId,
     limit: Number(req.body?.limit) || 20,
-    messageIds: Array.isArray(req.body?.messageIds)
-      ? req.body.messageIds.map((id: unknown) => String(id)).filter(Boolean)
-      : undefined,
+    messageIds: requestedMessageIds,
+    requestedMails: acceptedRequestedMails,
     force: req.body?.force === true,
     isCancelled: () => Boolean(getEmailTriageTask(task.taskId)?.cancelRequested),
   })
@@ -485,7 +567,20 @@ router.post('/triage/start', async (req, res) => {
       console.warn('[EmailTriageRoute] runEmailUnreadTriage failed:', error instanceof Error ? error.message : String(error))
     })
 
-  return sendEmailJson(req, res, { success: true, taskId: task.taskId, status: 'running' })
+  return sendEmailJson(req, res, {
+    success: true,
+    batchId: task.taskId,
+    taskId: task.taskId,
+    status: 'running',
+    total: (requestedMails?.length ?? 0) || requestedMessageIds.length,
+    accepted: acceptedRequestedMails.length || requestedMessageIds.length,
+    skipped: skippedRequestedMails,
+    jobs: acceptedRequestedMails.map((mail) => ({
+      mailId: mail.mailId,
+      sourceMailKey: mail.sourceMailKey,
+      status: 'queued',
+    })),
+  })
 })
 
 router.get('/triage/tasks/:taskId', async (req, res) => {

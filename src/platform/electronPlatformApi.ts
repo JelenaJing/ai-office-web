@@ -162,6 +162,9 @@ export const electronPlatformApi: PlatformApi = {
     async list(): Promise<Artifact[]> {
       notSupported('platformApi.artifacts.list')
     },
+    async get(_artifactId: string): Promise<Artifact> {
+      notSupported('platformApi.artifacts.get')
+    },
     async download(_artifactId: string, _filename: string): Promise<void> {
       notSupported('platformApi.artifacts.download')
     },

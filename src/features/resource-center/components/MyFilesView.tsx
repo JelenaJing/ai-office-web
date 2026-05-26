@@ -6,7 +6,8 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { Upload, Download, Trash2, File as FileIcon } from 'lucide-react'
+import { Upload, Download, Trash2, File as FileIcon, ExternalLink } from 'lucide-react'
+import { canOpenFileEntry, openFileEntryLabel } from '../../../services/openResourceIntent'
 import { platformApi } from '../../../platform'
 import type { FileEntry } from '../../../platform'
 
@@ -69,9 +70,10 @@ const ALLOWED_ACCEPT = '.docx,.pdf,.pptx,.xlsx,.csv,.txt,.md,.png,.jpg,.jpeg'
 interface MyFilesViewProps {
   /** If true, wrap in a scrollable full-height container */
   fullHeight?: boolean
+  onOpenFile?: (file: FileEntry) => void
 }
 
-export default function MyFilesView({ fullHeight }: MyFilesViewProps) {
+export default function MyFilesView({ fullHeight, onOpenFile }: MyFilesViewProps) {
   const [files, setFiles] = useState<FileEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
@@ -92,6 +94,12 @@ export default function MyFilesView({ fullHeight }: MyFilesViewProps) {
   }, [])
 
   useEffect(() => { void fetchFiles() }, [fetchFiles])
+
+  useEffect(() => {
+    const handler = () => { void fetchFiles() }
+    window.addEventListener('resource-files-changed', handler)
+    return () => window.removeEventListener('resource-files-changed', handler)
+  }, [fetchFiles])
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -216,7 +224,23 @@ export default function MyFilesView({ fullHeight }: MyFilesViewProps) {
                     {fmtDate(f.uploadedAt)}
                   </td>
                   <td style={{ padding: '10px 20px' }}>
-                    <div style={{ display: 'flex', gap: 8 }}>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      {onOpenFile && canOpenFileEntry(f) ? (
+                        <button
+                          type="button"
+                          onClick={() => onOpenFile(f)}
+                          title={openFileEntryLabel(f)}
+                          style={{
+                            height: 30, padding: '0 10px', border: '1px solid #b8d4f0',
+                            borderRadius: 6, background: '#f0f7ff', cursor: 'pointer',
+                            display: 'inline-flex', alignItems: 'center', gap: 5,
+                            fontSize: 12, color: '#1f6fd6', fontWeight: 600,
+                          }}
+                        >
+                          <ExternalLink size={13} />
+                          {openFileEntryLabel(f)}
+                        </button>
+                      ) : null}
                       <button
                         onClick={() => handleDownload(f)}
                         title="下载"

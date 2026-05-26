@@ -132,6 +132,13 @@ export interface MailSummary {
   messageId?: string
 }
 
+function toIsoString(value: string | Date | undefined | null): string | undefined {
+  if (!value) return undefined
+  if (value instanceof Date) return value.toISOString()
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString()
+}
+
 export interface MailAttachmentSummary {
   id: string
   filename: string
@@ -203,9 +210,13 @@ export async function fetchInbox(
         const attachments = parsedAttachments(parsed)
         out.push({
           id: String(uid),
+          uid: String(uid),
           from: env?.from?.[0]?.address || env?.from?.[0]?.name || '',
           subject: env?.subject || '(无主题)',
           timestamp: env?.date?.toISOString() || new Date().toISOString(),
+          snippet: preview,
+          flags: [...(msg.flags ?? [])].map((flag) => String(flag)),
+          isRead: msg.flags?.has('\\Seen') ?? false,
           unread: !msg.flags?.has('\\Seen'),
           preview,
           bodyPreview,
@@ -216,9 +227,13 @@ export async function fetchInbox(
       }
       out.push({
         id: String(uid),
+        uid: String(uid),
         from: env?.from?.[0]?.address || env?.from?.[0]?.name || '',
         subject: env?.subject || '(无主题)',
         timestamp: env?.date?.toISOString() || new Date().toISOString(),
+        snippet: preview,
+        flags: [...(msg.flags ?? [])].map((flag) => String(flag)),
+        isRead: msg.flags?.has('\\Seen') ?? false,
         unread: !msg.flags?.has('\\Seen'),
         preview,
         bodyPreview,
@@ -285,7 +300,7 @@ export async function fetchMessage(
     }))
     const normalized = normalizeParsedMailBody(parsed)
     const receivedAt = env?.date?.toISOString()
-    const internalDate = msg.internalDate?.toISOString()
+    const internalDate = toIsoString(msg.internalDate)
     const flags = [...(msg.flags ?? [])].map((flag) => String(flag))
     const isRead = msg.flags?.has('\\Seen') ?? false
     return {
@@ -524,7 +539,7 @@ export async function fetchFolder(
       let bodyFormat: EmailBodyFormat = 'text'
       const env = msg.envelope
       const receivedAt = env?.date?.toISOString()
-      const internalDate = msg.internalDate?.toISOString()
+      const internalDate = toIsoString(msg.internalDate)
       const flags = [...(msg.flags ?? [])].map((flag) => String(flag))
       const isRead = msg.flags?.has('\\Seen') ?? false
       let attachmentCount = 0

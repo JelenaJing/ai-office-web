@@ -28,6 +28,7 @@ description: Edit HTML-native WebDoc artifacts via structured JSON patches for A
 - `{ "type": "replace_block_text", "blockId": "...", "replacementText": "纯文本" }`
 - `{ "type": "replace_selection", "selectedText": "原文", "replacementText": "新文" }`
 - `{ "type": "insert_at_cursor", "text": "续写段落纯文本" }`
+- `{ "type": "insert_at_cursor", "html": "<figure><img src=\"...\" alt=\"说明\"/><figcaption>图注</figcaption></figure>" }` — 插入配图（插图由前端 `/api/image/jobs` 生成后也可自动插入）
 - `{ "type": "replace_document", "html": "<article>...</article>" }`
 
 ## 工具语义（context.json 的 tool 字段）

@@ -616,7 +616,7 @@ export function EmailProvider({ children }: { children: ReactNode }) {
       const bodyHash = computeBodyHash(mail.body)
 
       // 1. User-edited draft takes priority
-      const userDraft = getUserDraft(acctId, mailKey, bodyHash)
+      const userDraft = getUserDraft(acctId, mailKey, bodyHash, [mail.id, mail.messageId || ''])
       if (userDraft) {
         return {
           ...prev,
@@ -634,7 +634,7 @@ export function EmailProvider({ children }: { children: ReactNode }) {
       }
 
       // 2. AI draft fallback
-      const aiDraft = getAiDraft(acctId, mailKey, bodyHash)
+      const aiDraft = getAiDraft(acctId, mailKey, bodyHash, [mail.id, mail.messageId || ''])
       if (!aiDraft) return prev
       return {
         ...prev,

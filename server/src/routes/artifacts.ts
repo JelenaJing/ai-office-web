@@ -24,6 +24,10 @@ import {
   applyHtmlPresentationPatch,
   generateHtmlPresentationImage,
 } from '../features/artifact-jobs/services/htmlPresentationPatchService'
+import {
+  exportHtmlPresentationToPptx,
+  HtmlPresentationExportError,
+} from '../features/artifact-jobs/services/htmlPresentationPptxExport'
 import { requireAccountUser } from '../lib/authUser'
 import { saveSkillArtifact } from '../lib/skillArtifact'
 import { assertWorkspaceAccess, WorkspaceAccessError } from '../lib/workspaceAccess'
@@ -278,6 +282,53 @@ router.post('/:artifactId/html-presentation/image', async (req, res) => {
     if (res.headersSent) return
     const message = err instanceof Error ? err.message : String(err)
     return res.status(500).json({ success: false, error: message })
+  }
+})
+
+router.post('/:artifactId/html-presentation/export-pptx', async (req, res) => {
+  const { artifactId } = req.params
+  const artifact = getHtmlArtifact(artifactId)
+  if (!artifact) return res.status(404).json({ success: false, code: 'HTML_EXPORT_NOT_FOUND', error: 'Artifact not found', artifactId })
+
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+  if (!assertArtifactOwnership(userId, artifact, res)) return
+
+  const startedAt = new Date().toISOString()
+  const started = Date.now()
+  console.info(`[html-ppt-export] taskType=html_to_pptx timeoutMs=300000 startedAt=${startedAt} status=running artifactId=${artifactId} jobId=${artifact.jobId} skillId=html-ppt.export-pptx`)
+
+  try {
+    const result = await exportHtmlPresentationToPptx({ htmlArtifactId: artifactId, userId })
+    const elapsedMs = Date.now() - started
+    console.info(`[html-ppt-export] taskType=html_to_pptx timeoutMs=${result.timeoutMs} startedAt=${startedAt} elapsedMs=${elapsedMs} status=completed artifactId=${artifactId} exportArtifactId=${result.artifact.id} jobId=${artifact.jobId} skillId=html-ppt.export-pptx`)
+    return res.json({
+      success: true,
+      artifactId,
+      exportArtifactId: result.artifact.id,
+      filename: result.filename,
+      downloadUrl: result.downloadUrl,
+      cached: result.cached,
+      timeoutMs: result.timeoutMs,
+      startedAt,
+      elapsedMs,
+      status: 'completed',
+      artifact: result.artifact,
+    })
+  } catch (error) {
+    const elapsedMs = Date.now() - started
+    const known = error instanceof HtmlPresentationExportError ? error : null
+    const code = known?.code || 'PPTX_EXPORT_FAILED'
+    const message = error instanceof Error ? error.message : String(error)
+    console.info(`[html-ppt-export] taskType=html_to_pptx timeoutMs=300000 startedAt=${startedAt} elapsedMs=${elapsedMs} status=failed artifactId=${artifactId} jobId=${artifact.jobId} skillId=html-ppt.export-pptx error=${message}`)
+    return res.status(code === 'HTML_EXPORT_NOT_FOUND' ? 404 : code === 'EXPORT_TIMEOUT' ? 504 : 500).json({
+      success: false,
+      code,
+      error: message,
+      startedAt,
+      elapsedMs,
+      status: 'failed',
+    })
   }
 })
 

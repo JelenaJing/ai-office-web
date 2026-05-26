@@ -294,6 +294,23 @@ function insertManagedImageBlock(html: string, markup: string): string {
   return appendBeforeClosingTag(html, 'section', markup)
 }
 
+function stripImagesForNoImageMode(html: string): string {
+  let next = html
+  for (let index = 0; index < 4; index += 1) {
+    const before = next
+    next = next
+      .replace(/<(figure|picture)\b[^>]*>[\s\S]*?<\/\1>/gi, '')
+      .replace(
+        /<(div|section)\b[^>]*(?:data-block-type=["']image["']|class=["'][^"']*(?:\baios-visual-slot\b|\bimage-placeholder\b|\bmedia-placeholder\b|\bvisual-placeholder\b|\bplaceholder-svg\b)[^"']*["'])[^>]*>[\s\S]*?<\/\1>/gi,
+        '',
+      )
+    if (next === before) break
+  }
+  return next
+    .replace(/<img\b[^>]*\/?>/gi, '')
+    .replace(/\sdata-aios-has-visual=(["'])true\1/gi, ' data-aios-has-visual="false"')
+}
+
 export function injectSharedStyles(html: string): string {
   const styleBlock = `
 <style id="aios-html-ppt-enhancements">
@@ -323,6 +340,16 @@ export function injectSharedStyles(html: string): string {
   [data-block-id][data-block-type="image"] { cursor: pointer; transition: outline-color 160ms ease, box-shadow 160ms ease; }
   [data-block-id][data-block-type="image"]:hover { outline: 2px dashed rgba(245, 158, 11, 0.35); outline-offset: 4px; }
   [data-block-id][data-block-type="image"].aios-image-selected { outline: 2px solid rgba(245, 158, 11, 0.9); outline-offset: 4px; box-shadow: 0 0 0 6px rgba(245, 158, 11, 0.12); }
+  .aios-template-content { position: relative; z-index: 4; width: min(82vw, 1420px); max-width: 100%; margin: auto; display: grid; gap: clamp(18px, 2.8vh, 34px); }
+  .aios-template-kicker { font: 700 clamp(13px, 1.1vw, 22px)/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.16em; text-transform: uppercase; opacity: 0.76; }
+  .aios-template-title { margin: 0; max-width: 12ch; font-size: clamp(42px, 7vw, 148px); line-height: 0.95; letter-spacing: -0.045em; }
+  .aios-template-subtitle { margin: 0; max-width: 62ch; font-size: clamp(18px, 1.55vw, 34px); line-height: 1.45; opacity: 0.82; }
+  .aios-template-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: clamp(16px, 2vw, 34px); align-items: stretch; }
+  .aios-template-card { padding: clamp(18px, 2vw, 34px); border: 1px solid currentColor; background: rgba(255,255,255,0.12); backdrop-filter: blur(6px); min-height: clamp(120px, 18vh, 220px); }
+  .aios-template-card p,
+  .aios-template-card li { font-size: clamp(16px, 1.25vw, 27px); line-height: 1.55; }
+  .aios-template-card ul { margin: 0; padding-left: 1.15em; display: grid; gap: 0.65em; }
+  .aios-template-index { font: 800 clamp(20px, 2.8vw, 56px)/1 ui-monospace, SFMono-Regular, Menlo, monospace; opacity: 0.52; }
   .slide[data-aios-visual-placement="right"] .slide-content,
   .slide[data-aios-visual-placement="right"] .content-shell,
   .slide[data-aios-visual-placement="right"] .summary-inner,
@@ -379,6 +406,7 @@ export function injectSharedStyles(html: string): string {
     .aios-visual-slot--left,
     .aios-visual-slot--hero,
     .aios-visual-slot--card { position: relative; inset: auto; width: 100%; height: clamp(220px, 30vh, 320px); max-width: none; max-height: none; margin-top: 1rem; transform: none; }
+    .aios-template-grid { grid-template-columns: 1fr; }
   }
 </style>`
 
@@ -783,14 +811,19 @@ export function postProcessHtmlPresentationOutput(input: {
   selectedTemplateSlug: string
   fallbackUsed: boolean
   options: HtmlPresentationJobOptions
+  assertNotCanceled?: () => void
 }): HtmlPresentationPostProcessResult {
+  input.assertNotCanceled?.()
   ensureOutputAssetsDir(input.outputDir)
   const contentModelPath = `${input.outputDir}/content-model.json`
   const templateProfilePath = `${input.outputDir}/template-profile.json`
   const candidateTemplatesPath = `${input.outputDir}/candidate-templates.json`
   const now = new Date().toISOString()
 
+  input.assertNotCanceled?.()
   let html = ensureSlideSections(fs.readFileSync(input.htmlPath, 'utf-8'))
+  const noImageMode = !input.options.enableImages || input.options.maxImages <= 0
+  if (noImageMode) html = stripImagesForNoImageMode(html)
   const slidePattern = /<section\b[^>]*class=(["'])[^"']*\bslide\b[^"']*\1[^>]*>[\s\S]*?<\/section>/gi
   const slideMatches = Array.from(html.matchAll(slidePattern))
 
@@ -809,7 +842,7 @@ export function postProcessHtmlPresentationOutput(input: {
     let seenSubtitle = false
     const blocks: ContentModelBlock[] = []
     const bullets: string[] = []
-    let slideInner = inner
+    let slideInner = noImageMode ? stripImagesForNoImageMode(inner) : inner
 
     slideInner = slideInner.replace(/<(h[1-6]|p|li|figcaption|blockquote|small)\b([^>]*)>([\s\S]*?)<\/\1>/gi, (full, tagName: string, attrs: string, body: string) => {
       const text = stripTags(body)
@@ -832,44 +865,46 @@ export function postProcessHtmlPresentationOutput(input: {
       return `<${tagName}${cleanedAttrs} data-block-id="${currentBlockId}" data-block-type="text" data-block-role="${role}">${body}</${tagName}>`
     })
 
-    slideInner = slideInner.replace(/<(div|figure)\b([^>]*?(?:data-block-type=(["'])image\3|placeholder-svg|image-placeholder|visual-placeholder)[^>]*)>/gi, (full, tagName: string, attrs: string) => {
-      const currentBlockId = blockId(index, blockIndex)
-      blockIndex += 1
-      const cleanedAttrs = stripManagedDataAttrs(attrs)
-      blocks.push({
-        id: currentBlockId,
-        type: 'image',
-        role: 'visual',
-        text: '',
-        assetPath: '',
-        imagePrompt: '',
-        placement: 'right',
-        placeholderUsed: true,
+    if (!noImageMode) {
+      slideInner = slideInner.replace(/<(div|figure)\b([^>]*?(?:data-block-type=(["'])image\3|placeholder-svg|image-placeholder|media-placeholder|visual-placeholder)[^>]*)>/gi, (full, tagName: string, attrs: string) => {
+        const currentBlockId = blockId(index, blockIndex)
+        blockIndex += 1
+        const cleanedAttrs = stripManagedDataAttrs(attrs)
+        blocks.push({
+          id: currentBlockId,
+          type: 'image',
+          role: 'visual',
+          text: '',
+          assetPath: '',
+          imagePrompt: '',
+          placement: 'right',
+          placeholderUsed: true,
+        })
+        return `<${tagName}${cleanedAttrs} data-block-id="${currentBlockId}" data-block-type="image" data-block-role="visual" data-image-prompt="">`
       })
-      return `<${tagName}${cleanedAttrs} data-block-id="${currentBlockId}" data-block-type="image" data-block-role="visual" data-image-prompt="">`
-    })
 
-    slideInner = slideInner.replace(/<img\b([^>]*?)\/?>/gi, (full, attrs: string) => {
-      const currentBlockId = blockId(index, blockIndex)
-      blockIndex += 1
-      const cleanedAttrs = stripManagedDataAttrs(attrs)
-      const src = findImageSrc(full)
-      blocks.push({
-        id: currentBlockId,
-        type: 'image',
-        role: 'visual',
-        text: '',
-        assetPath: src,
-        imagePrompt: '',
-        placement: 'right',
-        placeholderUsed: isPlaceholderAssetPath(src),
+      slideInner = slideInner.replace(/<img\b([^>]*?)\/?>/gi, (full, attrs: string) => {
+        const currentBlockId = blockId(index, blockIndex)
+        blockIndex += 1
+        const cleanedAttrs = stripManagedDataAttrs(attrs)
+        const src = findImageSrc(full)
+        blocks.push({
+          id: currentBlockId,
+          type: 'image',
+          role: 'visual',
+          text: '',
+          assetPath: src,
+          imagePrompt: '',
+          placement: 'right',
+          placeholderUsed: isPlaceholderAssetPath(src),
+        })
+        return `<img${cleanedAttrs} data-block-id="${currentBlockId}" data-block-type="image" data-block-role="visual" data-image-prompt="">`
       })
-      return `<img${cleanedAttrs} data-block-id="${currentBlockId}" data-block-type="image" data-block-role="visual" data-image-prompt="">`
-    })
+    }
 
     const titleBlock = blocks.find((block) => block.role === 'title')
     const subtitleBlock = blocks.find((block) => block.role === 'subtitle')
-    const hasImage = blocks.some((block) => block.type === 'image')
+    const hasImage = !noImageMode && blocks.some((block) => block.type === 'image')
     const role = inferSlideRole(index, allMatches.length, titleBlock?.text ?? '', bullets, hasImage)
 
     const model: ContentModelSlide = {
@@ -905,6 +940,9 @@ export function postProcessHtmlPresentationOutput(input: {
     input.options,
     input.outputDir,
   )
+  void planning
+
+  input.assertNotCanceled?.()
 
   slides.forEach((item) => {
     const imageBlock = item.model.blocks.find((block) => block.type === 'image')
@@ -933,6 +971,8 @@ export function postProcessHtmlPresentationOutput(input: {
     cursor = item.end
   }
   rebuiltHtml += html.slice(cursor)
+  input.assertNotCanceled?.()
+  if (noImageMode) rebuiltHtml = stripImagesForNoImageMode(rebuiltHtml)
   rebuiltHtml = injectSharedStyles(rebuiltHtml)
   rebuiltHtml = injectEditRuntime(rebuiltHtml, input.jobId)
   fs.writeFileSync(input.htmlPath, rebuiltHtml, 'utf-8')
@@ -963,6 +1003,7 @@ export function postProcessHtmlPresentationOutput(input: {
     availableLayouts: layoutHints,
   }
 
+  input.assertNotCanceled?.()
   fs.writeFileSync(contentModelPath, JSON.stringify(contentModel, null, 2), 'utf-8')
   fs.writeFileSync(templateProfilePath, JSON.stringify(templateProfile, null, 2), 'utf-8')
   fs.writeFileSync(
@@ -978,7 +1019,7 @@ export function postProcessHtmlPresentationOutput(input: {
     selectedTemplateSlug: input.selectedTemplateSlug,
     candidateTemplateSlugs: input.candidateTemplates.map((candidate) => candidate.slug),
     fallbackUsed: input.fallbackUsed,
-    imagePlanningEnabled: input.options.enableImages,
+    imagePlanningEnabled: input.options.enableImages && input.options.maxImages > 0,
     plannedImageCount: planning.plannedImageCount,
     generatedImageCount: planning.generatedImageCount,
     placeholderCount: planning.placeholderCount,

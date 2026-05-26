@@ -598,6 +598,7 @@ export function createEditableStateFromTaskResult(input: {
   document: DocumentDraft
   html?: string
   documentArtifact?: DocumentWorkbenchArtifact
+  userFileId?: string | null
 }): EditableDocumentState {
   const html = input.html || renderDraftToEditableHtml(input.document)
   const documentArtifact = input.documentArtifact || buildDocumentArtifactFromHtml({
@@ -608,6 +609,7 @@ export function createEditableStateFromTaskResult(input: {
   })
   return {
     documentId: input.documentId,
+    userFileId: input.userFileId ?? null,
     artifactId: input.artifactId,
     exportUrl: input.exportUrl,
     title: input.document.title,

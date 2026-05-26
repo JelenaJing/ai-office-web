@@ -120,7 +120,7 @@ function makeTopic(topic: string, items: EmailAnalysisResult[]): EmailContentTop
     count: items.length,
     importanceLevel: importanceLevel(items),
     description: topicDescription(topic, items),
-    relatedMessageIds: sorted.map((item) => item.messageId),
+    relatedMessageIds: sorted.map((item) => item.mailId),
     representativeSubjects: unique(sorted.map((item) => item.subject).filter(Boolean)).slice(0, 3),
   }
 }
@@ -226,7 +226,8 @@ function buildCalendarItems(results: EmailAnalysisResult[]): EmailAnalysisBatchS
       .filter((item) => item.timeIntent?.needsUserConfirmation)
       .slice(0, 8)
       .map((item) => ({
-        messageId: item.messageId,
+        mailId: item.mailId,
+        messageId: item.messageId || '',
         subject: item.subject,
         title: item.timeIntent?.title || item.subject,
         startTime: item.timeIntent?.startTime,
@@ -236,7 +237,8 @@ function buildCalendarItems(results: EmailAnalysisResult[]): EmailAnalysisBatchS
       .filter((item) => (item.calendarConflictCount ?? 0) > 0)
       .slice(0, 8)
       .map((item) => ({
-        messageId: item.messageId,
+        mailId: item.mailId,
+        messageId: item.messageId || '',
         subject: item.subject,
         title: item.timeIntent?.title || item.subject,
         conflictCount: item.calendarConflictCount ?? 0,
@@ -245,7 +247,8 @@ function buildCalendarItems(results: EmailAnalysisResult[]): EmailAnalysisBatchS
       .filter((item) => item.timeIntent?.type === 'deadline')
       .slice(0, 8)
       .map((item) => ({
-        messageId: item.messageId,
+        mailId: item.mailId,
+        messageId: item.messageId || '',
         subject: item.subject,
         title: item.timeIntent?.title || item.subject,
         deadlineTime: item.timeIntent?.deadlineTime,
@@ -262,7 +265,8 @@ function buildTopImportantEmails(results: EmailAnalysisResult[]): EmailAnalysisB
     )
     .slice(0, 10)
     .map((item) => ({
-      messageId: item.messageId,
+      mailId: item.mailId,
+      messageId: item.messageId || '',
       fromName: item.fromName,
       fromEmail: item.fromEmail,
       subject: item.subject,
@@ -299,7 +303,8 @@ function buildActionItems(results: EmailAnalysisResult[]): EmailAnalysisBatchSum
     )
     .slice(0, 15)
     .map((item) => ({
-      messageId: item.messageId,
+      mailId: item.mailId,
+      messageId: item.messageId || '',
       subject: item.subject,
       fromName: item.fromName,
       fromEmail: item.fromEmail,
@@ -330,7 +335,8 @@ function buildFailedItems(results: EmailAnalysisResult[]): EmailAnalysisBatchSum
   return results
     .filter((item) => Boolean(item.error))
     .map((item) => ({
-      messageId: item.messageId,
+      mailId: item.mailId,
+      messageId: item.messageId || '',
       subject: item.subject,
       fromName: item.fromName,
       fromEmail: item.fromEmail,
@@ -369,7 +375,8 @@ function buildReportText(summary: Omit<EmailAnalysisBatchSummary, 'reportText' |
 
   const importantLines = summary.actionItems.slice(0, 5).map((item, index) =>
     `${index + 1}. ${displaySender(item)}关于“${item.subject || '无主题'}”的邮件，${suggestedNextStep({
-      messageId: item.messageId,
+      mailId: item.mailId,
+      messageId: item.messageId || '',
       fromName: item.fromName,
       fromEmail: item.fromEmail,
       subject: item.subject,
@@ -459,13 +466,21 @@ export function buildEmailAnalysisBatchSummary(
 const FAILURE_LABELS: Record<string, string> = {
   BODY_INCOMPLETE: '正文获取失败',
   FETCH_BODY_FAILED: '正文获取失败',
+  MESSAGE_NOT_FOUND: '邮件不存在',
   BODY_EMPTY: '正文为空',
+  EMPTY_BODY: '正文为空',
   HTML_CLEAN_FAILED: 'HTML 清洗失败',
   BODY_TOO_LONG: '正文过长',
   LLM_TIMEOUT: '模型超时',
+  TIMEOUT: '模型超时',
   MODEL_UNAVAILABLE: '模型服务不可用',
+  AI_MODEL_ERROR: '模型服务不可用',
   LLM_REQUEST_FAILED: '模型请求失败',
   LLM_NON_JSON: '模型返回非 JSON',
   JSON_PARSE_FAILED: 'JSON 解析失败',
+  RESPONSE_PARSE_FAILED: '分析结果解析失败',
   SAVE_FAILED: '保存失败',
+  MISSING_MAIL_ID: '缺少 mailId',
+  MISSING_SOURCE_MAIL_KEY: '缺少 sourceMailKey',
+  INVALID_ANALYSIS_PAYLOAD: '分析结果格式错误',
 }

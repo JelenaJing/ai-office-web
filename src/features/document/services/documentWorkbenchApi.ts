@@ -266,6 +266,8 @@ export interface DocumentSelectionRange {
 
 export interface EditableDocumentState {
   documentId: string | null
+  /** 「我的文件」条目 id：从资源打开或保存后绑定，再次保存覆盖同一文件。 */
+  userFileId: string | null
   artifactId: string | null
   exportUrl: string | null
   title: string
@@ -328,12 +330,14 @@ export interface DocumentTaskResult {
   knowledgeRefs: DocumentKnowledgeRef[]
   fallbackFrom?: 'minimax_docx'
   fallbackReason?: string
+  userFileId?: string
 }
 
 export interface DocumentSaveResponse {
   success: boolean
   documentId: string
   savedAt: string
+  userFileId?: string
   artifact?: {
     id: string
     title?: string
@@ -678,11 +682,41 @@ export async function saveEditableDocument(input: {
   html: string
   documentDraft: DocumentDraft
   outline: DocumentDraft['outline']
+  userFileId?: string | null
 }): Promise<DocumentSaveResponse> {
   return requestJson(`/api/documents/${encodeURIComponent(input.documentId)}/save`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(input),
+    body: JSON.stringify({
+      title: input.title,
+      html: input.html,
+      document: input.documentDraft,
+      outline: input.outline,
+      userFileId: input.userFileId || undefined,
+    }),
+  })
+}
+
+/** 新建文稿首次保存：在服务端创建 document 记录并写入「我的文件」。 */
+export async function saveInitialWorkbenchDocument(input: {
+  title: string
+  html: string
+  documentDraft: DocumentDraft
+  outline: DocumentDraft['outline']
+  workspacePath?: string
+  userFileId?: string | null
+}): Promise<DocumentSaveResponse & DocumentTaskResult> {
+  return requestJson('/api/documents/save-initial', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      title: input.title,
+      html: input.html,
+      document: input.documentDraft,
+      outline: input.outline,
+      workspacePath: input.workspacePath,
+      userFileId: input.userFileId || undefined,
+    }),
   })
 }
 
@@ -829,11 +863,13 @@ export async function commitFormalTemplate(input: {
 export async function importDocumentDocx(input: {
   file?: File
   artifactId?: string
+  fileId?: string
   workspacePath?: string
 }): Promise<DocumentImportResponse> {
   const formData = new FormData()
   if (input.file) formData.append('file', input.file)
   if (input.artifactId) formData.append('artifactId', input.artifactId)
+  if (input.fileId) formData.append('fileId', input.fileId)
   if (input.workspacePath) formData.append('workspacePath', input.workspacePath)
   const response = await fetch(resolveWebApiUrl('/api/documents/import-docx'), {
     method: 'POST',

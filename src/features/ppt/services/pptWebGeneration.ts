@@ -1,4 +1,5 @@
 import type { SkillResult } from '../../../platform'
+import { DEFAULT_TASK_POLL_INTERVAL_MS, TASK_TIMEOUTS } from '../../../constants/taskTimeouts'
 import { resolveWebApiUrl } from '../../../runtime/apiBase'
 
 function readAuthToken(): string | null {
@@ -225,21 +226,22 @@ export interface WebPptDeckPayload {
 
 function parsePreviewImages(value: unknown): WebPptPreviewImagePayload[] {
   if (!Array.isArray(value)) return []
-  return value
-    .map((entry, index) => {
-      const raw = pickObject(entry)
-      if (!raw) return null
-      const previewImageUrl = pickString(raw.previewImageUrl)
-      const previewHtmlUrl = pickString(raw.previewHtmlUrl)
-      if (!previewImageUrl && !previewHtmlUrl) return null
-      return {
-        slideId: pickString(raw.slideId),
-        index: typeof raw.index === 'number' ? raw.index : index,
-        previewImageUrl,
-        previewHtmlUrl,
-      }
-    })
-    .filter((entry): entry is WebPptPreviewImagePayload => Boolean(entry))
+  return value.reduce<WebPptPreviewImagePayload[]>((acc, entry, index) => {
+    const raw = pickObject(entry)
+    if (!raw) return acc
+    const previewImageUrl = pickString(raw.previewImageUrl)
+    const previewHtmlUrl = pickString(raw.previewHtmlUrl)
+    if (!previewImageUrl && !previewHtmlUrl) return acc
+    const next: WebPptPreviewImagePayload = {
+      index: typeof raw.index === 'number' ? raw.index : index,
+    }
+    const slideId = pickString(raw.slideId)
+    if (slideId) next.slideId = slideId
+    if (previewImageUrl) next.previewImageUrl = previewImageUrl
+    if (previewHtmlUrl) next.previewHtmlUrl = previewHtmlUrl
+    acc.push(next)
+    return acc
+  }, [])
 }
 
 export function parseWebPptDeckPayload(value: unknown): WebPptDeckPayload {
@@ -283,7 +285,7 @@ export function parseWebPptDeckPayload(value: unknown): WebPptDeckPayload {
   }
 }
 
-export interface WebPptCreateResult extends SkillResult {
+export type WebPptCreateResult = Omit<SkillResult, 'data'> & {
   data?: WebPptDeckPayload
 }
 
@@ -332,9 +334,8 @@ export async function runWebPptxCreate(input: {
   outputMode?: 'editable_pptx' | 'web_deck'
   onProgress?: (update: WebPptTaskProgressUpdate) => void
 }): Promise<WebPptCreateResult> {
-  const isSlidevJob = input.engine === 'slidev'
-  const MAX_POLL_ATTEMPTS = isSlidevJob ? 120 : 60
-  const POLL_INTERVAL_MS = 1500
+  const POLL_INTERVAL_MS = DEFAULT_TASK_POLL_INTERVAL_MS
+  const MAX_POLL_ATTEMPTS = Math.ceil(TASK_TIMEOUTS.ppt / POLL_INTERVAL_MS)
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   Object.assign(headers, authHeaders())
 
@@ -473,7 +474,7 @@ export async function runWebPptxCreate(input: {
       }
     }
 
-    const message = `PPT 任务超时：${Math.round((MAX_POLL_ATTEMPTS * POLL_INTERVAL_MS) / 1000)} 秒内未完成，请重试。`
+    const message = `PPT 任务超时：${Math.round((MAX_POLL_ATTEMPTS * POLL_INTERVAL_MS) / 1000)} 秒内未完成。触发了前端轮询超时，请稍后重试。`
     console.error('[ppt-web] error', { stage: 'timeout', message })
     return { success: false, taskId: startBody.taskId, error: message }
   } catch (error) {

@@ -2736,15 +2736,23 @@ function EmailAnalysisSummaryPanel({
     const labels: Record<string, string> = {
       BODY_INCOMPLETE: '正文获取失败',
       FETCH_BODY_FAILED: '正文获取失败',
+      MESSAGE_NOT_FOUND: '邮件不存在',
       BODY_EMPTY: '正文为空',
+      EMPTY_BODY: '正文为空',
       HTML_CLEAN_FAILED: 'HTML 清洗失败',
       BODY_TOO_LONG: '正文过长',
       LLM_TIMEOUT: '模型超时',
+      TIMEOUT: '模型超时',
       MODEL_UNAVAILABLE: '模型服务不可用',
+      AI_MODEL_ERROR: '模型服务不可用',
       LLM_REQUEST_FAILED: '模型请求失败',
       LLM_NON_JSON: '模型返回非 JSON',
       JSON_PARSE_FAILED: 'JSON 解析失败',
+      RESPONSE_PARSE_FAILED: '分析结果解析失败',
       SAVE_FAILED: '保存失败',
+      MISSING_MAIL_ID: '缺少 mailId',
+      MISSING_SOURCE_MAIL_KEY: '缺少 sourceMailKey',
+      INVALID_ANALYSIS_PAYLOAD: '分析结果格式错误',
     }
     return (code && labels[code]) || fallback || '分析失败'
   }
@@ -2805,10 +2813,10 @@ function EmailAnalysisSummaryPanel({
               <SummaryList>
                 {summary.failedItems.map((item) => (
                   <SummaryListItem
-                    key={`failed-${item.messageId}`}
+                    key={`failed-${item.mailId}`}
                     type="button"
                     $clickable
-                    onClick={() => onMailClick(item.messageId)}
+                    onClick={() => onMailClick(item.mailId)}
                     title="点击定位到邮件详情"
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, width: '100%' }}>
@@ -2823,7 +2831,7 @@ function EmailAnalysisSummaryPanel({
                         $variant="muted"
                         onClick={(event) => {
                           event.stopPropagation()
-                          onRetryMail(item.messageId)
+                          onRetryMail(item.mailId)
                         }}
                       >
                         重试分析
@@ -2852,10 +2860,10 @@ function EmailAnalysisSummaryPanel({
             <SummaryList>
               {(summary.actionItems.length ? summary.actionItems : summary.topImportantEmails).slice(0, 8).map((item) => (
                 <SummaryListItem
-                  key={item.messageId}
+                  key={item.mailId}
                   type="button"
                   $clickable
-                  onClick={() => onMailClick(item.messageId)}
+                  onClick={() => onMailClick(item.mailId)}
                   title="点击定位到邮件详情"
                 >
                   <strong>{item.subject}</strong>
@@ -2876,17 +2884,17 @@ function EmailAnalysisSummaryPanel({
             {(summary.calendarItems.pending.length > 0 || summary.calendarItems.conflicts.length > 0 || summary.calendarItems.deadlines.length > 0) && (
               <SummaryList>
                 {summary.calendarItems.pending.slice(0, 4).map((item) => (
-                  <SummaryListItem key={`pending-${item.messageId}`} type="button" $clickable onClick={() => onMailClick(item.messageId)}>
+                  <SummaryListItem key={`pending-${item.mailId}`} type="button" $clickable onClick={() => onMailClick(item.mailId)}>
                     <strong>需要确认的日程：</strong>{item.title} · {item.startTime || item.deadlineTime || item.subject}
                   </SummaryListItem>
                 ))}
                 {summary.calendarItems.conflicts.slice(0, 4).map((item) => (
-                  <SummaryListItem key={`conflict-${item.messageId}`} type="button" $clickable onClick={() => onMailClick(item.messageId)}>
+                  <SummaryListItem key={`conflict-${item.mailId}`} type="button" $clickable onClick={() => onMailClick(item.mailId)}>
                     <strong>存在冲突的日程：</strong>{item.title} · 与 {item.conflictCount} 个日程冲突
                   </SummaryListItem>
                 ))}
                 {summary.calendarItems.deadlines.slice(0, 4).map((item) => (
-                  <SummaryListItem key={`deadline-${item.messageId}`} type="button" $clickable onClick={() => onMailClick(item.messageId)}>
+                  <SummaryListItem key={`deadline-${item.mailId}`} type="button" $clickable onClick={() => onMailClick(item.mailId)}>
                     <strong>截止事项：</strong>{item.title} · {item.deadlineTime || item.subject}
                   </SummaryListItem>
                 ))}
@@ -3095,6 +3103,7 @@ function CommunicationWorkbenchInner() {
     triggerAnalysis,
     analysisStatus,
     analysisProgress,
+    analysisError,
     currentBatchSummary,
     isAnalyzingEmails,
     isWorkerRunning,
@@ -4071,6 +4080,11 @@ function CommunicationWorkbenchInner() {
           <AnalysisBanner>
             <AnalysisSpinner>🤖</AnalysisSpinner>
             总数 {analysisProgress.total} · 完成 {analysisProgress.done} · 失败 {analysisProgress.failed} · 跳过 {analysisProgress.skipped} · 进行中 {analysisProgress.running}
+          </AnalysisBanner>
+        )}
+        {!isAnalyzingEmails && analysisError && (
+          <AnalysisBanner style={{ background: '#fffaf0', color: '#b7791f', borderColor: '#f6ad55' }}>
+            ⚠ {analysisError}
           </AnalysisBanner>
         )}
         {analysisStatus === 'failed' && analysisProgress.failed > 0 && (

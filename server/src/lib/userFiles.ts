@@ -39,6 +39,8 @@ export interface UserFileEntry {
   uploadedAt: string
   sourceArtifactId?: string
   generated?: boolean
+  documentId?: string
+  artifactId?: string
 }
 
 interface FilesIndex {
@@ -71,6 +73,8 @@ export function registerUserFile(input: {
   content: Buffer
   sourceArtifactId?: string
   generated?: boolean
+  documentId?: string
+  artifactId?: string
 }): UserFileEntry | null {
   const access = assertWorkspaceAccess(input.userId, input.workspacePath, 'editor')
   const displayName = sanitizeDisplayFilename(input.filename)
@@ -91,6 +95,8 @@ export function registerUserFile(input: {
     uploadedAt: new Date().toISOString(),
     sourceArtifactId: input.sourceArtifactId,
     generated: input.generated ?? true,
+    documentId: input.documentId,
+    artifactId: input.artifactId,
   }
 
   const index = readFilesIndex(input.userId, access.workspaceId)
@@ -222,4 +228,64 @@ export function resolveUserFile(
   requestedWorkspacePath?: string | null,
 ): ResolvedUserFile | null {
   return resolveUserFileInWorkspace(userId, fileId, requestedWorkspacePath)
+}
+
+export function findUserFileBySourceArtifactId(
+  userId: string,
+  sourceArtifactId: string,
+  requestedWorkspacePath?: string | null,
+): ResolvedUserFile | null {
+  const trimmed = String(sourceArtifactId || '').trim()
+  if (!trimmed) return null
+  for (const candidate of resolveWorkspaceCandidates(userId, requestedWorkspacePath)) {
+    const index = readFilesIndex(userId, candidate.workspaceId)
+    const entry = index.files.find((item) => item.sourceArtifactId === trimmed)
+    if (!entry) continue
+    const resolved = resolveUserFileFromWorkspace(
+      userId,
+      entry.id,
+      candidate.workspaceId,
+      candidate.workspacePath,
+    )
+    if (resolved) return resolved
+  }
+  return null
+}
+
+/** 覆盖「我的文件」中已有条目的二进制内容（打开后再次保存走此路径）。 */
+export function updateUserFileContent(input: {
+  userId: string
+  fileId: string
+  workspacePath?: string
+  filename?: string
+  content: Buffer
+  sourceArtifactId?: string
+  documentId?: string
+  artifactId?: string
+}): UserFileEntry | null {
+  const resolved = resolveUserFileInWorkspace(input.userId, input.fileId, input.workspacePath)
+  if (!resolved) return null
+
+  fs.writeFileSync(resolved.absolutePath, input.content)
+
+  const index = readFilesIndex(input.userId, resolved.workspaceId)
+  const entry = index.files.find((item) => item.id === input.fileId)
+  if (!entry) return null
+
+  if (input.filename) {
+    const displayName = sanitizeDisplayFilename(input.filename)
+    entry.name = displayName
+    const ext = path.extname(displayName).slice(1).toLowerCase()
+    if (GENERATED_FILE_MIRROR_EXTS.has(ext)) {
+      entry.ext = ext
+      entry.mimeType = USER_FILE_MIME_BY_EXT[ext] || entry.mimeType
+    }
+  }
+  entry.size = input.content.length
+  entry.uploadedAt = new Date().toISOString()
+  if (input.sourceArtifactId) entry.sourceArtifactId = input.sourceArtifactId
+  if (input.documentId) entry.documentId = input.documentId
+  if (input.artifactId) entry.artifactId = input.artifactId
+  writeFilesIndex(input.userId, resolved.workspaceId, index)
+  return entry
 }

@@ -11,6 +11,7 @@
 
 import fs from 'fs'
 import path from 'path'
+import { resolveTaskTimeoutMs } from '../../lib/taskTimeouts'
 
 export interface LlmMessage {
   role: 'system' | 'user' | 'assistant'
@@ -62,7 +63,7 @@ interface ResolvedLlmRuntime {
 }
 
 const AI_CONFIG_PATH = path.resolve(__dirname, '../../../../build/ai-config.json')
-const DEFAULT_TIMEOUT_MS = 60_000
+const DEFAULT_TIMEOUT_MS = resolveTaskTimeoutMs('default')
 const FALLBACK_MODEL = 'gpt-4o-mini'
 
 let cachedAiConfig: AiConfigFile | null = null
@@ -247,6 +248,120 @@ export async function invokeLlmText(
     }
 
     return content.trim()
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error('LLM 请求超时（60 秒），请稍后重试。')
+    }
+    if (err instanceof Error) throw err
+    throw new Error(`LLM 调用异常：${String(err)}`)
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function parseEventStream(
+  response: Response,
+  onChunk: (chunk: string) => void,
+): Promise<string> {
+  const reader = response.body?.getReader()
+  if (!reader) {
+    throw new Error('上游模型未返回可读流')
+  }
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let fullText = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+
+    const parts = buffer.split('\n\n')
+    buffer = parts.pop() ?? ''
+
+    for (const part of parts) {
+      const line = part
+        .split('\n')
+        .find((entry) => entry.startsWith('data: '))
+      if (!line) continue
+
+      const payload = line.slice(6).trim()
+      if (payload === '[DONE]') continue
+
+      try {
+        const data = JSON.parse(payload) as Record<string, unknown>
+        const delta =
+          (data.choices as Array<{ delta?: { content?: string }; message?: { content?: string } }> | undefined)?.[0]?.delta?.content
+          ?? (data.choices as Array<{ message?: { content?: string } }> | undefined)?.[0]?.message?.content
+          ?? (data.delta as { text?: string } | undefined)?.text
+          ?? ''
+
+        if (typeof delta === 'string' && delta) {
+          fullText += delta
+          onChunk(delta)
+        }
+      } catch {
+        continue
+      }
+    }
+  }
+
+  return fullText
+}
+
+/**
+ * Invoke chat/completions with SSE streaming; returns the full assistant text.
+ */
+export async function invokeLlmTextStream(
+  messages: LlmMessage[],
+  onDelta: (text: string) => void,
+  options?: LlmInvokeOptions,
+): Promise<string> {
+  const runtime = resolveRuntime()
+  const { apiKey, baseUrl, model, provider } = runtime
+
+  if (!apiKey || !baseUrl) {
+    throw new Error(
+      `LLM 未配置：请设置 LLM_API_KEY 或 ${provider} 对应的 provider API Key（如 QWEN_API_KEY），` +
+        '并确保 build/ai-config.json 中有 defaultBaseUrl。',
+    )
+  }
+
+  logResolvedConfig(runtime)
+
+  const url = resolveChatCompletionsUrl(baseUrl)
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), options?.timeoutMs ?? DEFAULT_TIMEOUT_MS)
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        temperature: options?.temperature ?? 0.3,
+        max_tokens: options?.maxTokens ?? 4096,
+        stream: true,
+      }),
+      signal: controller.signal,
+    })
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      throw new Error(
+        `LLM 请求失败 (${res.status})${body ? `：${body.slice(0, 200)}` : ''}`,
+      )
+    }
+
+    const fullText = await parseEventStream(res, onDelta)
+    if (!fullText.trim()) {
+      throw new Error('LLM 返回为空，请重试。')
+    }
+    return fullText.trim()
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
       throw new Error('LLM 请求超时（60 秒），请稍后重试。')

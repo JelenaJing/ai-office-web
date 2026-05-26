@@ -72,6 +72,15 @@ function makeCacheKey(
   return `${accountId}:${folder}:${mailKey}:${bodyHash}:${promptVersion}`
 }
 
+function candidateKeys(primaryKey: string, aliases: string[] = []): string[] {
+  return [...new Set([
+    primaryKey,
+    ...aliases,
+    extractLegacyMailId(primaryKey),
+    ...aliases.map((key) => extractLegacyMailId(key)),
+  ].filter(Boolean))]
+}
+
 /**
  * Return the cached triage result only if it is a successful hit
  * (status === 'success' AND bodyHash matches).
@@ -82,10 +91,12 @@ export function getCachedTriage(
   bodyHash: string,
   folder = 'INBOX',
   promptVersion = MAIL_ANALYSIS_PROMPT_VERSION,
+  aliases: string[] = [],
 ): AiMailTriageResult | null {
   const store = loadStore()
-  const entry = store[makeCacheKey(accountId, folder, mailKey, bodyHash, promptVersion)]
-    ?? store[makeCacheKey(accountId, folder, extractLegacyMailId(mailKey), bodyHash, promptVersion)]
+  const entry = candidateKeys(mailKey, aliases)
+    .map((key) => store[makeCacheKey(accountId, folder, key, bodyHash, promptVersion)])
+    .find(Boolean)
   if (!entry) return null
   if (entry.status !== 'success') return null
   if (entry.bodyHash !== bodyHash) return null
@@ -97,7 +108,8 @@ export function setCachedTriage(result: AiMailTriageResult): void {
   const store = loadStore()
   const folder = result.folder || 'INBOX'
   const promptVersion = result.promptVersion || MAIL_ANALYSIS_PROMPT_VERSION
-  const mailKey = result.mailKey || result.messageId
+  const mailKey = result.sourceMailKey || result.mailKey || result.mailId || result.messageId || ''
+  if (!mailKey) return
   store[makeCacheKey(result.accountId, folder, mailKey, result.bodyHash, promptVersion)] = result
   saveStore(store)
 }
@@ -114,7 +126,8 @@ export function getAllCachedTriagesForAccount(
   const result: Record<string, AiMailTriageResult> = {}
   for (const [key, value] of Object.entries(store)) {
     if (key.startsWith(prefix)) {
-      const mailKey = value.mailKey || value.messageId
+      const mailKey = value.sourceMailKey || value.mailKey || value.mailId || value.messageId
+      if (!mailKey) continue
       const existing = result[mailKey]
       if (!existing || existing.updatedAt.localeCompare(value.updatedAt) < 0) {
         result[mailKey] = value
