@@ -12,6 +12,8 @@ export interface ContentModelBlock {
   text: string
   assetPath: string
   imagePrompt: string
+  placement?: 'hero' | 'right' | 'left' | 'background' | 'full' | 'inline' | 'card'
+  placeholderUsed?: boolean
 }
 
 export interface ContentModelSlide {
@@ -27,7 +29,7 @@ export interface ContentModelSlide {
     type: 'none' | 'image' | 'svg' | 'diagram'
     prompt: string
     assetPath: string
-    placement: 'left' | 'right' | 'background' | 'full'
+    placement: 'hero' | 'right' | 'left' | 'background' | 'full' | 'inline' | 'card'
   }
 }
 
@@ -43,6 +45,7 @@ export interface ContentModelRecord {
     slideId: string
     assetPath: string
     imagePrompt: string
+    placeholderUsed?: boolean
   }>
   createdAt: string
   updatedAt: string
@@ -94,10 +97,13 @@ export function escapeAttribute(value: string): string {
 }
 
 export function createPlaceholderDataUri(title: string, prompt: string): string {
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(createPlaceholderSvgMarkup(title, prompt))}`
+}
+
+export function createPlaceholderSvgMarkup(title: string, prompt: string): string {
   const safeTitle = truncate(title || 'Image Placeholder', 48)
   const safePrompt = truncate(prompt || 'Visual planned for this slide', 96)
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540" role="img" aria-label="${escapeAttribute(safeTitle)}"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop offset="0%" stop-color="#eaf1fb"/><stop offset="100%" stop-color="#d6e4f6"/></linearGradient></defs><rect width="960" height="540" rx="28" fill="url(#g)"/><rect x="40" y="40" width="880" height="460" rx="24" fill="none" stroke="#9fb7d8" stroke-dasharray="14 10" stroke-width="3"/><text x="60" y="106" fill="#244367" font-family="Arial, sans-serif" font-size="34" font-weight="700">${escapeHtml(safeTitle)}</text><text x="60" y="156" fill="#55728f" font-family="Arial, sans-serif" font-size="20">${escapeHtml(safePrompt)}</text><g transform="translate(60 220)" fill="none" stroke="#87a6ca" stroke-width="10"><rect width="320" height="190" rx="18"/><path d="M18 164l68-72 58 48 52-68 124 92"/><circle cx="242" cy="54" r="26"/></g><text x="60" y="468" fill="#6d88a3" font-family="Arial, sans-serif" font-size="18">SVG placeholder · phase 1 fallback</text></svg>`
-  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540" role="img" aria-label="${escapeAttribute(safeTitle)}"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop offset="0%" stop-color="#eaf1fb"/><stop offset="100%" stop-color="#d6e4f6"/></linearGradient></defs><rect width="960" height="540" rx="28" fill="url(#g)"/><rect x="40" y="40" width="880" height="460" rx="24" fill="none" stroke="#9fb7d8" stroke-dasharray="14 10" stroke-width="3"/><text x="60" y="106" fill="#244367" font-family="Arial, sans-serif" font-size="34" font-weight="700">${escapeHtml(safeTitle)}</text><text x="60" y="156" fill="#55728f" font-family="Arial, sans-serif" font-size="20">${escapeHtml(safePrompt)}</text><g transform="translate(60 220)" fill="none" stroke="#87a6ca" stroke-width="10"><rect width="320" height="190" rx="18"/><path d="M18 164l68-72 58 48 52-68 124 92"/><circle cx="242" cy="54" r="26"/></g><text x="60" y="468" fill="#6d88a3" font-family="Arial, sans-serif" font-size="18">SVG placeholder · phase 2 fallback</text></svg>`
 }
 
 function stripTags(value: string): string {
@@ -116,6 +122,8 @@ function stripManagedDataAttrs(value: string): string {
     .replace(/\sdata-block-type=(["']).*?\1/gi, '')
     .replace(/\sdata-block-role=(["']).*?\1/gi, '')
     .replace(/\sdata-image-prompt=(["']).*?\1/gi, '')
+    .replace(/\sdata-placeholder-used=(["']).*?\1/gi, '')
+    .replace(/\sdata-aios-[a-z-]+=(["']).*?\1/gi, '')
 }
 
 function stripNonCanonicalManagedAttrs(html: string): string {
@@ -143,6 +151,46 @@ function stripNonCanonicalManagedAttrs(html: string): string {
 function ensureOutputAssetsDir(outputDir: string): void {
   fs.mkdirSync(outputDir, { recursive: true })
   fs.mkdirSync(`${outputDir}/assets`, { recursive: true })
+}
+
+function normalizeVisualPlacement(
+  placement: ContentModelSlide['visual']['placement'] | undefined,
+): ContentModelSlide['visual']['placement'] {
+  if (placement) return placement
+  return 'right'
+}
+
+export function isPlaceholderAssetPath(assetPath: string): boolean {
+  return assetPath.startsWith('data:image/svg+xml') || /placeholder/i.test(assetPath)
+}
+
+export function resolveHtmlPresentationAssetUrl(assetPath: string, artifactId?: string): string {
+  if (!assetPath) return ''
+  if (/^(data:|https?:|\/api\/artifacts\/)/i.test(assetPath)) return assetPath
+  if (artifactId && assetPath.startsWith('assets/')) {
+    const filename = assetPath.replace(/^assets\//, '')
+    return `/api/artifacts/${artifactId}/assets/${filename}`
+  }
+  return assetPath
+}
+
+function writePlaceholderAsset(outputDir: string, slide: ContentModelSlide, block: ContentModelBlock, prompt: string): string {
+  ensureOutputAssetsDir(outputDir)
+  const filename = `${slide.id}-${block.id}-placeholder.svg`
+  fs.writeFileSync(`${outputDir}/assets/${filename}`, createPlaceholderSvgMarkup(slide.title || 'Slide visual', prompt), 'utf-8')
+  return `assets/${filename}`
+}
+
+function renderManagedImageMarkup(input: {
+  block: ContentModelBlock
+  slide: ContentModelSlide
+  artifactId?: string
+}): string {
+  const placement = normalizeVisualPlacement(input.block.placement ?? input.slide.visual?.placement)
+  const resolvedSrc = resolveHtmlPresentationAssetUrl(input.block.assetPath, input.artifactId)
+  const placeholderUsed = input.block.placeholderUsed ?? isPlaceholderAssetPath(input.block.assetPath)
+  const fit = placement === 'background' || placement === 'full' ? 'cover' : placement === 'inline' ? 'contain' : 'cover'
+  return `<div class="aios-visual-slot aios-visual-slot--${placement}" data-aios-visual-placement="${placement}" data-placeholder-used="${placeholderUsed ? 'true' : 'false'}"><img src="${escapeAttribute(resolvedSrc)}" alt="${escapeAttribute(input.slide.title || 'Slide visual')}" style="object-fit:${fit};" data-block-id="${input.block.id}" data-block-type="image" data-block-role="visual" data-image-prompt="${escapeAttribute(input.block.imagePrompt)}" data-placeholder-used="${placeholderUsed ? 'true' : 'false'}"></div>`
 }
 
 function ensureSlideSections(html: string): string {
@@ -208,18 +256,95 @@ function appendBeforeClosingTag(html: string, closingTag: string, fragment: stri
   return `${html}\n${fragment}`
 }
 
+function replaceManagedImageBlock(html: string, blockIdValue: string, markup: string): { replaced: boolean; html: string } {
+  const safeBlockId = blockIdValue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const wrapperPattern = new RegExp(
+    `<(?:div|figure|section|picture)\\b[^>]*data-block-id="${safeBlockId}"[^>]*>[\\s\\S]*?<\\/(?:div|figure|section|picture)>`,
+    'i',
+  )
+  if (wrapperPattern.test(html)) {
+    return { replaced: true, html: html.replace(wrapperPattern, markup) }
+  }
+  const imgPattern = new RegExp(`<img\\b[^>]*data-block-id="${safeBlockId}"[^>]*\\/?>`, 'i')
+  if (imgPattern.test(html)) {
+    return { replaced: true, html: html.replace(imgPattern, markup) }
+  }
+  return { replaced: false, html }
+}
+
+function insertManagedImageBlock(html: string, markup: string): string {
+  const containers = ['slide-content', 'content-shell', 'summary-inner', 'hero-title-group', 'hero-tagline', 'rm-inner']
+  for (const className of containers) {
+    const openPattern = new RegExp(`<div\\b[^>]*class=(["'])[^"']*\\b${className}\\b[^"']*\\1[^>]*>`, 'i')
+    const openMatch = openPattern.exec(html)
+    if (!openMatch || openMatch.index == null) continue
+    const openEnd = openMatch.index + openMatch[0].length
+    const tokenPattern = /<\/?div\b[^>]*>/gi
+    tokenPattern.lastIndex = openEnd
+    let depth = 1
+    let tokenMatch: RegExpExecArray | null
+    while ((tokenMatch = tokenPattern.exec(html))) {
+      if (/^<div\b/i.test(tokenMatch[0])) depth += 1
+      else depth -= 1
+      if (depth === 0) {
+        return `${html.slice(0, tokenMatch.index)}${markup}${html.slice(tokenMatch.index)}`
+      }
+    }
+  }
+  return appendBeforeClosingTag(html, 'section', markup)
+}
+
 export function injectSharedStyles(html: string): string {
   const styleBlock = `
 <style id="aios-html-ppt-enhancements">
-  .slide[data-slide-id] { position: relative; }
+  .slide[data-slide-id] { position: relative; overflow: hidden; contain: layout paint; isolation: isolate; }
+  .slide[data-slide-id] > * { position: relative; z-index: 3; }
+  .slide[data-slide-id] [class*="decoration"],
+  .slide[data-slide-id] [class*="dots"],
+  .slide[data-slide-id] .cover-decoration,
+  .slide[data-slide-id] .quote-decoration,
+  .slide[data-slide-id] .quote-decoration-2,
+  .slide[data-slide-id] .closing-decoration,
+  .slide[data-slide-id] .closing-decoration-2 { z-index: 1; pointer-events: none; max-width: 100%; max-height: 100%; }
+  .slide[data-slide-id] .slide-content,
+  .slide[data-slide-id] .slide-header,
+  .slide[data-slide-id] .summary-inner,
+  .slide[data-slide-id] .summary-columns,
+  .slide[data-slide-id] .summary-highlights,
+  .slide[data-slide-id] .fin-grid,
+  .slide[data-slide-id] .split-body,
+  .slide[data-slide-id] .content-shell,
+  .slide[data-slide-id] .detail-body,
+  .slide[data-slide-id] .rm-inner,
+  .slide[data-slide-id] .global-inner { position: relative; z-index: 3; }
   [data-block-id][data-block-type="text"] { cursor: text; transition: outline-color 160ms ease, box-shadow 160ms ease; }
   [data-block-id][data-block-type="text"]:hover { outline: 2px dashed rgba(37, 99, 235, 0.25); outline-offset: 4px; }
   [data-block-id][data-block-type="text"].aios-edit-selected { outline: 2px solid rgba(37, 99, 235, 0.85); outline-offset: 4px; box-shadow: 0 0 0 6px rgba(37, 99, 235, 0.12); }
   [data-block-id][data-block-type="image"] { cursor: pointer; transition: outline-color 160ms ease, box-shadow 160ms ease; }
   [data-block-id][data-block-type="image"]:hover { outline: 2px dashed rgba(245, 158, 11, 0.35); outline-offset: 4px; }
   [data-block-id][data-block-type="image"].aios-image-selected { outline: 2px solid rgba(245, 158, 11, 0.9); outline-offset: 4px; box-shadow: 0 0 0 6px rgba(245, 158, 11, 0.12); }
-  .aios-visual-slot { position: absolute; right: clamp(18px, 2.5vw, 40px); bottom: clamp(18px, 2.5vw, 40px); width: min(30vw, 360px); max-height: min(34vh, 260px); display: flex; align-items: flex-end; justify-content: center; pointer-events: none; z-index: 0; }
-  .aios-visual-slot img { width: 100%; height: auto; max-height: 100%; object-fit: contain; border-radius: 16px; box-shadow: 0 16px 40px rgba(15, 23, 42, 0.12); background: rgba(255,255,255,0.65); }
+  .slide[data-aios-visual-placement="right"] .slide-content,
+  .slide[data-aios-visual-placement="right"] .content-shell,
+  .slide[data-aios-visual-placement="right"] .summary-inner,
+  .slide[data-aios-visual-placement="right"] .split-body,
+  .slide[data-aios-visual-placement="right"] .detail-body { padding-right: min(34vw, 380px); }
+  .slide[data-aios-visual-placement="left"] .slide-content,
+  .slide[data-aios-visual-placement="left"] .content-shell,
+  .slide[data-aios-visual-placement="left"] .summary-inner,
+  .slide[data-aios-visual-placement="left"] .split-body,
+  .slide[data-aios-visual-placement="left"] .detail-body { padding-left: min(34vw, 380px); }
+  .aios-visual-slot { position: absolute; overflow: hidden; display: flex; align-items: stretch; justify-content: stretch; width: min(30vw, 360px); height: min(40vh, 300px); max-width: min(34vw, 420px); max-height: min(44vh, 340px); border-radius: 20px; box-shadow: 0 18px 44px rgba(15, 23, 42, 0.16); background: rgba(255,255,255,0.68); z-index: 2; }
+  .aios-visual-slot--right { right: clamp(18px, 2.5vw, 40px); top: 50%; transform: translateY(-50%); }
+  .aios-visual-slot--left { left: clamp(18px, 2.5vw, 40px); top: 50%; transform: translateY(-50%); }
+  .aios-visual-slot--hero { right: clamp(18px, 3vw, 48px); top: clamp(18px, 7vh, 72px); width: min(32vw, 420px); height: min(44vh, 320px); }
+  .aios-visual-slot--card { right: clamp(18px, 2.5vw, 40px); bottom: clamp(18px, 2.5vw, 40px); width: min(28vw, 320px); height: min(30vh, 220px); }
+  .aios-visual-slot--inline { position: relative; inset: auto; width: 100%; height: clamp(220px, 30vh, 320px); max-width: none; max-height: none; margin-top: 1.2rem; transform: none; }
+  .aios-visual-slot--background,
+  .aios-visual-slot--full { inset: 0; width: auto; height: auto; max-width: none; max-height: none; border-radius: 0; box-shadow: none; }
+  .aios-visual-slot--background { opacity: 0.2; z-index: 1; }
+  .aios-visual-slot img,
+  .aios-visual-slot svg { width: 100%; height: 100%; display: block; object-fit: cover; }
+  .aios-visual-slot [data-placeholder-used="true"] { background: rgba(255,255,255,0.72); }
   .aios-inline-editor { position: fixed; right: 20px; bottom: 20px; width: min(420px, calc(100vw - 32px)); background: rgba(15, 23, 42, 0.96); color: #fff; border-radius: 16px; box-shadow: 0 22px 60px rgba(15, 23, 42, 0.35); padding: 14px; z-index: 99999; display: none; font-family: system-ui, -apple-system, sans-serif; }
   .aios-inline-editor.open { display: block; }
   .aios-inline-editor__title { font-size: 13px; font-weight: 700; letter-spacing: 0.04em; margin: 0 0 8px; color: rgba(255,255,255,0.78); }
@@ -238,6 +363,23 @@ export function injectSharedStyles(html: string): string {
   .aios-image-editor__cancel { background: rgba(255,255,255,0.16); color: #fff; }
   .aios-image-editor__regen { background: #f59e0b; color: #000; }
   .aios-image-editor__status { font-size: 12px; color: rgba(255,255,255,0.6); margin-top: 6px; min-height: 18px; }
+  @media (max-width: 960px) {
+    .slide[data-aios-visual-placement="right"] .slide-content,
+    .slide[data-aios-visual-placement="right"] .content-shell,
+    .slide[data-aios-visual-placement="right"] .summary-inner,
+    .slide[data-aios-visual-placement="right"] .split-body,
+    .slide[data-aios-visual-placement="right"] .detail-body,
+    .slide[data-aios-visual-placement="left"] .slide-content,
+    .slide[data-aios-visual-placement="left"] .content-shell,
+    .slide[data-aios-visual-placement="left"] .summary-inner,
+    .slide[data-aios-visual-placement="left"] .split-body,
+    .slide[data-aios-visual-placement="left"] .detail-body { padding-left: 0; padding-right: 0; }
+    .aios-visual-slot,
+    .aios-visual-slot--right,
+    .aios-visual-slot--left,
+    .aios-visual-slot--hero,
+    .aios-visual-slot--card { position: relative; inset: auto; width: 100%; height: clamp(220px, 30vh, 320px); max-width: none; max-height: none; margin-top: 1rem; transform: none; }
+  }
 </style>`
 
   if (/<\/head>/i.test(html)) {
@@ -336,13 +478,16 @@ export function injectEditRuntime(html: string, deckId: string): string {
       })
         .then(function(r) { return r.ok ? r.json() : Promise.reject(r.status); })
         .then(function(data) {
-          if (data && data.assetDataUri) {
+          const nextSrc = data && (data.assetUrl || data.assetDataUri || data.assetPath);
+          if (data && nextSrc) {
             if (imgEl) {
-              imgEl.src = data.assetDataUri;
+              imgEl.src = nextSrc;
               if (imgEl.hasAttribute('data-image-prompt')) imgEl.setAttribute('data-image-prompt', imagePrompt);
+              imgEl.setAttribute('data-placeholder-used', data && data.placeholderUsed ? 'true' : 'false');
             }
             if (blockEl && blockEl.hasAttribute && blockEl.hasAttribute('data-image-prompt')) {
               blockEl.setAttribute('data-image-prompt', imagePrompt);
+              blockEl.setAttribute('data-placeholder-used', data && data.placeholderUsed ? 'true' : 'false');
             }
           }
           if (statusEl) statusEl.textContent = data && data.placeholderUsed ? '已使用 SVG 占位图' : '图片已更新';
@@ -360,13 +505,16 @@ export function injectEditRuntime(html: string, deckId: string): string {
         if (pending.statusEl) pending.statusEl.textContent = '图片生成失败: ' + (data.error || 'unknown error');
         return;
       }
-      if (data.assetDataUri) {
+      const nextSrc = data.assetUrl || data.assetDataUri || data.assetPath;
+      if (nextSrc) {
         if (pending.imgEl) {
-          pending.imgEl.src = data.assetDataUri;
+          pending.imgEl.src = nextSrc;
           if (pending.imgEl.hasAttribute('data-image-prompt')) pending.imgEl.setAttribute('data-image-prompt', pending.imagePrompt);
+          pending.imgEl.setAttribute('data-placeholder-used', data.placeholderUsed ? 'true' : 'false');
         }
         if (pending.blockEl && pending.blockEl.hasAttribute && pending.blockEl.hasAttribute('data-image-prompt')) {
           pending.blockEl.setAttribute('data-image-prompt', pending.imagePrompt);
+          pending.blockEl.setAttribute('data-placeholder-used', data.placeholderUsed ? 'true' : 'false');
         }
       }
       if (pending.statusEl) pending.statusEl.textContent = data.placeholderUsed ? '已使用 SVG 占位图' : '图片已更新';
@@ -524,6 +672,7 @@ function applyImagePlanning(
   slides: ContentModelSlide[],
   templateProfile: TemplateProfileRecord,
   options: HtmlPresentationJobOptions,
+  outputDir: string,
 ): {
   plannedSlideIds: Set<string>
   placeholderBySlideId: Map<string, { block: ContentModelBlock; placement: ContentModelSlide['visual']['placement'] }>
@@ -564,33 +713,51 @@ function applyImagePlanning(
     plannedSlideIds.add(slide.id)
     const prompt = buildVisualPrompt(templateProfile, slide)
     const existingImageBlock = slide.blocks.find((block) => block.type === 'image')
-    const placement: ContentModelSlide['visual']['placement'] = slide.role === 'cover' ? 'background' : 'right'
+    const placement: ContentModelSlide['visual']['placement'] =
+      slide.role === 'cover'
+        ? 'hero'
+        : slide.role === 'image'
+          ? 'right'
+          : slide.role === 'content'
+            ? 'card'
+            : 'inline'
     if (existingImageBlock) {
       existingImageBlock.imagePrompt = existingImageBlock.imagePrompt || prompt
+      existingImageBlock.placement = placement
+      if (!existingImageBlock.assetPath || isPlaceholderAssetPath(existingImageBlock.assetPath)) {
+        existingImageBlock.assetPath = writePlaceholderAsset(outputDir, slide, existingImageBlock, prompt)
+        existingImageBlock.placeholderUsed = true
+        placeholderBySlideId.set(slide.id, { block: existingImageBlock, placement })
+        placeholderCount += 1
+      } else {
+        existingImageBlock.placeholderUsed = false
+      }
       slide.visual = {
         type: 'image',
         prompt,
         assetPath: existingImageBlock.assetPath,
         placement,
       }
-      generatedImageCount += existingImageBlock.assetPath.startsWith('data:image/') ? 0 : 1
+      generatedImageCount += existingImageBlock.placeholderUsed ? 0 : 1
       return
     }
 
-    const placeholder = createPlaceholderDataUri(slide.title || 'Slide visual', prompt)
     const nextBlock: ContentModelBlock = {
       id: blockId(slide.index, slide.blocks.length),
       type: 'image',
       role: 'visual',
       text: '',
-      assetPath: placeholder,
+      assetPath: '',
       imagePrompt: prompt,
+      placement,
+      placeholderUsed: true,
     }
+    nextBlock.assetPath = writePlaceholderAsset(outputDir, slide, nextBlock, prompt)
     slide.blocks.push(nextBlock)
     slide.visual = {
       type: 'image',
       prompt,
-      assetPath: placeholder,
+      assetPath: nextBlock.assetPath,
       placement,
     }
     placeholderBySlideId.set(slide.id, { block: nextBlock, placement })
@@ -676,6 +843,8 @@ export function postProcessHtmlPresentationOutput(input: {
         text: '',
         assetPath: '',
         imagePrompt: '',
+        placement: 'right',
+        placeholderUsed: true,
       })
       return `<${tagName}${cleanedAttrs} data-block-id="${currentBlockId}" data-block-type="image" data-block-role="visual" data-image-prompt="">`
     })
@@ -692,6 +861,8 @@ export function postProcessHtmlPresentationOutput(input: {
         text: '',
         assetPath: src,
         imagePrompt: '',
+        placement: 'right',
+        placeholderUsed: isPlaceholderAssetPath(src),
       })
       return `<img${cleanedAttrs} data-block-id="${currentBlockId}" data-block-type="image" data-block-role="visual" data-image-prompt="">`
     })
@@ -714,7 +885,7 @@ export function postProcessHtmlPresentationOutput(input: {
         type: hasImage ? 'image' : 'none',
         prompt: '',
         assetPath: blocks.find((block) => block.type === 'image')?.assetPath ?? '',
-        placement: role === 'cover' ? 'background' : 'right',
+        placement: role === 'cover' ? 'hero' : 'right',
       },
     }
 
@@ -732,20 +903,22 @@ export function postProcessHtmlPresentationOutput(input: {
     slides.map((item) => item.model),
     input.templateProfile,
     input.options,
+    input.outputDir,
   )
 
   slides.forEach((item) => {
-    const placeholder = planning.placeholderBySlideId.get(item.model.id)
-    if (!placeholder) return
-    const placementClass = placeholder.placement === 'background' ? 'aios-visual-slot aios-visual-slot--background' : 'aios-visual-slot'
-    const placeholderMarkup = `<div class="${placementClass}"><img src="${placeholder.block.assetPath}" alt="${escapeAttribute(item.model.title || 'Slide visual placeholder')}" data-block-id="${placeholder.block.id}" data-block-type="image" data-block-role="visual" data-image-prompt="${escapeAttribute(placeholder.block.imagePrompt)}"></div>`
-    item.updated = appendBeforeClosingTag(item.updated, 'section', placeholderMarkup)
-    item.updated = item.updated.replace(/(<[^>]+data-block-type="image"[^>]*)(>)/gi, (full, start: string, end: string) => {
-      if (/data-image-prompt=(["']).*?\1/i.test(start)) {
-        return start.replace(/data-image-prompt=(["']).*?\1/i, `data-image-prompt="${escapeAttribute(placeholder.block.imagePrompt)}"`) + end
-      }
-      return `${start} data-image-prompt="${escapeAttribute(placeholder.block.imagePrompt)}"${end}`
-    })
+    const imageBlock = item.model.blocks.find((block) => block.type === 'image')
+    const visualPlacement = normalizeVisualPlacement(item.model.visual?.placement ?? imageBlock?.placement)
+    item.updated = item.updated.replace(
+      /^<section\b([^>]*)>/i,
+      (_full, attrs: string) => `<section${attrs} data-aios-has-visual="${imageBlock ? 'true' : 'false'}" data-aios-visual-placement="${visualPlacement}">`,
+    )
+    if (!imageBlock) return
+    imageBlock.placement = visualPlacement
+    imageBlock.placeholderUsed = imageBlock.placeholderUsed ?? isPlaceholderAssetPath(imageBlock.assetPath)
+    const managedMarkup = renderManagedImageMarkup({ block: imageBlock, slide: item.model })
+    const replaced = replaceManagedImageBlock(item.updated, imageBlock.id, managedMarkup)
+    item.updated = replaced.replaced ? replaced.html : insertManagedImageBlock(item.updated, managedMarkup)
   })
 
   slides.forEach((item) => {
@@ -778,6 +951,7 @@ export function postProcessHtmlPresentationOutput(input: {
         slideId: slides.find((slide) => slide.model.blocks.some((candidate) => candidate.id === block.id))?.model.id ?? '',
         assetPath: block.assetPath,
         imagePrompt: block.imagePrompt,
+        placeholderUsed: block.placeholderUsed,
       })),
     createdAt: now,
     updatedAt: now,
@@ -827,17 +1001,29 @@ function renderBlocksForTemplate(slide: ContentModelSlide): string {
       ${textBlocks.find((block) => block.role === 'title') ? `<h1 data-block-id="${textBlocks.find((block) => block.role === 'title')?.id}" data-block-type="text" data-block-role="title">${escapeHtml(textBlocks.find((block) => block.role === 'title')?.text ?? '')}</h1>` : ''}
       ${textBlocks.find((block) => block.role === 'subtitle') ? `<p class="subtitle" data-block-id="${textBlocks.find((block) => block.role === 'subtitle')?.id}" data-block-type="text" data-block-role="subtitle">${escapeHtml(textBlocks.find((block) => block.role === 'subtitle')?.text ?? '')}</p>` : ''}
       ${bullets || paragraphs}
+      ${imageBlock ? renderManagedImageMarkup({ block: imageBlock, slide }) : ''}
     </div>
-    ${imageBlock ? `<div class="visual-shell"><img src="${imageBlock.assetPath}" alt="${escapeAttribute(slide.title || 'Slide visual')}" data-block-id="${imageBlock.id}" data-block-type="image" data-block-role="visual" data-image-prompt="${escapeAttribute(imageBlock.imagePrompt)}"></div>` : ''}
   `
 }
 
 export function rebuildHtmlPresentationFromContentModel(input: {
   contentModel: ContentModelRecord
   templateProfile: TemplateProfileRecord
+  artifactId?: string
 }): string {
   const slidesHtml = input.contentModel.slides
-    .map((slide) => `<section class="slide" data-slide-id="${slide.id}">${renderBlocksForTemplate(slide)}</section>`)
+    .map((slide) => {
+      const imageBlock = slide.blocks.find((block) => block.type === 'image')
+      const rendered = renderBlocksForTemplate({
+        ...slide,
+        blocks: slide.blocks.map((block) => (
+          block.type === 'image'
+            ? { ...block, assetPath: resolveHtmlPresentationAssetUrl(block.assetPath, input.artifactId) }
+            : block
+        )),
+      })
+      return `<section class="slide" data-slide-id="${slide.id}" data-aios-has-visual="${imageBlock ? 'true' : 'false'}" data-aios-visual-placement="${normalizeVisualPlacement(slide.visual?.placement ?? imageBlock?.placement)}">${rendered}</section>`
+    })
     .join('\n')
   return `<!DOCTYPE html>
 <html lang="zh-CN">

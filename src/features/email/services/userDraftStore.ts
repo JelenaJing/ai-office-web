@@ -8,6 +8,7 @@
  * Security: local-only. Nothing is sent automatically.
  */
 import type { UserMailReplyDraft } from '../../../types/mailTriage'
+import { extractLegacyMailId } from '../utils/mailIdentity'
 
 const STORE_KEY = 'ai:user-draft:v1'
 const MAX_DRAFTS = 200
@@ -41,8 +42,8 @@ function save(store: UserDraftStore): void {
   } catch { /* quota exceeded — silently ignore */ }
 }
 
-function key(accountId: string, messageId: string, bodyHash: string): string {
-  return `${accountId}:${messageId}:${bodyHash}`
+function key(accountId: string, mailKey: string, bodyHash: string): string {
+  return `${accountId}:${mailKey}:${bodyHash}`
 }
 
 /**
@@ -50,10 +51,13 @@ function key(accountId: string, messageId: string, bodyHash: string): string {
  */
 export function getUserDraft(
   accountId: string,
-  messageId: string,
+  mailKey: string,
   bodyHash: string,
 ): UserMailReplyDraft | null {
-  const draft = load()[key(accountId, messageId, bodyHash)] ?? null
+  const store = load()
+  const draft = store[key(accountId, mailKey, bodyHash)]
+    ?? store[key(accountId, extractLegacyMailId(mailKey), bodyHash)]
+    ?? null
   if (!draft) return null
   if (draft.status === 'sent' || draft.status === 'discarded') return null
   return draft
@@ -64,7 +68,7 @@ export function getUserDraft(
  */
 export function setUserDraft(draft: UserMailReplyDraft): void {
   const store = load()
-  store[key(draft.accountId, draft.messageId, draft.bodyHash)] = draft
+  store[key(draft.accountId, draft.mailKey || draft.messageId, draft.bodyHash)] = draft
   save(store)
 }
 
@@ -73,27 +77,35 @@ export function setUserDraft(draft: UserMailReplyDraft): void {
  */
 export function updateUserDraftStatus(
   accountId: string,
-  messageId: string,
+  mailKey: string,
   bodyHash: string,
   status: UserMailReplyDraft['status'],
 ): void {
   const store = load()
-  const k = key(accountId, messageId, bodyHash)
-  if (store[k]) {
+  const keys = [
+    key(accountId, mailKey, bodyHash),
+    key(accountId, extractLegacyMailId(mailKey), bodyHash),
+  ]
+  for (const k of keys) {
+    if (!store[k]) continue
     store[k] = { ...store[k], status, updatedAt: new Date().toISOString() }
     save(store)
+    return
   }
 }
 
 /**
  * Remove all user drafts for a specific mail (across all bodyHash variants).
  */
-export function evictUserDraft(accountId: string, messageId: string): void {
+export function evictUserDraft(accountId: string, mailKey: string): void {
   const store = load()
-  const prefix = `${accountId}:${messageId}:`
+  const prefixes = [
+    `${accountId}:${mailKey}:`,
+    `${accountId}:${extractLegacyMailId(mailKey)}:`,
+  ]
   let changed = false
   for (const k of Object.keys(store)) {
-    if (k.startsWith(prefix)) { delete store[k]; changed = true }
+    if (prefixes.some((prefix) => k.startsWith(prefix))) { delete store[k]; changed = true }
   }
   if (changed) save(store)
 }

@@ -83,6 +83,7 @@ export interface CommunicationMessage {
 
 export interface CommunicationThread {
   id: string
+  sourceMailKey?: string
   providerType: ProviderType
   /** Email subject line OR the chat partner's display name */
   subject: string

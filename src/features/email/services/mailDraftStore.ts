@@ -8,6 +8,7 @@
  * Users must explicitly click "Send" to dispatch any message.
  */
 import type { AiMailReplyDraft } from '../../../types/mailTriage'
+import { extractLegacyMailId } from '../utils/mailIdentity'
 
 const STORE_KEY = 'ai:mail-draft:v2'
 const MAX_DRAFTS = 200
@@ -42,8 +43,11 @@ function save(store: DraftStore): void {
 }
 
 /** Get the AI draft for a specific mail. Returns null if not present or discarded. */
-export function getAiDraft(accountId: string, messageId: string, bodyHash: string): AiMailReplyDraft | null {
-  const draft = load()[`${accountId}:${messageId}:${bodyHash}`] ?? null
+export function getAiDraft(accountId: string, mailKey: string, bodyHash: string): AiMailReplyDraft | null {
+  const store = load()
+  const draft = store[`${accountId}:${mailKey}:${bodyHash}`]
+    ?? store[`${accountId}:${extractLegacyMailId(mailKey)}:${bodyHash}`]
+    ?? null
   if (!draft) return null
   // Don't return discarded drafts
   if (draft.status === 'discarded') return null
@@ -51,39 +55,48 @@ export function getAiDraft(accountId: string, messageId: string, bodyHash: strin
 }
 
 /** Check if a non-discarded AI draft exists for a specific mail + bodyHash. */
-export function hasAiDraft(accountId: string, messageId: string, bodyHash: string): boolean {
-  return getAiDraft(accountId, messageId, bodyHash) !== null
+export function hasAiDraft(accountId: string, mailKey: string, bodyHash: string): boolean {
+  return getAiDraft(accountId, mailKey, bodyHash) !== null
 }
 
 /** Store an AI draft. */
 export function setAiDraft(draft: AiMailReplyDraft): void {
   const store = load()
-  store[`${draft.accountId}:${draft.messageId}:${draft.bodyHash}`] = draft
+  const mailKey = draft.mailKey || draft.messageId
+  store[`${draft.accountId}:${mailKey}:${draft.bodyHash}`] = draft
   save(store)
 }
 
 /** Update the status of an existing draft. */
 export function updateAiDraftStatus(
   accountId: string,
-  messageId: string,
+  mailKey: string,
   bodyHash: string,
   status: AiMailReplyDraft['status'],
 ): void {
   const store = load()
-  const key = `${accountId}:${messageId}:${bodyHash}`
-  if (store[key]) {
+  const keys = [
+    `${accountId}:${mailKey}:${bodyHash}`,
+    `${accountId}:${extractLegacyMailId(mailKey)}:${bodyHash}`,
+  ]
+  for (const key of keys) {
+    if (!store[key]) continue
     store[key] = { ...store[key], status, updatedAt: new Date().toISOString() }
     save(store)
+    return
   }
 }
 
 /** Remove all AI drafts for a specific mail (across all bodyHash variants). */
-export function evictAiDraft(accountId: string, messageId: string): void {
+export function evictAiDraft(accountId: string, mailKey: string): void {
   const store = load()
-  const prefix = `${accountId}:${messageId}:`
+  const prefixes = [
+    `${accountId}:${mailKey}:`,
+    `${accountId}:${extractLegacyMailId(mailKey)}:`,
+  ]
   let changed = false
   for (const key of Object.keys(store)) {
-    if (key.startsWith(prefix)) {
+    if (prefixes.some((prefix) => key.startsWith(prefix))) {
       delete store[key]
       changed = true
     }

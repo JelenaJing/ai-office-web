@@ -350,11 +350,13 @@ export interface DocumentEditorCanvasHandle {
 interface DocumentEditorCanvasProps {
   state: EditableDocumentState
   modifiedSectionIds: string[]
+  compact?: boolean
   recentAiChange?: {
     token: number
     scope: 'selection' | 'section' | 'document'
     sectionId: string | null
   } | null
+  onContextMenu?: (event: React.MouseEvent) => void
   onHtmlChange: (html: string, activeSectionId: string | null) => void
   onSelectionChange: (payload: {
     selectedSectionId: string | null
@@ -657,7 +659,9 @@ export const DocumentEditorCanvas = forwardRef<DocumentEditorCanvasHandle, Docum
   function DocumentEditorCanvas({
     state,
     modifiedSectionIds,
+    compact = false,
     recentAiChange,
+    onContextMenu,
     onHtmlChange,
     onSelectionChange,
   }, ref) {
@@ -963,22 +967,23 @@ export const DocumentEditorCanvas = forwardRef<DocumentEditorCanvasHandle, Docum
 
     return (
       <CanvasShell>
-        <EditorToolbar>
-          {TOOLBAR_ACTIONS.map((action) => (
-            <ToolbarButton
-              key={action.label}
-              type="button"
-              disabled={action.kind === 'exec' ? !commandSupported(action.command) : false}
-              onMouseDown={(event) => {
-                event.preventDefault()
-                runCommand(action)
-              }}
-            >
-              {action.label}
-            </ToolbarButton>
-          ))}
-          <ToolbarHint>精简工具栏已保留常用写作能力；右侧 AI 助手可继续生成、改写和加引用。</ToolbarHint>
-        </EditorToolbar>
+        {!compact ? (
+          <EditorToolbar>
+            {TOOLBAR_ACTIONS.map((action) => (
+              <ToolbarButton
+                key={action.label}
+                type="button"
+                disabled={action.kind === 'exec' ? !commandSupported(action.command) : false}
+                onMouseDown={(event) => {
+                  event.preventDefault()
+                  runCommand(action)
+                }}
+              >
+                {action.label}
+              </ToolbarButton>
+            ))}
+          </EditorToolbar>
+        ) : null}
         <Paper>
           <EditableRoot
             ref={rootRef}
@@ -987,6 +992,12 @@ export const DocumentEditorCanvas = forwardRef<DocumentEditorCanvasHandle, Docum
             data-testid="document-editor-canvas"
             onInput={() => handleInput()}
             onPaste={handlePaste}
+            onContextMenu={(event) => {
+              if (onContextMenu) {
+                event.preventDefault()
+                onContextMenu(event)
+              }
+            }}
             onMouseUp={(event) => emitSelection(event.target)}
             onKeyUp={(event) => emitSelection(event.target)}
             onClick={(event) => emitSelection(event.target)}

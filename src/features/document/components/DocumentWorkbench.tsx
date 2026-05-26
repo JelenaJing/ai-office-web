@@ -1,24 +1,24 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type RefObject } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type MouseEvent } from 'react'
 import styled from 'styled-components'
 import { useWorkspace } from '../../../contexts/WorkspaceContext'
 import { useDocumentWorkspaceKnowledge } from '../../../contexts/DocumentWorkspaceContext'
 import { platformApi } from '../../../platform'
 import type { FileEntry, KnowledgeSourceListItem } from '../../../platform'
 import {
-  DocumentAiEditPanel,
-  type DocumentAiScope,
-  type SectionHistoryEntry,
-} from './DocumentAiEditPanel'
-import {
   DocumentEditorCanvas,
   type DocumentEditorCanvasHandle,
 } from './DocumentEditorCanvas'
-import { DocumentAttachmentPanel, DocumentKnowledgePanel } from './DocumentKnowledgePanel'
 import { DocumentKnowledgeSourcePicker } from './DocumentKnowledgeSourcePicker'
-import { DocumentOutlinePanel } from './DocumentOutlinePanel'
-import { DocumentTemplatePanel } from './DocumentTemplatePanel'
 import { DocumentTopToolbar } from './DocumentTopToolbar'
-import { AcademicWritingPanel, type AcademicWritingPanelSubmit } from './AcademicWritingPanel'
+import { DocumentHtmlContextMenu, type DocumentHtmlContextMenuState } from './DocumentHtmlContextMenu'
+import { WebDocChatPanel, type WebDocChatMessage } from './WebDocChatPanel'
+import type { DocumentAiScope, SectionHistoryEntry } from './DocumentAiEditPanel'
+import {
+  chatWebDocOpenCode,
+  invokeWebDocOpenCode,
+  mapWebDocPatchToDocumentPatch,
+  type WebDocToolId,
+} from '../services/documentOpenCodeApi'
 import {
   analyzeFormalTemplateFlow,
   buildKnowledgeRefsFromSelection,
@@ -78,66 +78,20 @@ const Shell = styled.div`
   position: relative;
 `
 
-const Body = styled.div<{ $aiOpen: boolean }>`
+const Body = styled.div`
   flex: 1;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: 200px minmax(0, 1fr) ${({ $aiOpen }) => ($aiOpen ? 'minmax(280px, 320px)' : '0px')};
-  overflow: hidden;
-  position: relative;
-`
-
-const LeftPane = styled.aside`
-  min-width: 0;
-  min-height: 0;
-  overflow: auto;
-  padding: 12px 10px;
-  border-right: 1px solid #d8e3ef;
-  background: #f7fafc;
-  display: grid;
-  align-content: start;
-  gap: 10px;
-`
-
-const AiPanelWrap = styled.div<{ $open: boolean }>`
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-  border-left: ${({ $open }) => ($open ? '1px solid #d8e3ef' : 'none')};
-  display: ${({ $open }) => ($open ? 'flex' : 'none')};
-  flex-direction: column;
-`
-
-const AiPanelToggle = styled.button<{ $open: boolean }>`
-  position: absolute;
-  right: ${({ $open }) => ($open ? 'min(320px, 28vw)' : '0')};
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 12;
-  width: 28px;
-  height: 72px;
-  border: 1px solid #d0dce9;
-  border-right: ${({ $open }) => ($open ? 'none' : '1px solid #d0dce9')};
-  border-radius: 10px 0 0 10px;
-  background: #ffffff;
-  color: #3b5f7d;
-  font-size: 11px;
-  font-weight: 800;
-  cursor: pointer;
-  writing-mode: vertical-rl;
-  letter-spacing: 0.08em;
-  box-shadow: -4px 0 16px rgba(15, 23, 42, 0.06);
-
-  &:hover {
-    background: #f4f9ff;
-  }
-`
-
-const CenterPane = styled.div`
-  min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+`
+
+const EditorArea = styled.div`
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 `
 
 const SidebarCard = styled.div`
@@ -279,8 +233,6 @@ interface RecentAiChange {
   scope: DocumentAiScope
   sectionId: string | null
 }
-
-type SidebarPanelKey = 'template' | 'academic' | 'knowledge'
 
 function createLocalDocumentDraft(engine: string, title = ''): DocumentDraft {
   return {
@@ -525,20 +477,13 @@ export default function DocumentWorkbench() {
   const [commandUndoStack, setCommandUndoStack] = useState<DocumentPatchOperation[]>([])
   // Last command operation result — shown in the AI panel
   const [lastCommandOp, setLastCommandOp] = useState<DocumentPatchOperation | null>(null)
-  const [sidebarOpen, setSidebarOpen] = useState<Record<SidebarPanelKey, boolean>>({
-    template: false,
-    academic: false,
-    knowledge: false,
-  })
-  const [leftToolsOpen, setLeftToolsOpen] = useState(false)
-  const [aiPanelOpen, setAiPanelOpen] = useState(true)
+  const [chatMessages, setChatMessages] = useState<WebDocChatMessage[]>([])
+  const [ctxMenu, setCtxMenu] = useState<DocumentHtmlContextMenuState | null>(null)
+  const [lastOpenCodeSource, setLastOpenCodeSource] = useState<string | null>(null)
 
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
   const importDocxInputRef = useRef<HTMLInputElement | null>(null)
   const canvasRef = useRef<DocumentEditorCanvasHandle | null>(null)
-  const outlinePanelRef = useRef<HTMLElement | null>(null)
-  const templatePanelRef = useRef<HTMLElement | null>(null)
-  const knowledgePanelRef = useRef<HTMLElement | null>(null)
 
   useEffect(() => {
     let disposed = false
@@ -716,8 +661,6 @@ export default function DocumentWorkbench() {
     () => editorState.documentDraft?.sections.find((section) => section.id === editorState.selectedSectionId) || null,
     [editorState.documentDraft, editorState.selectedSectionId],
   )
-
-  const currentHistory = sectionHistory[activeHistoryKey] || []
 
   const activeEngineLabel = engineLabel((editorState.engine as 'builtin' | 'minimax_docx') || defaultEngine)
   const activeTemplateLabel = template?.label || '未选择'
@@ -1936,10 +1879,6 @@ export default function DocumentWorkbench() {
 
   const handleAiSubmit = useCallback(runAiSubmit, [appendHistory, attachments, captureAiSnapshot, editorState, handleDocumentRewrite, knowledgeSourceMap, markSectionModified, selectedSection, syncEditorStateFromTaskResult, template, workspaceKbIds])
 
-  const handleAiPanelGenerate = useCallback(async (text: string) => {
-    await handleGenerate(text)
-  }, [handleGenerate])
-
   const handleDownloadDocx = useCallback(async () => {
     if (!hasActiveDocument) return
     setBusy(true)
@@ -2025,21 +1964,6 @@ export default function DocumentWorkbench() {
     setExportError(null)
   }, [editorState])
 
-  const toggleSidebarPanel = useCallback((key: SidebarPanelKey) => {
-    setSidebarOpen((prev) => ({ ...prev, [key]: !prev[key] }))
-  }, [])
-
-  const openSidebarPanel = useCallback((key: SidebarPanelKey, ref: RefObject<HTMLElement | null>) => {
-    setSidebarOpen((prev) => ({ ...prev, [key]: true }))
-    window.setTimeout(() => ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0)
-  }, [])
-
-  const openAcademicScenario = useCallback(() => {
-    setLeftToolsOpen(true)
-    setSidebarOpen((prev) => ({ ...prev, template: true, academic: true }))
-    window.setTimeout(() => templatePanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0)
-  }, [])
-
   const handleNewDocument = useCallback(() => {
     if (editorState.dirty) {
       const confirmed = typeof window !== 'undefined'
@@ -2064,6 +1988,80 @@ export default function DocumentWorkbench() {
     return () => window.removeEventListener('workspace-new-document', handler)
   }, [handleNewDocument])
 
+  const handleOpenCodeInvoke = useCallback(async (instruction: string, tool: WebDocToolId = 'chat') => {
+    const trimmed = instruction.trim()
+    if (!trimmed) return
+
+    const latestHtml = stripTransientAiMarkup(canvasRef.current?.getHtml() || editorState.html)
+    setBusy(true)
+    setStatusTone(undefined)
+    setChatMessages((prev) => [...prev, { id: `user-${Date.now()}`, role: 'user', text: trimmed }])
+    appendHistory('document', editorState.selectedSectionId, { role: 'user', text: trimmed })
+
+    try {
+      const payload = {
+        instruction: trimmed,
+        html: latestHtml,
+        title: editorState.title,
+        selectedText: editorState.selectedText,
+        selectedBlockId: editorState.selectedBlockId,
+        selectedSectionId: editorState.selectedSectionId,
+      }
+      const result = tool === 'chat'
+        ? await chatWebDocOpenCode(payload)
+        : await invokeWebDocOpenCode({ ...payload, tool })
+
+      setLastOpenCodeSource(result.source || null)
+      setChatMessages((prev) => [
+        ...prev,
+        { id: `assistant-${Date.now()}`, role: 'assistant', text: result.assistantMessage || '已完成。' },
+      ])
+      appendHistory('document', editorState.selectedSectionId, {
+        role: 'assistant',
+        text: result.assistantMessage || '已完成。',
+      })
+
+      const mappedPatch = mapWebDocPatchToDocumentPatch(result.patch, editorState.selectedText)
+      if (mappedPatch) {
+        const applied = canvasRef.current?.applyPatch(mappedPatch)
+        if (applied?.applied) {
+          setEditorState((prev) => ({
+            ...updateEditableStateFromHtml(prev, applied.html),
+            dirty: true,
+            selectedText: mappedPatch.type === 'replace_selection' ? '' : prev.selectedText,
+            selectionRange: mappedPatch.type === 'replace_selection' ? undefined : prev.selectionRange,
+          }))
+          markSectionModified(applied.affectedSectionId || editorState.selectedSectionId)
+          setRecentAiChange({
+            token: Date.now(),
+            scope: mappedPatch.type === 'replace_selection' ? 'selection' : 'document',
+            sectionId: applied.affectedSectionId || editorState.selectedSectionId,
+          })
+        }
+      }
+
+      setStatusMessage(result.success ? result.assistantMessage : (result.error || result.assistantMessage))
+      setStatusTone(result.success ? 'ok' : 'err')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'OpenCode 请求失败'
+      setChatMessages((prev) => [...prev, { id: `err-${Date.now()}`, role: 'assistant', text: message }])
+      setStatusMessage(message)
+      setStatusTone('err')
+    } finally {
+      setBusy(false)
+    }
+  }, [appendHistory, editorState, markSectionModified])
+
+  const handleCanvasContextMenu = useCallback((event: MouseEvent) => {
+    const selection = window.getSelection()
+    const selectedText = selection?.toString().trim() || editorState.selectedText.trim()
+    setCtxMenu({
+      x: event.clientX,
+      y: event.clientY,
+      hasSelection: selectedText.length > 0,
+    })
+  }, [editorState.selectedText])
+
   return (
     <Shell data-testid="document-workbench">
       <DocumentTopToolbar
@@ -2075,10 +2073,10 @@ export default function DocumentWorkbench() {
         saving={editorState.saving}
         lastSavedAt={editorState.lastSavedAt || null}
         exportError={exportError}
-        onOpenOutline={() => outlinePanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-        onOpenTemplate={() => openSidebarPanel('template', templatePanelRef)}
-        onOpenAcademicWriting={openAcademicScenario}
-        onOpenKnowledge={() => openSidebarPanel('knowledge', knowledgePanelRef)}
+        onOpenOutline={() => {}}
+        onOpenTemplate={() => {}}
+        onOpenKnowledge={() => setKbPickerOpen(true)}
+        onOpenAcademicWriting={() => {}}
         onImportDocx={handleImportDocx}
         onDownloadDocx={() => void handleDownloadDocx()}
         onExportPdf={handleExportPdf}
@@ -2090,168 +2088,34 @@ export default function DocumentWorkbench() {
         regenerateDisabled={!editorState.documentId}
       />
 
-      <Body $aiOpen={aiPanelOpen}>
-        <LeftPane>
-          <SidebarCard>
-            <SidebarSection ref={outlinePanelRef}>
-              <SidebarHeader>文档目录</SidebarHeader>
-              <DocumentOutlinePanel
-                outline={editorState.outline}
-                selectedSectionId={editorState.selectedSectionId}
-                modifiedSectionIds={modifiedSectionIds}
-                onSelectSection={(sectionId) => {
-                  handleSelectSection(sectionId)
-                }}
-              />
-            </SidebarSection>
-          </SidebarCard>
-
-          <SidebarCard>
-            <SidebarSection>
-              <SidebarToggle type="button" onClick={() => setLeftToolsOpen((value) => !value)} aria-expanded={leftToolsOpen}>
-                <span>更多工具</span>
-                <span>{leftToolsOpen ? '收起' : '模板 / 知识库'}</span>
-              </SidebarToggle>
-              {!leftToolsOpen ? (
-                <SidebarCollapsedHint>模板、知识库与附件已收起，需要时再展开。</SidebarCollapsedHint>
-              ) : null}
-            </SidebarSection>
-          </SidebarCard>
-
-          {leftToolsOpen ? (
-            <>
-          <SidebarCard>
-            <SidebarSection ref={templatePanelRef}>
-              <SidebarToggle type="button" onClick={() => toggleSidebarPanel('template')} aria-expanded={sidebarOpen.template}>
-                <span>模板</span>
-                <span>{sidebarOpen.template ? '收起' : activeTemplateLabel}</span>
-              </SidebarToggle>
-              {sidebarOpen.template ? (
-                <SidebarBody>
-                  <DocumentTemplatePanel
-                    templates={templates}
-                    selectedTemplateId={selectedTemplateId}
-                    onSelectTemplate={(id) => {
-                      setSelectedTemplateId(id)
-                    }}
-                  />
-                  <ScenarioCard>
-                    <ScenarioToggle type="button" onClick={() => toggleSidebarPanel('academic')} aria-expanded={sidebarOpen.academic}>
-                      <span>更多场景</span>
-                      <span>{sidebarOpen.academic ? '收起' : '学术写作'}</span>
-                    </ScenarioToggle>
-                    {sidebarOpen.academic ? (
-                      <div style={{ padding: '0 14px 14px' }}>
-                        <AcademicWritingPanel
-                          disabled={busy}
-                          selectedKnowledgeIds={workspaceKbIds}
-                          attachments={attachments}
-                          onGenerate={handleAcademicWritingGenerate}
-                        />
-                      </div>
-                    ) : <SidebarCollapsedHint>论文、研究报告等场景已收纳到这里，需要时再展开。</SidebarCollapsedHint>}
-                  </ScenarioCard>
-                </SidebarBody>
-              ) : <SidebarCollapsedHint>入口已收口到折叠项，不默认占用写作区。</SidebarCollapsedHint>}
-            </SidebarSection>
-          </SidebarCard>
-
-          <SidebarCard>
-            <SidebarSection ref={knowledgePanelRef}>
-              <SidebarToggle type="button" onClick={() => toggleSidebarPanel('knowledge')} aria-expanded={sidebarOpen.knowledge}>
-                <span>知识库与附件</span>
-                <span>{sidebarOpen.knowledge ? '收起' : `${workspaceKbIds.length + attachments.length} 个来源`}</span>
-              </SidebarToggle>
-              {sidebarOpen.knowledge ? (
-                <SidebarBody>
-                  <DocumentKnowledgePanel
-                    sources={knowledgeSources.filter((source) => source.provider === 'remote')}
-                    selectedKnowledgeIds={workspaceKbIds}
-                    onOpenKnowledgePicker={() => {
-                      setKbPickerOpen(true)
-                    }}
-                  />
-                  <DocumentAttachmentPanel
-                    attachments={attachments}
-                    onAddAttachment={() => {
-                      handleUploadAttachment()
-                    }}
-                    onRemoveAttachment={(fileId) => setAttachments((prev) => prev.filter((item) => item.id !== fileId))}
-                  />
-                </SidebarBody>
-              ) : <SidebarCollapsedHint>展开后即可选择知识库、上传附件，并在 AI 助手里直接加引用。</SidebarCollapsedHint>}
-            </SidebarSection>
-          </SidebarCard>
-            </>
-          ) : null}
-        </LeftPane>
-
-        <CenterPane>
+      <Body>
+        <EditorArea>
           <DocumentEditorCanvas
             ref={canvasRef}
+            compact
             state={editorState}
             modifiedSectionIds={modifiedSectionIds}
             recentAiChange={recentAiChange}
+            onContextMenu={handleCanvasContextMenu}
             onHtmlChange={handleCanvasHtmlChange}
             onSelectionChange={handleCanvasSelectionChange}
           />
-        </CenterPane>
+        </EditorArea>
 
-        <AiPanelToggle
-          type="button"
-          $open={aiPanelOpen}
-          onClick={() => setAiPanelOpen((value) => !value)}
-          aria-label={aiPanelOpen ? '收起 AI 助手' : '展开 AI 助手'}
-        >
-          {aiPanelOpen ? '收起助手' : 'AI 助手'}
-        </AiPanelToggle>
-
-        <AiPanelWrap $open={aiPanelOpen}>
-        <DocumentAiEditPanel
-          selectedSectionId={editorState.selectedSectionId}
-          selectedSectionLabel={selectedSection?.title || '未选择章节'}
-          selectedBlockId={editorState.selectedBlockId}
-          selectedBlockRole={editorState.selectedBlockRole}
-          selectedBlockText={editorState.selectedBlockText}
-          selectedText={editorState.selectedText}
-          selectionLength={editorState.selectedText.trim().length}
-          history={currentHistory}
-          references={editorState.documentArtifact?.references}
-          citations={editorState.documentArtifact?.citations}
+        <WebDocChatPanel
+          messages={chatMessages}
           busy={busy}
-          disabled={false}
-          hasDocument={hasActiveDocument}
-          dirty={editorState.dirty}
-          saving={editorState.saving}
-          lastSavedAt={editorState.lastSavedAt || null}
-          statusMessage={statusMessage}
-          canUndoLastAiEdit={Boolean(lastAiSnapshot)}
-          lastCommandOp={lastCommandOp}
-          canUndoLastCommand={commandUndoStack.length > 0}
-          promptValue={generationPrompt}
-          onPromptChange={setGenerationPrompt}
-          onUndoLastAiEdit={handleUndoLastAiEdit}
-          onUndoLastCommand={handleUndoLastCommand}
-          onContinueWriting={handleContinueWriting}
-          onInsertCitation={handleInsertCitation}
-          onGenerate={handleAiPanelGenerate}
-          onSubmit={async (instruction, scope) => {
-            if (isUndoInstruction(instruction)) {
-              if (commandUndoStack.length > 0) {
-                handleUndoLastCommand()
-              } else {
-                setStatusMessage('当前没有可撤销的指令操作')
-                setStatusTone('err')
-              }
-              return
-            }
-            // Try command engine first, fall back to legacy scope-based submit
-            const handled = await handleCommandSubmit(instruction)
-            if (!handled) await handleAiSubmit(instruction, scope)
-          }}
+          lastSource={lastOpenCodeSource}
+          onSend={(instruction) => handleOpenCodeInvoke(instruction, 'chat')}
         />
-        </AiPanelWrap>
       </Body>
+
+      <DocumentHtmlContextMenu
+        menu={ctxMenu}
+        busy={busy}
+        onInvokeTool={(tool, instruction) => void handleOpenCodeInvoke(instruction, tool)}
+        onClose={() => setCtxMenu(null)}
+      />
 
       {statusMessage ? <StatusBar $tone={statusTone}>{statusMessage}</StatusBar> : null}
 

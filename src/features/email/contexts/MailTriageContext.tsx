@@ -62,6 +62,12 @@ import {
   emailRuntimeGetTriageTask,
   emailRuntimeStartTriage,
 } from '../services/emailRuntime'
+import {
+  formatMailDebugEntry,
+  getMailKey,
+  getMailTimestamp,
+  normalizeMailBase,
+} from '../utils/mailIdentity'
 
 /* ------------------------------------------------------------------ */
 /*  Context shape                                                      */
@@ -122,6 +128,7 @@ function buildSkippedResult(mail: MailItem, accountId: string, reason: AiMailSki
   const isSystemNotice = reason === 'system_delivery_notice'
   return {
     messageId: mail.id,
+    mailKey: resolveMailStorageKey(mail),
     threadId: mail.threadId,
     accountId,
     bodyHash: computeBodyHash(mail.body),
@@ -151,6 +158,36 @@ function resolveAccountId(accountConfig: ReturnType<typeof useEmail>['accountCon
 function resolveWorkspaceId(activeWorkspacePath: string | null): string {
   if (!activeWorkspacePath) return 'no-workspace'
   return `ws-${computeBodyHash(activeWorkspacePath)}`
+}
+
+function logMailOrder(label: string, mails: MailItem[]) {
+  console.debug(label, mails.slice(0, 10).map((mail) => ({
+    ...formatMailDebugEntry(mail),
+    timestamp: getMailTimestamp(mail),
+  })))
+}
+
+function resolveMailStorageKey(mail: MailItem): string {
+  return mail.mailKey || getMailKey(mail)
+}
+
+function resolveJobMailKey(job: Pick<EmailAnalysisJobSnapshot, 'accountId' | 'folder' | 'messageId'>, mail?: MailItem): string {
+  if (mail) return resolveMailStorageKey(mail)
+  return getMailKey(normalizeMailBase({
+    id: job.messageId,
+    accountId: job.accountId,
+    from: '',
+    fromName: '',
+    to: '',
+    toName: '',
+    subject: '',
+    body: '',
+    timestamp: '',
+    unread: false,
+    replied: false,
+    folder: job.folder?.toLowerCase() === 'sent' ? 'sent' : job.folder?.toLowerCase() === 'trash' ? 'trash' : 'inbox',
+    uid: job.messageId,
+  }, job.accountId))
 }
 
 /**
@@ -246,12 +283,13 @@ function buildStructuredAnalysisResult(
   const failed = triage.status === 'failed'
   return {
     messageId: mail.id,
+    mailKey: mail.mailKey || triage.mailKey || getMailKey(mail),
     threadId: mail.threadId,
     status: triage.status === 'success' ? 'done' : triage.status === 'skipped' ? 'skipped' : job?.status,
     fromName: mail.fromName,
     fromEmail: mail.from,
     subject: mail.subject,
-    receivedAt: mail.timestamp,
+    receivedAt: mail.receivedAt || mail.internalDate || mail.date || mail.sentAt || mail.createdAt || mail.timestamp,
     importance: mapImportance(triage),
     category: triage.emailCategory || triage.category,
     actionType: mapActionType(triage),
@@ -283,12 +321,13 @@ function buildFallbackFailedAnalysisResult(
 ): EmailAnalysisResult {
   return {
     messageId: mail.id,
+    mailKey: mail.mailKey || getMailKey(mail),
     threadId: mail.threadId,
     status: 'failed',
     fromName: mail.fromName,
     fromEmail: mail.from,
     subject: mail.subject,
-    receivedAt: mail.timestamp,
+    receivedAt: mail.receivedAt || mail.internalDate || mail.date || mail.sentAt || mail.createdAt || mail.timestamp,
     importance: 'normal',
     category: 'unknown',
     actionType: 'no_action',
@@ -317,6 +356,7 @@ async function generateDraftForMail(
       id: `draft-${accountId}-${mail.id}-${Date.now()}`,
       accountId,
       messageId: mail.id,
+      mailKey: mail.mailKey || getMailKey(mail),
       bodyHash,
       triageResultId: `${accountId}:${mail.id}:${bodyHash}`,
       subject: `Re: ${mail.subject}`,
@@ -348,12 +388,13 @@ async function generateDraftForMail(
     const raw = await window.electronAPI.writingAssistant({ instruction: prompt, language: 'zh' })
     const draftBody = stripThinkTags(raw).trim()
     if (!draftBody) return null
-    const draft: AiMailReplyDraft = {
-      id: `draft-${accountId}-${mail.id}-${Date.now()}`,
-      accountId,
-      messageId: mail.id,
-      bodyHash,
-      triageResultId: `${accountId}:${mail.id}:${bodyHash}`,
+      const draft: AiMailReplyDraft = {
+        id: `draft-${accountId}-${mail.id}-${Date.now()}`,
+        accountId,
+        messageId: mail.id,
+        mailKey: mail.mailKey || getMailKey(mail),
+        bodyHash,
+        triageResultId: `${accountId}:${mail.id}:${bodyHash}`,
       subject: `Re: ${mail.subject}`,
       to: [mail.from || ''],
       draftBody: draftBody + '\n\n（本条回复由 AI 自动生成，请确认后再发送。）',
@@ -435,22 +476,33 @@ export function MailTriageProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => () => clearPolling(), [clearPolling])
 
-  const publishResult = useCallback((result: AiMailTriageResult) => {
+  const publishResult = useCallback((result: AiMailTriageResult, mail?: MailItem) => {
     const mergedTodos = mergeAnalysisTodos(accountId, workspaceId, result.todos ?? [])
+    const mailKey = result.mailKey || (mail ? resolveMailStorageKey(mail) : resolveJobMailKey({
+      accountId: result.accountId,
+      folder: result.folder || 'INBOX',
+      messageId: result.messageId,
+    }))
     const nextResult = {
       ...result,
+      mailKey,
       folder: result.folder || 'INBOX',
       promptVersion: result.promptVersion || MAIL_ANALYSIS_PROMPT_VERSION,
       todos: mergedTodos,
       updatedAt: now(),
     }
     setCachedTriage(nextResult)
-    setTriageResults((prev) => ({ ...prev, [nextResult.messageId]: nextResult }))
+    setTriageResults((prev) => ({ ...prev, [mailKey]: nextResult }))
     setMailTodos(getMailTodos(accountId, workspaceId))
   }, [accountId, workspaceId])
 
-  const applyTransientResult = useCallback((result: AiMailTriageResult) => {
-    setTriageResults((prev) => ({ ...prev, [result.messageId]: result }))
+  const applyTransientResult = useCallback((result: AiMailTriageResult, mail?: MailItem) => {
+    const mailKey = result.mailKey || (mail ? resolveMailStorageKey(mail) : resolveJobMailKey({
+      accountId: result.accountId,
+      folder: result.folder || 'INBOX',
+      messageId: result.messageId,
+    }))
+    setTriageResults((prev) => ({ ...prev, [mailKey]: { ...result, mailKey } }))
   }, [])
 
   const rebuildBatchResults = useCallback((
@@ -471,49 +523,59 @@ export function MailTriageProvider({ children }: { children: ReactNode }) {
       : [...jobMap.keys()]
     const nextResults: EmailAnalysisResult[] = ids.map((messageId) => {
       const job = jobMap.get(messageId)
-      const triage = jobToTriageResult(job) ?? latestTriageResultsRef.current[messageId]
-      const mail = mailMap.get(messageId) ?? buildSyntheticMail(messageId, job, triage)
+      const existingMail = mailMap.get(messageId)
+      const triage = jobToTriageResult(job, existingMail)
+      const mail = existingMail ?? buildSyntheticMail(messageId, job, triage)
+      const mailKey = resolveMailStorageKey(mail)
+      const resolvedTriage = triage ?? latestTriageResultsRef.current[mailKey]
       if (job?.status === 'failed') {
         return buildJobFailedAnalysisResult(mail, batchId, job)
       }
       if (job?.status === 'pending' || job?.status === 'running') {
         return buildJobPendingAnalysisResult(mail, batchId, job)
       }
-      if (triage) {
-        const draft = drafts[messageId] ?? getAiDraft(accountId, messageId, computeBodyHash(mail.body))
-        return buildStructuredAnalysisResult(mail, triage, batchId, draft, job)
+      if (resolvedTriage) {
+        const draft = drafts[mailKey] ?? getAiDraft(accountId, mailKey, computeBodyHash(mail.body))
+        return buildStructuredAnalysisResult(mail, resolvedTriage, batchId, draft, job)
       }
       return buildFallbackFailedAnalysisResult(mail, batchId, '未获得分析结果')
     })
+    console.debug('[MailTriage] analyzed results order', nextResults.map((result) => ({
+      subject: result.subject,
+      mailKey: result.mailKey,
+      priority: result.importance,
+      timestamp: result.receivedAt ? new Date(result.receivedAt).getTime() : 0,
+    })))
     setCurrentBatchResults(nextResults)
     setCurrentBatchSummary(buildEmailAnalysisBatchSummary(batchId, nextResults))
   }, [accountId, mails])
 
   const mergeJobIntoTriageState = useCallback((job: EmailAnalysisJobSnapshot) => {
-    const existing = latestTriageResultsRef.current[job.messageId]
-    const triage = jobToTriageResult(job)
     const mail = mails.find((item) => item.id === job.messageId)
+    const mailKey = resolveJobMailKey(job, mail)
+    const existing = latestTriageResultsRef.current[mailKey]
+    const triage = jobToTriageResult(job, mail)
     if (job.status === 'done' && triage) {
-      publishResult(triage)
+      publishResult(triage, mail)
       return
     }
     if (job.status === 'skipped' && triage) {
       if (triage.status === 'success') {
-        publishResult(triage)
+        publishResult(triage, mail)
         return
       }
       if (existing?.status !== 'success') {
-        publishResult(triage)
+        publishResult(triage, mail)
       }
       return
     }
     if (job.status === 'failed') {
       if (existing?.status === 'success' && !batchForceRef.current) return
-      applyTransientResult(buildFailedResult(job, mail, job.error || '分析失败'))
+      applyTransientResult(buildFailedResult(job, mail, job.error || '分析失败'), mail)
       return
     }
     if ((job.status === 'pending' || job.status === 'running') && !(existing?.status === 'success' && !batchForceRef.current)) {
-      applyTransientResult(buildPendingResult(job, mail))
+      applyTransientResult(buildPendingResult(job, mail), mail)
     }
   }, [applyTransientResult, mails, publishResult])
 
@@ -524,20 +586,21 @@ export function MailTriageProvider({ children }: { children: ReactNode }) {
     const generatedDrafts: Record<string, AiMailReplyDraft> = {}
     let draftsGenerated = 0
     for (const job of snapshot.jobs) {
-      const triage = jobToTriageResult(job) ?? latestTriageResultsRef.current[job.messageId]
+      const mail = mailMap.get(job.messageId)
+      const mailKey = mail ? resolveMailStorageKey(mail) : resolveJobMailKey(job)
+      const triage = jobToTriageResult(job, mail) ?? latestTriageResultsRef.current[mailKey]
       if (!triage || triage.status !== 'success') continue
       if (!qualifiesForDraft(triage)) continue
-      const mail = mailMap.get(job.messageId)
       if (!mail) continue
       const bodyHash = computeBodyHash(mail.body)
-      if (hasAiDraft(accountId, job.messageId, bodyHash)) {
-        const existing = getAiDraft(accountId, job.messageId, bodyHash)
-        if (existing) generatedDrafts[job.messageId] = existing
+      if (hasAiDraft(accountId, mailKey, bodyHash)) {
+        const existing = getAiDraft(accountId, mailKey, bodyHash)
+        if (existing) generatedDrafts[mailKey] = existing
         continue
       }
       const draft = await generateDraftForMail(mail, accountId, bodyHash, triage)
       if (!draft) continue
-      generatedDrafts[job.messageId] = draft
+      generatedDrafts[mailKey] = draft
       draftsGenerated += 1
     }
     if (Object.keys(generatedDrafts).length > 0) {
@@ -572,6 +635,7 @@ export function MailTriageProvider({ children }: { children: ReactNode }) {
       failed: snapshot.summary.failed,
     }))
     rebuildBatchResults(snapshot)
+    logMailOrder('[MailTriage] after analysis top10', mails)
     const terminal = snapshot.status === 'completed' || snapshot.status === 'failed' || snapshot.status === 'cancelled'
     setIsAnalyzingEmails(!terminal)
     setIsWorkerRunning(!terminal)
@@ -645,6 +709,7 @@ export function MailTriageProvider({ children }: { children: ReactNode }) {
     } else {
       batchMailIdsRef.current = new Set(mails.filter((mail) => mail.unread && mail.folder !== 'sent' && mail.folder !== 'trash').map((mail) => mail.id))
     }
+    logMailOrder('[MailTriage] before analysis top10', mails)
     refreshMails()
     const limit = Math.min(Math.max(batchMailIdsRef.current.size || 30, 1), 30)
     try {
@@ -706,11 +771,12 @@ export function MailTriageProvider({ children }: { children: ReactNode }) {
     async (mailId: string) => {
       const mail = mails.find((m) => m.id === mailId)
       if (!mail) return
+      const mailKey = resolveMailStorageKey(mail)
       const bodyHash = computeBodyHash(mail.body)
-      const triage = triageResults[mailId]
+      const triage = triageResults[mailKey]
       if (!triage) return
       const draft = await generateDraftForMail(mail, accountId, bodyHash, triage)
-      if (draft) setAiDrafts((prev) => ({ ...prev, [mailId]: draft }))
+      if (draft) setAiDrafts((prev) => ({ ...prev, [mailKey]: draft }))
     },
     [mails, triageResults, accountId],
   )
@@ -718,15 +784,17 @@ export function MailTriageProvider({ children }: { children: ReactNode }) {
   /* ---- Public API: discard draft ---- */
   const discardDraft = useCallback(
     (mailId: string) => {
+      const mail = mails.find((item) => item.id === mailId)
+      const mailKey = mail ? resolveMailStorageKey(mail) : mailId
       setAiDrafts((prev) => {
-        if (!prev[mailId]) return prev
-        updateAiDraftStatus(accountId, mailId, prev[mailId].bodyHash, 'discarded')
+        if (!prev[mailKey]) return prev
+        updateAiDraftStatus(accountId, mailKey, prev[mailKey].bodyHash, 'discarded')
         const next = { ...prev }
-        delete next[mailId]
+        delete next[mailKey]
         return next
       })
     },
-    [accountId],
+    [accountId, mails],
   )
 
   const value = useMemo<MailTriageContextValue>(
@@ -763,6 +831,7 @@ function buildPendingResult(
 ): AiMailTriageResult {
   return {
     messageId: job.messageId,
+    mailKey: mail ? resolveMailStorageKey(mail) : resolveJobMailKey({ accountId: job.accountId, folder: 'INBOX', messageId: job.messageId }),
     accountId: job.accountId,
     bodyHash: job.bodyHash || '',
     category: 'unknown',
@@ -789,6 +858,7 @@ function buildFailedResult(
 ): AiMailTriageResult {
   return {
     messageId: job.messageId,
+    mailKey: mail ? resolveMailStorageKey(mail) : resolveJobMailKey({ accountId: job.accountId, folder: 'INBOX', messageId: job.messageId }),
     accountId: job.accountId,
     bodyHash: job.bodyHash || '',
     category: 'unknown',
@@ -815,10 +885,11 @@ function buildFailedResult(
   }
 }
 
-function jobToTriageResult(job: EmailAnalysisJobSnapshot | undefined): AiMailTriageResult | null {
+function jobToTriageResult(job: EmailAnalysisJobSnapshot | undefined, mail?: MailItem): AiMailTriageResult | null {
   if (!job?.result) return null
   return {
     ...job.result,
+    mailKey: job.result.mailKey || (mail ? resolveMailStorageKey(mail) : resolveJobMailKey(job)),
     accountId: job.result.accountId || job.accountId,
     folder: job.result.folder || job.folder,
     promptVersion: job.result.promptVersion || MAIL_ANALYSIS_PROMPT_VERSION,
@@ -847,19 +918,26 @@ function buildSyntheticMail(
   job?: EmailAnalysisJobSnapshot,
   triage?: AiMailTriageResult | null,
 ): MailItem {
-  return {
+  return normalizeMailBase({
     id: messageId,
+    accountId: job?.accountId || triage?.accountId,
     from: '',
     fromName: '',
     to: '',
     toName: '',
     subject: job?.subject || triage?.summary || '邮件分析结果',
     body: '',
+    receivedAt: job?.finishedAt || job?.updatedAt || now(),
+    internalDate: job?.updatedAt || now(),
+    date: job?.updatedAt || now(),
+    createdAt: job?.createdAt || now(),
     timestamp: job?.finishedAt || job?.updatedAt || now(),
     unread: false,
     replied: false,
     folder: 'inbox',
-  }
+    uid: messageId,
+    uidValidity: '',
+  }, job?.accountId || triage?.accountId)
 }
 
 function buildJobPendingAnalysisResult(
@@ -869,12 +947,13 @@ function buildJobPendingAnalysisResult(
 ): EmailAnalysisResult {
   return {
     messageId: mail.id,
+    mailKey: mail.mailKey || getMailKey(mail),
     threadId: mail.threadId,
     status: job.status,
     fromName: mail.fromName,
     fromEmail: mail.from,
     subject: mail.subject,
-    receivedAt: mail.timestamp,
+    receivedAt: mail.receivedAt || mail.internalDate || mail.date || mail.sentAt || mail.createdAt || mail.timestamp,
     importance: 'normal',
     category: 'unknown',
     actionType: 'no_action',
@@ -895,12 +974,13 @@ function buildJobFailedAnalysisResult(
 ): EmailAnalysisResult {
   return {
     messageId: mail.id,
+    mailKey: mail.mailKey || getMailKey(mail),
     threadId: mail.threadId,
     status: 'failed',
     fromName: mail.fromName,
     fromEmail: mail.from,
     subject: mail.subject,
-    receivedAt: mail.timestamp,
+    receivedAt: mail.receivedAt || mail.internalDate || mail.date || mail.sentAt || mail.createdAt || mail.timestamp,
     importance: 'normal',
     category: 'unknown',
     actionType: 'no_action',

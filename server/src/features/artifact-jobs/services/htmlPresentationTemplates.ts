@@ -41,12 +41,15 @@ export interface TemplateProfileRecord {
   templateSource: string
   templateSlug: string
   templateName: string
+  templateFile: string
+  rendererMode: 'beautiful-template' | 'html-ppt-beautiful-fallback' | 'generic-fallback'
   availableLayouts: string[]
   colorScheme: string
   density: string
   bestFor: string[]
   avoidFor: string[]
   visualRules: string[]
+  warning?: string
   imagePolicy: {
     maxImages: number
     fallback: 'svg-placeholder'
@@ -69,6 +72,7 @@ interface TemplateIndexPayload {
 }
 
 const BEAUTIFUL_TEMPLATES_INDEX = '/data/darebug/aios-skills/beautiful-html-templates/index.json'
+const BEAUTIFUL_TEMPLATES_ROOT = '/data/darebug/aios-skills/beautiful-html-templates/templates'
 
 const FALLBACK_TEMPLATE_LIBRARY: CandidateTemplateRecord[] = [
   {
@@ -248,6 +252,13 @@ export function loadBeautifulTemplateIndex(): TemplateIndexEntry[] {
   return Array.isArray(payload.templates) ? payload.templates.filter((entry) => entry && typeof entry.slug === 'string' && typeof entry.name === 'string') : []
 }
 
+export function resolveBeautifulTemplateFile(slug: string): string {
+  const normalized = slug.trim()
+  if (!normalized) return ''
+  const candidate = path.join(BEAUTIFUL_TEMPLATES_ROOT, normalized, 'template.html')
+  return fs.existsSync(candidate) ? candidate : ''
+}
+
 export function listAvailableHtmlPresentationTemplates(): CandidateTemplateRecord[] {
   try {
     return loadBeautifulTemplateIndex()
@@ -261,10 +272,13 @@ export function listAvailableHtmlPresentationTemplates(): CandidateTemplateRecor
 function buildTemplateProfile(candidate: CandidateTemplateRecord, options: HtmlPresentationJobOptions, fallbackUsed: boolean): TemplateProfileRecord {
   const bestFor = candidate.bestFor.length > 0 ? candidate.bestFor : uniqueStrings([...candidate.mood, ...candidate.occasion]).slice(0, 4)
   const avoidFor = candidate.avoidFor.length > 0 ? candidate.avoidFor : ['overcrowded slides', 'mismatched tone']
+  const templateFile = fallbackUsed ? '' : resolveBeautifulTemplateFile(candidate.slug)
   return {
     templateSource: fallbackUsed ? 'html-ppt-beautiful-fallback' : 'beautiful-html-templates',
     templateSlug: candidate.slug,
     templateName: candidate.name,
+    templateFile,
+    rendererMode: fallbackUsed ? 'html-ppt-beautiful-fallback' : 'html-ppt-beautiful-fallback',
     availableLayouts: [],
     colorScheme: candidate.scheme,
     density: candidate.density,

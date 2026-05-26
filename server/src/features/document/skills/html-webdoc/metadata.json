@@ -1,0 +1,12 @@
+{
+  "id": "html-webdoc",
+  "name": "HTML 文稿 WebDoc",
+  "description": "OpenCode 驱动的 HTML-native 文稿编辑：对话修改、选区改写、续写与引用工具",
+  "type": "document",
+  "runner": "opencode",
+  "inputTypes": ["html", "text"],
+  "outputTypes": ["json", "html"],
+  "entryFile": "SKILL.md",
+  "outputFile": "output/response.json",
+  "uiPlacement": ["document-workbench"]
+}

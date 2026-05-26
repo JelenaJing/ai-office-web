@@ -147,6 +147,7 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
   const [retemplateSlug, setRetemplateSlug] = useState('')
   const [isRetemplating, setIsRetemplating] = useState(false)
   const [retemplateError, setRetemplateError] = useState('')
+  const [retemplateWarning, setRetemplateWarning] = useState('')
 
   const previewRef = useRef<HTMLDivElement | null>(null)
   const previewIframeRef = useRef<HTMLIFrameElement | null>(null)
@@ -241,7 +242,7 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
             ? event.source
             : previewIframeRef.current?.contentWindow
         if (targetWindow && typeof targetWindow.postMessage === 'function') {
-          targetWindow.postMessage(responsePayload, '*')
+          (targetWindow as { postMessage: (message: unknown, targetOrigin: string) => void }).postMessage(responsePayload, '*')
         }
       }
     }
@@ -362,6 +363,7 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
     setPreviewError('')
     setLogs('')
     setShowDebug(false)
+    setRetemplateWarning('')
     setJob(null)
     loadedArtifactIdRef.current = ''
     setPreview(null)
@@ -414,6 +416,7 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
     if (!retemplateSlug || !job?.artifactId) return
     setIsRetemplating(true)
     setRetemplateError('')
+    setRetemplateWarning('')
     setPreviewLoaded(false)
     try {
       const res = await fetch(resolveWebApiUrl(`/api/artifacts/${job.artifactId}/html-presentation/retemplate`), {
@@ -421,8 +424,9 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
         headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ templateSlug: retemplateSlug }),
       })
-      const data = (await res.json()) as { success?: boolean; previewUrl?: string; error?: string }
+      const data = (await res.json()) as { success?: boolean; previewUrl?: string; error?: string; warning?: string }
       if (!res.ok || !data.success) throw new Error(data.error ?? '换模板失败')
+      setRetemplateWarning(data.warning ?? '')
       // Force iframe remount with a cache-buster
       const cacheBuster = `?v=${Date.now()}`
       setPreview((prev) => prev ? { ...prev, url: resolveWebApiUrl(`/api/artifacts/${job.artifactId!}/file`) + cacheBuster } : prev)
@@ -440,6 +444,7 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
     setSubmitError('')
     setPreviewError('')
     setShowDebug(false)
+    setRetemplateWarning('')
     loadedArtifactIdRef.current = ''
     setPreview(null)
     setPreviewLoaded(false)
@@ -659,6 +664,7 @@ export default function HtmlPptPage({ onBack }: { onBack?: () => void }) {
             {retemplateError ? <span style={s.retemplateError}>{retemplateError}</span> : null}
           </div>
         ) : null}
+        {retemplateWarning ? <div style={s.inlineWarnBox}>{retemplateWarning}</div> : null}
 
         {previewError ? (
           <div style={s.inlineErrorBox}>预览加载失败，请点击“在新窗口打开预览”或“下载 HTML”。</div>
@@ -1229,6 +1235,15 @@ const s: Record<string, React.CSSProperties> = {
     border: '1px solid #fecaca',
     color: '#b91c1c',
     fontSize: 14,
+  },
+  inlineWarnBox: {
+    padding: '14px 16px',
+    borderRadius: 14,
+    background: '#fff7e6',
+    border: '1px solid #f5d28c',
+    color: '#8a5600',
+    fontSize: 14,
+    marginBottom: 14,
   },
   retemplateBar: {
     display: 'flex',

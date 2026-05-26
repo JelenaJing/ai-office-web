@@ -28,12 +28,49 @@ import {
   emailRuntimeSendPlain,
   emailRuntimeSendReply,
 } from '../services/emailRuntime'
+import {
+  formatMailDebugEntry,
+  getMailKey,
+  mergeFetchedMail,
+  mergeMailDetail,
+  normalizeMailBase,
+  normalizeMailReadState,
+  sortMailsByTimeDesc,
+} from '../utils/mailIdentity'
 
 /* ------------------------------------------------------------------ */
 /*  helpers                                                           */
 /* ------------------------------------------------------------------ */
 
 const now = () => new Date().toISOString()
+
+function logMailRefresh(label: string, mails: MailItem[]) {
+  console.debug(label, mails.slice(0, 10).map(formatMailDebugEntry))
+}
+
+function mergeRemoteMails(previous: MailItem[], incoming: MailItem[], accountId: string): MailItem[] {
+  const previousByKey = new Map(previous.map((mail) => [mail.mailKey || getMailKey(mail), mail]))
+  const next = incoming.map((mail) => {
+    const normalizedIncoming = normalizeMailBase(mail, accountId)
+    const mailKey = normalizedIncoming.mailKey || getMailKey(normalizedIncoming)
+    const existing = previousByKey.get(mailKey)
+    const remoteReadState = normalizeMailReadState(normalizedIncoming)
+
+    if (existing && typeof existing.isRead === 'boolean' && existing.isRead !== remoteReadState.isRead) {
+      console.warn('[EmailContext] remote flags override local read state', {
+        mailKey,
+        subject: normalizedIncoming.subject,
+        localIsRead: existing.isRead,
+        remoteFlags: remoteReadState.flags,
+        remoteIsRead: remoteReadState.isRead,
+      })
+    }
+
+    return mergeFetchedMail(existing, normalizedIncoming, accountId)
+  })
+
+  return sortMailsByTimeDesc(next)
+}
 
 function resolveReplyPerspective(mail: MailItem): {
   responderName: string
@@ -371,8 +408,13 @@ export function EmailProvider({ children }: { children: ReactNode }) {
     setIsFetchingMails(true)
     setFetchError(null)
     try {
+      const accountId = resolveEmailAccountId(_config) || _config.user || _config.email || 'local-account'
       const baseMails = await emailRuntimeFetchInbox({ force, limit: 50 })
-      setMails(baseMails)
+      setMails((prev) => {
+        const next = mergeRemoteMails(prev, baseMails.map((mail) => normalizeMailBase(mail, accountId)), accountId)
+        logMailRefresh('[EmailContext] inbox refresh top10', next)
+        return next
+      })
     } catch (err) {
       setFetchError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -394,6 +436,7 @@ export function EmailProvider({ children }: { children: ReactNode }) {
     if (!mail) return
 
     const acctId = resolveEmailAccountId(accountConfig) || accountConfig.user || accountConfig.email || 'local-account'
+    const mailKey = mail.mailKey || getMailKey(mail)
     const bodyHash = computeBodyHash(mail.body)
     const replyBody = draft.content
 
@@ -402,6 +445,7 @@ export function EmailProvider({ children }: { children: ReactNode }) {
       setUserDraft({
         accountId: acctId,
         messageId: selectedMailId,
+        mailKey,
         bodyHash,
         replyBody,
         status: 'editing',
@@ -420,7 +464,7 @@ export function EmailProvider({ children }: { children: ReactNode }) {
   const fetchSentMails = useCallback(async (force = false) => {
     try {
       const mails = await emailRuntimeFetchSent({ force, limit: 50 })
-      setSentMails(mails)
+      setSentMails(sortMailsByTimeDesc(mails.map((mail) => normalizeMailBase(mail))))
     } catch (err) {
       console.warn('[EmailContext] fetchSentMails failed:', err instanceof Error ? err.message : err)
       setSentMails([])
@@ -430,7 +474,7 @@ export function EmailProvider({ children }: { children: ReactNode }) {
   const fetchTrashMails = useCallback(async (force = false) => {
     try {
       const mails = await emailRuntimeFetchTrash({ force, limit: 30 })
-      setTrashMails(mails)
+      setTrashMails(sortMailsByTimeDesc(mails.map((mail) => normalizeMailBase(mail))))
     } catch {
       setTrashMails([])
     }
@@ -447,7 +491,7 @@ export function EmailProvider({ children }: { children: ReactNode }) {
     }
     if (folder === 'inbox') {
       const deleted = mails.find((m) => m.id === id)
-      if (deleted) setTrashMails((prev) => [{ ...deleted, folder: 'trash' }, ...prev])
+      if (deleted) setTrashMails((prev) => sortMailsByTimeDesc([normalizeMailBase({ ...deleted, folder: 'trash' }, deleted.accountId), ...prev]))
       setMails((prev) => prev.filter((m) => m.id !== id))
     } else {
       setSentMails((prev) => prev.filter((m) => m.id !== id))
@@ -463,7 +507,7 @@ export function EmailProvider({ children }: { children: ReactNode }) {
       }
     }
     const restored = trashMails.find((m) => m.id === id)
-    if (restored) setMails((prev) => [{ ...restored, folder: 'inbox' }, ...prev])
+    if (restored) setMails((prev) => sortMailsByTimeDesc([normalizeMailBase({ ...restored, folder: 'inbox' }, restored.accountId), ...prev]))
     setTrashMails((prev) => prev.filter((m) => m.id !== id))
   }, [trashMails])
 
@@ -539,12 +583,27 @@ export function EmailProvider({ children }: { children: ReactNode }) {
 
     if (isWebShim() && accountConfig) {
       void emailRuntimeFetchMessage(id).then((full) => {
-        setMails((prev) => prev.map((m) => (m.id === id ? { ...m, ...full, unread: false } : m)))
+        setMails((prev) => sortMailsByTimeDesc(prev.map((m) => {
+          if (m.id !== id) return m
+          return normalizeMailBase({
+            ...mergeMailDetail(m, full),
+            isRead: true,
+            unread: false,
+          }, m.accountId)
+        })))
       }).catch(() => {
-        setMails((prev) => prev.map((m) => (m.id === id && m.unread ? { ...m, unread: false } : m)))
+        setMails((prev) => sortMailsByTimeDesc(prev.map((m) => (
+          m.id === id && m.unread
+            ? normalizeMailBase({ ...m, isRead: true, unread: false }, m.accountId)
+            : m
+        ))))
       })
     } else {
-      setMails((prev) => prev.map((m) => (m.id === id && m.unread ? { ...m, unread: false } : m)))
+      setMails((prev) => sortMailsByTimeDesc(prev.map((m) => (
+        m.id === id && m.unread
+          ? normalizeMailBase({ ...m, isRead: true, unread: false }, m.accountId)
+          : m
+      ))))
     }
 
     // Pre-populate draft from persisted user edits, then AI draft, then nothing
@@ -553,10 +612,11 @@ export function EmailProvider({ children }: { children: ReactNode }) {
       const mail = mails.find((m) => m.id === id)
       if (!mail || !accountConfig) return prev
       const acctId = resolveEmailAccountId(accountConfig) || accountConfig.user || accountConfig.email || 'local-account'
+      const mailKey = mail.mailKey || getMailKey(mail)
       const bodyHash = computeBodyHash(mail.body)
 
       // 1. User-edited draft takes priority
-      const userDraft = getUserDraft(acctId, id, bodyHash)
+      const userDraft = getUserDraft(acctId, mailKey, bodyHash)
       if (userDraft) {
         return {
           ...prev,
@@ -574,7 +634,7 @@ export function EmailProvider({ children }: { children: ReactNode }) {
       }
 
       // 2. AI draft fallback
-      const aiDraft = getAiDraft(acctId, id, bodyHash)
+      const aiDraft = getAiDraft(acctId, mailKey, bodyHash)
       if (!aiDraft) return prev
       return {
         ...prev,
@@ -710,6 +770,7 @@ export function EmailProvider({ children }: { children: ReactNode }) {
     if (!draft || !draft.content.trim()) return
     const mail = mails.find((m) => m.id === selectedMailId)
     if (!mail) return
+    const mailKey = mail.mailKey || getMailKey(mail)
     const perspective = resolveReplyPerspective(mail)
     const replySubject = buildReplySubject(mail.subject)
 
@@ -739,8 +800,8 @@ export function EmailProvider({ children }: { children: ReactNode }) {
       if (accountConfig) {
         const acctId = resolveEmailAccountId(accountConfig) || accountConfig.user || accountConfig.email || 'local-account'
         const bodyHash = computeBodyHash(mail.body)
-        updateUserDraftStatus(acctId, selectedMailId, bodyHash, 'sent')
-        updateAiDraftStatus(acctId, selectedMailId, bodyHash, 'sent')
+        updateUserDraftStatus(acctId, mailKey, bodyHash, 'sent')
+        updateAiDraftStatus(acctId, mailKey, bodyHash, 'sent')
       }
     }
 
@@ -812,8 +873,9 @@ export function EmailProvider({ children }: { children: ReactNode }) {
         finalizeSend(sentAt)
         // Inject loopback mail for the local session
         setMails((prev) => {
-          const loopbackMail: MailItem = {
+          const loopbackMail = normalizeMailBase({
             id: uid(),
+            accountId: mail.accountId,
             from: perspective.responderAddress,
             fromName: perspective.responderName,
             to: perspective.counterpartyAddress,
@@ -821,12 +883,14 @@ export function EmailProvider({ children }: { children: ReactNode }) {
             subject: replySubject,
             body: draft.content,
             timestamp: sentAt,
+            sentAt,
+            createdAt: sentAt,
             unread: true,
             replied: false,
             threadId: mail.threadId ?? mail.id,
             isLoopback: true,
-          }
-          return [loopbackMail, ...prev]
+          }, mail.accountId)
+          return sortMailsByTimeDesc([loopbackMail, ...prev])
         })
       }, 800)
     }

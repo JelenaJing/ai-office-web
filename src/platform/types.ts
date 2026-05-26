@@ -146,14 +146,27 @@ export interface EmailAccountState {
 
 export interface EmailMessageSummary {
   id: string
+  accountId?: string
+  uid?: string
+  uidValidity?: string
   from: string
   subject: string
   timestamp: string
+  snippet?: string
+  receivedAt?: string
+  internalDate?: string
+  date?: string
+  sentAt?: string
+  createdAt?: string
+  flags?: string[]
+  isRead?: boolean
   unread: boolean
   preview: string
   bodyPreview?: string
   bodyFormat?: 'text' | 'html' | 'mixed'
   attachmentCount?: number
+  messageId?: string
+  folder?: string
 }
 
 export interface EmailMessageDetail extends EmailMessageSummary {

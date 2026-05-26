@@ -9,6 +9,7 @@
  */
 import type { MailItem } from '../../../types/email'
 import type { CommunicationThread, CommunicationMessage } from '../types'
+import { getMailKey } from '../utils/mailIdentity'
 
 /** Prefix used for all email thread/message IDs. */
 export const EMAIL_THREAD_PREFIX = 'email:'
@@ -58,6 +59,7 @@ export function adaptMailsToThreads(mails: MailItem[], sourceAccount?: string): 
     const isSent = mail.folder === 'sent'
     const thread: CommunicationThread = {
       id: toEmailThreadId(mail.id),
+      sourceMailKey: mail.mailKey || getMailKey(mail),
       providerType: 'email' as const,
       subject: mail.subject,
       // For sent: participants[0] = recipient (the "other party" shown in list)

@@ -220,8 +220,7 @@ export default function LoginGate() {
         <Logo src={logoImage} alt="CUHK-Shenzhen logo" />
 
         <Title>
-          <TitlePrimary>CUHK-Shenzhen</TitlePrimary>
-          <TitleSecondary>LOGIN-AI</TitleSecondary>
+          <TitlePrimary>CUHK-Shenzhen （AI）</TitlePrimary>
         </Title>
 
         <StaffHint>

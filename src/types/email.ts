@@ -32,6 +32,8 @@ export interface OutgoingAttachment {
 
 export interface MailItem {
   id: string
+  mailKey?: string
+  accountId?: string
   from: string
   fromName: string
   to: string
@@ -45,10 +47,20 @@ export interface MailItem {
   /** Fully-resolved HTML version of the email body (inline CID images as data URIs) */
   htmlBody?: string
   timestamp: string
+  snippet?: string
+  receivedAt?: string
+  internalDate?: string
+  date?: string
+  sentAt?: string
+  createdAt?: string
+  flags?: string[]
+  isRead?: boolean
   unread: boolean
   replied: boolean
   threadId?: string
   isLoopback?: boolean
+  uidValidity?: string
+  uid?: string
   /** Non-inline (regular) attachments extracted from the MIME message */
   attachments?: MailAttachment[]
   /** Which folder this mail came from */

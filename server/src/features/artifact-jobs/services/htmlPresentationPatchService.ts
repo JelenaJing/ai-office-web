@@ -5,7 +5,8 @@ import { randomUUID } from 'crypto'
 import {
   escapeHtml,
   escapeAttribute,
-  createPlaceholderDataUri,
+  createPlaceholderSvgMarkup,
+  resolveHtmlPresentationAssetUrl,
   type ContentModelRecord,
 } from './htmlPresentationPostProcess'
 
@@ -67,6 +68,10 @@ function savePatchLog(artifactDir: string, entries: PatchLogEntry[]): void {
   fs.writeFileSync(logPath, JSON.stringify(entries, null, 2), 'utf-8')
 }
 
+function getArtifactIdFromDir(artifactDir: string): string {
+  return path.basename(artifactDir)
+}
+
 function appendPatchEntry(artifactDir: string, entry: PatchLogEntry): void {
   const entries = loadPatchLog(artifactDir)
   entries.push(entry)
@@ -77,7 +82,7 @@ function appendPatchEntry(artifactDir: string, entry: PatchLogEntry): void {
 // HTML patching helpers
 // ---------------------------------------------------------------------------
 
-const TEXT_TAGS = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'li', 'figcaption', 'blockquote', 'small', 'span', 'td', 'th', 'dt', 'dd', 'caption']
+const TEXT_TAGS = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'li', 'figcaption', 'blockquote', 'small', 'span', 'div', 'cite', 'td', 'th', 'dt', 'dd', 'caption']
 
 /**
  * Replace the textContent of the element whose data-block-id matches `blockId`.
@@ -102,9 +107,16 @@ export function patchTextInHtml(html: string, blockId: string, newText: string):
  * Replace src and data-image-prompt attributes on an img tag whose parent has data-block-id.
  * Also handles replacing a placeholder SVG inline element at the block level.
  */
-export function patchImgTagInHtml(html: string, blockId: string, newSrc: string, newPrompt: string): string {
+export function patchImgTagInHtml(
+  html: string,
+  blockId: string,
+  newSrc: string,
+  newPrompt: string,
+  placeholderUsed: boolean,
+): string {
   const safeBlockId = blockId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   const safePrompt = escapeAttribute(newPrompt)
+  const placeholderAttr = placeholderUsed ? 'true' : 'false'
 
   // Case 1: img tag with data-block-id directly
   let updated = html.replace(
@@ -120,6 +132,11 @@ export function patchImgTagInHtml(html: string, blockId: string, newSrc: string,
         result = result.replace(/\sdata-image-prompt=(["'])[^"']*\1/, ` data-image-prompt="${safePrompt}"`)
       } else {
         result += ` data-image-prompt="${safePrompt}"`
+      }
+      if (result.includes('data-placeholder-used=')) {
+        result = result.replace(/\sdata-placeholder-used=(["'])[^"']*\1/, ` data-placeholder-used="${placeholderAttr}"`)
+      } else {
+        result += ` data-placeholder-used="${placeholderAttr}"`
       }
       return result + post
     },
@@ -143,6 +160,11 @@ export function patchImgTagInHtml(html: string, blockId: string, newSrc: string,
         patchedAttrs = patchedAttrs.replace(/\sdata-image-prompt=(["'])[^"']*\1/, ` data-image-prompt="${safePrompt}"`)
       } else {
         patchedAttrs += ` data-image-prompt="${safePrompt}"`
+      }
+      if (patchedAttrs.includes('data-placeholder-used=')) {
+        patchedAttrs = patchedAttrs.replace(/\sdata-placeholder-used=(["'])[^"']*\1/, ` data-placeholder-used="${placeholderAttr}"`)
+      } else {
+        patchedAttrs += ` data-placeholder-used="${placeholderAttr}"`
       }
       return before + imgOpen + patchedAttrs + after
     },
@@ -169,6 +191,19 @@ function saveContentModel(artifactDir: string, model: ContentModelRecord): void 
   fs.writeFileSync(modelPath, JSON.stringify(model, null, 2), 'utf-8')
 }
 
+function upsertContentModelAsset(
+  assets: ContentModelRecord['assets'],
+  entry: ContentModelRecord['assets'][number],
+): ContentModelRecord['assets'] {
+  const nextAssets = assets.map((asset) => (
+    asset.blockId === entry.blockId && asset.slideId === entry.slideId
+      ? { ...asset, ...entry }
+      : asset
+  ))
+  const exists = nextAssets.some((asset) => asset.blockId === entry.blockId && asset.slideId === entry.slideId)
+  return exists ? nextAssets : [...nextAssets, entry]
+}
+
 function patchContentModelText(model: ContentModelRecord, slideId: string, blockId: string, text: string): ContentModelRecord {
   return {
     ...model,
@@ -192,15 +227,24 @@ function patchContentModelImage(
   blockId: string,
   imagePrompt: string,
   assetPath: string,
+  placeholderUsed: boolean,
 ): ContentModelRecord {
+  const nextAssetEntry = {
+    blockId,
+    slideId,
+    assetPath,
+    imagePrompt,
+    placeholderUsed,
+  }
   return {
     ...model,
     updatedAt: new Date().toISOString(),
+    assets: upsertContentModelAsset(model.assets, nextAssetEntry),
     slides: model.slides.map((slide) => {
       if (slide.id !== slideId) return slide
       const updatedBlocks = slide.blocks.map((block) => {
         if (block.id !== blockId) return block
-        return { ...block, imagePrompt, assetPath }
+        return { ...block, imagePrompt, assetPath, placeholderUsed }
       })
       const updatedVisual =
         slide.visual && (slide.visual.assetPath === '' || slide.visual.type !== 'none')
@@ -266,7 +310,8 @@ export interface ImagePatchResult {
   success: boolean
   artifactId?: string
   assetPath: string
-  assetDataUri: string
+  assetUrl: string
+  assetDataUri?: string
   placeholderUsed: boolean
   tokenUsed: false
 }
@@ -277,9 +322,11 @@ export async function generateHtmlPresentationImage(
 ): Promise<ImagePatchResult> {
   const { slideId, blockId, imagePrompt } = params
   const assetsDir = path.join(artifactDir, 'assets')
+  const artifactId = getArtifactIdFromDir(artifactDir)
   fs.mkdirSync(assetsDir, { recursive: true })
 
   let assetPath = ''
+  let assetUrl = ''
   let assetDataUri = ''
   let placeholderUsed = false
 
@@ -294,7 +341,7 @@ export async function generateHtmlPresentationImage(
         const fullPath = path.join(assetsDir, filename)
         fs.writeFileSync(fullPath, pngBuffer)
         assetPath = `assets/${filename}`
-        assetDataUri = `data:image/png;base64,${pngBuffer.toString('base64')}`
+        assetUrl = resolveHtmlPresentationAssetUrl(assetPath, artifactId)
       } else {
         throw new Error('empty image buffer')
       }
@@ -303,27 +350,25 @@ export async function generateHtmlPresentationImage(
     }
   } catch (_err) {
     placeholderUsed = true
-    const svgDataUri = createPlaceholderDataUri(imagePrompt, imagePrompt)
-    const svgContent = decodeURIComponent(svgDataUri.replace('data:image/svg+xml;charset=utf-8,', ''))
     const filename = `${slideId}-${blockId}-placeholder.svg`
     const fullPath = path.join(assetsDir, filename)
-    fs.writeFileSync(fullPath, svgContent, 'utf-8')
+    fs.writeFileSync(fullPath, createPlaceholderSvgMarkup(imagePrompt, imagePrompt), 'utf-8')
     assetPath = `assets/${filename}`
-    assetDataUri = svgDataUri
+    assetUrl = resolveHtmlPresentationAssetUrl(assetPath, artifactId)
   }
 
   // Update HTML
   const htmlPath = path.join(artifactDir, 'index.html')
   if (fs.existsSync(htmlPath)) {
     const html = fs.readFileSync(htmlPath, 'utf-8')
-    const patched = patchImgTagInHtml(html, blockId, assetDataUri, imagePrompt)
+    const patched = patchImgTagInHtml(html, blockId, assetUrl || assetDataUri, imagePrompt, placeholderUsed)
     fs.writeFileSync(htmlPath, patched, 'utf-8')
   }
 
   // Update content-model.json
   const model = loadContentModel(artifactDir)
   if (model) {
-    saveContentModel(artifactDir, patchContentModelImage(model, slideId, blockId, imagePrompt, assetPath))
+    saveContentModel(artifactDir, patchContentModelImage(model, slideId, blockId, imagePrompt, assetPath, placeholderUsed))
   }
 
   const patchId = randomUUID()
@@ -339,5 +384,5 @@ export async function generateHtmlPresentationImage(
     createdAt: updatedAt,
   })
 
-  return { success: true, assetPath, assetDataUri, placeholderUsed, tokenUsed: false }
+  return { success: true, assetPath, assetUrl, assetDataUri: assetDataUri || undefined, placeholderUsed, tokenUsed: false }
 }

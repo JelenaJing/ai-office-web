@@ -232,6 +232,7 @@ export type EmailActionType =
 
 export interface EmailAnalysisResult {
   messageId: string
+  mailKey?: string
   threadId?: string
   status?: 'pending' | 'running' | 'done' | 'failed' | 'skipped'
 
@@ -466,6 +467,7 @@ export interface EmailAnalysisTaskSnapshot {
 
 export type AiMailTriageResult = {
   messageId: string
+  mailKey?: string
   threadId?: string
   accountId: string
   folder?: string
@@ -577,6 +579,7 @@ export type AiMailReplyDraft = {
   id: string
   accountId: string
   messageId: string
+  mailKey?: string
   bodyHash: string
   triageResultId?: string
   subject: string
@@ -600,6 +603,7 @@ export type AiMailReplyDraft = {
 export type UserMailReplyDraft = {
   accountId: string
   messageId: string
+  mailKey?: string
   bodyHash: string
   replyBody: string
   status: 'editing' | 'sent' | 'discarded'

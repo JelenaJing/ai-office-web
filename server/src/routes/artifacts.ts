@@ -213,6 +213,9 @@ router.post('/:artifactId/html-presentation/retemplate', async (req, res) => {
       artifactId,
       templateSlug: result.templateSlug,
       tokenUsed: false,
+      rendererMode: result.rendererMode,
+      fallbackUsed: result.fallbackUsed,
+      warning: result.warning,
       previewUrl: `/api/artifacts/${artifactId}/file`,
       sidecars: result.sidecars,
     })
@@ -272,6 +275,7 @@ router.post('/:artifactId/html-presentation/image', async (req, res) => {
     const result = await generateHtmlPresentationImage(artifactDirPath, { slideId, blockId, imagePrompt })
     return res.json({ ...result, artifactId })
   } catch (err) {
+    if (res.headersSent) return
     const message = err instanceof Error ? err.message : String(err)
     return res.status(500).json({ success: false, error: message })
   }

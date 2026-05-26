@@ -15,6 +15,7 @@ import type {
   EmailMessageSummary,
   EmailSendInput,
 } from '../../../platform/types'
+import { normalizeMailBase } from '../utils/mailIdentity'
 
 function getElectronApi() {
   return window.electronAPI
@@ -83,8 +84,11 @@ function configToInput(config: EmailAccountConfig): EmailAccountInput {
 
 function summaryToMailItem(summary: EmailMessageSummary, folder: 'inbox' | 'sent' | 'trash' = 'inbox'): MailItem {
   const bodyPreview = summary.bodyPreview || summary.preview || ''
-  return {
+  return normalizeMailBase({
     id: summary.id,
+    accountId: summary.accountId,
+    uid: summary.uid || summary.id,
+    uidValidity: summary.uidValidity,
     from: summary.from,
     fromName: summary.from.split('@')[0] || summary.from,
     to: '',
@@ -93,19 +97,31 @@ function summaryToMailItem(summary: EmailMessageSummary, folder: 'inbox' | 'sent
     body: bodyPreview,
     bodyText: bodyPreview,
     bodyPreview,
+    snippet: summary.snippet || bodyPreview,
     bodyFormat: summary.bodyFormat || 'text',
     timestamp: summary.timestamp,
+    receivedAt: summary.receivedAt || summary.timestamp,
+    internalDate: summary.internalDate,
+    date: summary.date || summary.receivedAt || summary.timestamp,
+    sentAt: summary.sentAt,
+    createdAt: summary.createdAt || summary.internalDate || summary.receivedAt || summary.timestamp,
+    flags: summary.flags ?? [],
+    isRead: summary.isRead,
     unread: summary.unread,
     replied: false,
     folder,
-  }
+    messageId: summary.messageId,
+  })
 }
 
 function detailToMailItem(detail: EmailMessageDetail): MailItem {
   const bodyHtml = detail.bodyHtml || detail.htmlBody || undefined
   const bodyText = detail.bodyText || detail.body || ''
-  return {
+  return normalizeMailBase({
     id: detail.id,
+    accountId: detail.accountId,
+    uid: detail.uid || detail.id,
+    uidValidity: detail.uidValidity,
     from: detail.from,
     fromName: detail.from.split('@')[0] || detail.from,
     to: detail.to,
@@ -114,14 +130,22 @@ function detailToMailItem(detail: EmailMessageDetail): MailItem {
     body: bodyText,
     bodyText,
     bodyPreview: detail.bodyPreview || bodyText,
+    snippet: detail.snippet || detail.bodyPreview || bodyText,
     bodyFormat: detail.bodyFormat || (bodyHtml ? 'html' : 'text'),
     bodyHtml,
     htmlBody: bodyHtml,
     timestamp: detail.timestamp,
+    receivedAt: detail.receivedAt || detail.timestamp,
+    internalDate: detail.internalDate,
+    date: detail.date || detail.receivedAt || detail.timestamp,
+    createdAt: detail.createdAt || detail.internalDate || detail.receivedAt || detail.timestamp,
+    flags: detail.flags ?? [],
+    isRead: detail.isRead,
     unread: detail.unread,
     replied: false,
-    folder: 'inbox',
-  }
+    folder: (detail.folder as MailItem['folder']) || 'inbox',
+    messageId: detail.messageId,
+  })
 }
 
 export async function emailRuntimeGetAccount(): Promise<EmailAccountConfig | null> {

@@ -11,6 +11,7 @@
  *     to support larger datasets, cross-window sync, and atomic writes.
  */
 import type { AiMailTriageResult } from '../../../types/mailTriage'
+import { extractLegacyMailId } from '../utils/mailIdentity'
 
 const CACHE_KEY = 'ai:mail-triage:v1'
 /** Prune to this many entries when storage grows large */
@@ -64,11 +65,11 @@ function saveStore(store: CacheStore): void {
 function makeCacheKey(
   accountId: string,
   folder: string,
-  messageId: string,
+  mailKey: string,
   bodyHash: string,
   promptVersion: string,
 ): string {
-  return `${accountId}:${folder}:${messageId}:${bodyHash}:${promptVersion}`
+  return `${accountId}:${folder}:${mailKey}:${bodyHash}:${promptVersion}`
 }
 
 /**
@@ -77,13 +78,14 @@ function makeCacheKey(
  */
 export function getCachedTriage(
   accountId: string,
-  messageId: string,
+  mailKey: string,
   bodyHash: string,
   folder = 'INBOX',
   promptVersion = MAIL_ANALYSIS_PROMPT_VERSION,
 ): AiMailTriageResult | null {
   const store = loadStore()
-  const entry = store[makeCacheKey(accountId, folder, messageId, bodyHash, promptVersion)]
+  const entry = store[makeCacheKey(accountId, folder, mailKey, bodyHash, promptVersion)]
+    ?? store[makeCacheKey(accountId, folder, extractLegacyMailId(mailKey), bodyHash, promptVersion)]
   if (!entry) return null
   if (entry.status !== 'success') return null
   if (entry.bodyHash !== bodyHash) return null
@@ -95,7 +97,8 @@ export function setCachedTriage(result: AiMailTriageResult): void {
   const store = loadStore()
   const folder = result.folder || 'INBOX'
   const promptVersion = result.promptVersion || MAIL_ANALYSIS_PROMPT_VERSION
-  store[makeCacheKey(result.accountId, folder, result.messageId, result.bodyHash, promptVersion)] = result
+  const mailKey = result.mailKey || result.messageId
+  store[makeCacheKey(result.accountId, folder, mailKey, result.bodyHash, promptVersion)] = result
   saveStore(store)
 }
 
@@ -111,9 +114,10 @@ export function getAllCachedTriagesForAccount(
   const result: Record<string, AiMailTriageResult> = {}
   for (const [key, value] of Object.entries(store)) {
     if (key.startsWith(prefix)) {
-      const existing = result[value.messageId]
+      const mailKey = value.mailKey || value.messageId
+      const existing = result[mailKey]
       if (!existing || existing.updatedAt.localeCompare(value.updatedAt) < 0) {
-        result[value.messageId] = value
+        result[mailKey] = value
       }
     }
   }
@@ -121,10 +125,16 @@ export function getAllCachedTriagesForAccount(
 }
 
 /** Remove a single entry from cache. */
-export function evictCachedTriage(accountId: string, messageId: string): void {
+export function evictCachedTriage(accountId: string, mailKey: string): void {
   const store = loadStore()
   for (const key of Object.keys(store)) {
-    if (key.startsWith(`${accountId}:`) && key.includes(`:${messageId}:`)) {
+    if (
+      key.startsWith(`${accountId}:`)
+      && (
+        key.includes(`:${mailKey}:`)
+        || key.includes(`:${extractLegacyMailId(mailKey)}:`)
+      )
+    ) {
       delete store[key]
     }
   }

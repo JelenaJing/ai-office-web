@@ -1715,6 +1715,7 @@ function buildConflictTarget(
 function buildMailItemFromMessage(thread: CommunicationThread, message: CommunicationMessage): MailItem {
   return {
     id: fromEmailThreadId(thread.id),
+    mailKey: thread.sourceMailKey,
     from: message.from,
     fromName: message.fromName || '',
     to: message.to || '',
@@ -1799,9 +1800,9 @@ const MAIL_SORT_KEY = 'ai:mail-sort-mode'
 function loadSortMode(): MailSortMode {
   try {
     const saved = localStorage.getItem(MAIL_SORT_KEY)
-    if (saved === 'time') return 'time'
+    if (saved === 'smart') return 'smart'
   } catch { /* ignore */ }
-  return 'smart'
+  return 'time'
 }
 
 function saveSortMode(mode: MailSortMode) {
@@ -3248,8 +3249,8 @@ function CommunicationWorkbenchInner() {
   const displayedThreads = useMemo(() => {
     // Apply sort — both modes use getThreadTime for stable tie-breaking
     return [...filteredThreads].sort((a, b) => {
-      const mailA = fromEmailThreadId(a.id)
-      const mailB = fromEmailThreadId(b.id)
+      const mailA = a.providerType === 'email' ? (a.sourceMailKey || fromEmailThreadId(a.id)) : a.id
+      const mailB = b.providerType === 'email' ? (b.sourceMailKey || fromEmailThreadId(b.id)) : b.id
       if (sortMode === 'smart') {
         const scoreA = getMailImportanceScore(a, triageResults[mailA], Boolean(aiDrafts[mailA]))
         const scoreB = getMailImportanceScore(b, triageResults[mailB], Boolean(aiDrafts[mailB]))
@@ -3395,7 +3396,10 @@ function CommunicationWorkbenchInner() {
   const isSentFolderThread = selectedThread?.providerType === 'email' && selectedThread?.folder === 'sent'
   const isTrashFolderThread = selectedThread?.providerType === 'email' && selectedThread?.folder === 'trash'
   const selectedMailId = selectedThread?.providerType === 'email' ? fromEmailThreadId(selectedThread.id) : null
-  const selectedTriage = selectedMailId ? triageResults[selectedMailId] : undefined
+  const selectedMailKey = selectedThread?.providerType === 'email'
+    ? (selectedThread.sourceMailKey || selectedMailId)
+    : null
+  const selectedTriage = selectedMailKey ? triageResults[selectedMailKey] : undefined
   const selectedTodos = selectedMailId ? mailTodos.filter((todo) => todo.sourceEmailId === selectedMailId) : []
   const isSystemNotice = selectedTriage?.skipReason === 'system_delivery_notice'
   const currentReplyKnowledgeIds = selectedMailId ? selectedReplyKnowledgeByMailId[selectedMailId]?.knowledgeIds ?? [] : []
@@ -3737,26 +3741,24 @@ function CommunicationWorkbenchInner() {
 
   // Watch triageResults: whenever a new successful triage appears for an eligible mail, fire auto-start
   useEffect(() => {
-    for (const [mailId, triage] of Object.entries(triageResults)) {
+    for (const [mailKey, triage] of Object.entries(triageResults)) {
       if (!triage || triage.status !== 'success') continue
-      if (workflowProcessIds[mailId]) continue                  // already started
-      if (autoStartInitiatedRef.current.has(mailId)) continue   // already initiated (ref is sync-safe)
+      const thread = threads.find((t) => t.providerType === 'email' && t.sourceMailKey === mailKey)
+      const rawMailId = thread?.providerType === 'email' ? fromEmailThreadId(thread.id) : mailKey
+      if (workflowProcessIds[rawMailId]) continue                  // already started
+      if (autoStartInitiatedRef.current.has(rawMailId)) continue   // already initiated (ref is sync-safe)
 
-      const thread = threads.find((t) => {
-        const tid = t.providerType === 'email' ? fromEmailThreadId(t.id) : t.id
-        return tid === mailId
-      })
       if (!shouldAutoStartWorkflow(triage, thread?.folder)) continue
 
       // Mark as initiated synchronously (ref) before the async call to prevent double-fire
-      autoStartInitiatedRef.current.add(mailId)
+      autoStartInitiatedRef.current.add(rawMailId)
       try {
         const stored = JSON.parse(
           localStorage.getItem('aioffice.autoWorkflowStarted') ?? '[]',
         ) as string[]
         localStorage.setItem(
           'aioffice.autoWorkflowStarted',
-          JSON.stringify([...new Set([...stored, mailId])]),
+          JSON.stringify([...new Set([...stored, rawMailId])]),
         )
       } catch {
         // ignore storage errors
@@ -3765,8 +3767,8 @@ function CommunicationWorkbenchInner() {
       const msg = thread?.messages?.find((m) => m.isIncoming) ?? thread?.lastMessage
       const scenario = detectMatterScenario(triage, thread?.subject ?? '', '')
       const matter = buildEmailMatter(
-        mailId,
-        thread?.id ?? mailId,
+        rawMailId,
+        thread?.id ?? rawMailId,
         triage,
         thread?.subject ?? '',
         msg?.from ?? msg?.fromName ?? 'unknown',
@@ -3783,13 +3785,13 @@ function CommunicationWorkbenchInner() {
           attachmentNames: [],
         })
           .then((agentResult) => {
-            setAgentResults((prev) => ({ ...prev, [mailId]: agentResult }))
-            setAutoStartedByAi((prev) => ({ ...prev, [mailId]: true }))
+            setAgentResults((prev) => ({ ...prev, [rawMailId]: agentResult }))
+            setAutoStartedByAi((prev) => ({ ...prev, [rawMailId]: true }))
             // Only escalate to Flowable when agent says human review is needed
             if (agentResult.status === 'human_review_required') {
               const input = buildAutoWorkflowInput(
-                mailId,
-                thread?.id ?? mailId,
+                rawMailId,
+                thread?.id ?? rawMailId,
                 triage,
                 thread?.subject ?? '(无主题)',
                 senderEmail || 'unknown',
@@ -3797,17 +3799,17 @@ function CommunicationWorkbenchInner() {
                 activeWorkspacePath ?? 'default',
                 matter,
               )
-              setWorkflowStartStates((prev) => ({ ...prev, [mailId]: 'loading' }))
+              setWorkflowStartStates((prev) => ({ ...prev, [rawMailId]: 'loading' }))
               startEmailWorkflow(input)
                 .then((result) => {
-                  setWorkflowProcessIds((prev) => ({ ...prev, [mailId]: result.processInstanceId }))
-                  setWorkflowStartStates((prev) => ({ ...prev, [mailId]: 'done' }))
+                  setWorkflowProcessIds((prev) => ({ ...prev, [rawMailId]: result.processInstanceId }))
+                  setWorkflowStartStates((prev) => ({ ...prev, [rawMailId]: 'done' }))
                 })
                 .catch((err) => {
-                  setWorkflowStartStates((prev) => ({ ...prev, [mailId]: 'error' }))
+                  setWorkflowStartStates((prev) => ({ ...prev, [rawMailId]: 'error' }))
                   setWorkflowStartErrors((prev) => ({
                     ...prev,
-                    [mailId]: err instanceof Error ? err.message : String(err),
+                    [rawMailId]: err instanceof Error ? err.message : String(err),
                   }))
                 })
             }
@@ -3815,7 +3817,7 @@ function CommunicationWorkbenchInner() {
           .catch((err) => {
             setAgentResults((prev) => ({
               ...prev,
-              [mailId]: {
+              [rawMailId]: {
                 status: 'human_review_required',
                 message: `Agent 异常：${err instanceof Error ? err.message : String(err)}，转人工复核。`,
               },
@@ -3826,8 +3828,8 @@ function CommunicationWorkbenchInner() {
 
       // ── Standard Flowable path ────────────────────────────────────────────────
       const input = buildAutoWorkflowInput(
-        mailId,
-        thread?.id ?? mailId,
+        rawMailId,
+        thread?.id ?? rawMailId,
         triage,
         thread?.subject ?? '(无主题)',
         msg?.from ?? msg?.fromName ?? 'unknown',
@@ -3836,20 +3838,20 @@ function CommunicationWorkbenchInner() {
         matter,
       )
 
-      setWorkflowStartStates((prev) => ({ ...prev, [mailId]: 'loading' }))
-      setWorkflowStartErrors((prev) => { const n = { ...prev }; delete n[mailId]; return n })
+      setWorkflowStartStates((prev) => ({ ...prev, [rawMailId]: 'loading' }))
+      setWorkflowStartErrors((prev) => { const n = { ...prev }; delete n[rawMailId]; return n })
 
       startEmailWorkflow(input)
         .then((result) => {
-          setWorkflowProcessIds((prev) => ({ ...prev, [mailId]: result.processInstanceId }))
-          setWorkflowStartStates((prev) => ({ ...prev, [mailId]: 'done' }))
-          setAutoStartedByAi((prev) => ({ ...prev, [mailId]: true }))
+          setWorkflowProcessIds((prev) => ({ ...prev, [rawMailId]: result.processInstanceId }))
+          setWorkflowStartStates((prev) => ({ ...prev, [rawMailId]: 'done' }))
+          setAutoStartedByAi((prev) => ({ ...prev, [rawMailId]: true }))
         })
         .catch((err) => {
-          setWorkflowStartStates((prev) => ({ ...prev, [mailId]: 'error' }))
+          setWorkflowStartStates((prev) => ({ ...prev, [rawMailId]: 'error' }))
           setWorkflowStartErrors((prev) => ({
             ...prev,
-            [mailId]: err instanceof Error ? err.message : String(err),
+            [rawMailId]: err instanceof Error ? err.message : String(err),
           }))
         })
     }
@@ -4088,7 +4090,7 @@ function CommunicationWorkbenchInner() {
           ) : (
             displayedThreads.map((thread) => {
               const mailId = fromEmailThreadId(thread.id)
-              const triage = triageResults[mailId]
+              const triage = triageResults[thread.sourceMailKey || mailId]
               const actionPlan = triage?.status === 'success' ? resolveActionPlan(triage) : null
               const calendarTag = calendarTagForTriage(triage)
               return (

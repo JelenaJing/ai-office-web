@@ -111,14 +111,25 @@ export async function testMailboxCredential(
 
 export interface MailSummary {
   id: string
+  uid: string
+  uidValidity?: string
   from: string
   subject: string
   timestamp: string
+  snippet: string
+  receivedAt?: string
+  internalDate?: string
+  date?: string
+  sentAt?: string
+  createdAt?: string
+  flags: string[]
+  isRead: boolean
   unread: boolean
   preview: string
   bodyPreview: string
   bodyFormat: EmailBodyFormat
   attachmentCount: number
+  messageId?: string
 }
 
 export interface MailAttachmentSummary {
@@ -227,6 +238,8 @@ export async function fetchMessage(
   uid: string,
 ): Promise<{
   id: string
+  uid: string
+  uidValidity?: string
   from: string
   to: string
   subject: string
@@ -238,15 +251,25 @@ export async function fetchMessage(
   bodyFormat: EmailBodyFormat
   bodySource: 'text' | 'html' | 'mixed' | 'empty'
   timestamp: string
+  snippet: string
+  receivedAt?: string
+  internalDate?: string
+  date?: string
+  createdAt?: string
+  flags: string[]
+  isRead: boolean
+  unread: boolean
+  messageId?: string
   attachments: MailAttachmentSummary[]
 }> {
   const client = createImapClient(account)
   await client.connect()
   const lock = await client.getMailboxLock('INBOX')
   try {
+    const mailbox = client.mailbox
     const msg = await client.fetchOne(
       Number(uid),
-      { envelope: true, source: true },
+      { uid: true, envelope: true, flags: true, internalDate: true, source: true },
       { uid: true },
     )
     if (!msg || !msg.source) {
@@ -261,8 +284,14 @@ export async function fetchMessage(
       size: attachment.size || attachment.content.length,
     }))
     const normalized = normalizeParsedMailBody(parsed)
+    const receivedAt = env?.date?.toISOString()
+    const internalDate = msg.internalDate?.toISOString()
+    const flags = [...(msg.flags ?? [])].map((flag) => String(flag))
+    const isRead = msg.flags?.has('\\Seen') ?? false
     return {
-      id: uid,
+      id: String(msg.uid ?? uid),
+      uid: String(msg.uid ?? uid),
+      uidValidity: mailbox && 'uidValidity' in mailbox ? stringifyImapScalar((mailbox as { uidValidity?: unknown }).uidValidity) : undefined,
       from: env?.from?.[0]?.address || '',
       to: env?.to?.[0]?.address || account.user,
       subject: env?.subject || '',
@@ -273,7 +302,16 @@ export async function fetchMessage(
       bodyPreview: normalized.bodyPreview,
       bodyFormat: normalized.bodyFormat,
       bodySource: normalized.hasHtml ? (normalized.hasText ? 'mixed' : 'html') : normalized.bodyText ? 'text' : 'empty',
-      timestamp: env?.date?.toISOString() || new Date().toISOString(),
+      timestamp: receivedAt || internalDate || new Date().toISOString(),
+      snippet: normalized.bodyPreview,
+      receivedAt,
+      internalDate,
+      date: receivedAt,
+      createdAt: internalDate || receivedAt,
+      flags,
+      isRead,
+      unread: !isRead,
+      messageId: env?.messageId ? String(env.messageId) : undefined,
       attachments,
     }
   } finally {
@@ -479,12 +517,16 @@ export async function fetchFolder(
     const all = await client.search({ all: true }, { uid: true })
     const pick = (all || []).slice(-limit)
     for (const uid of pick.reverse()) {
-      const msg = await client.fetchOne(uid, { envelope: true, source: true }, { uid: true })
+      const msg = await client.fetchOne(uid, { uid: true, envelope: true, flags: true, internalDate: true, source: true }, { uid: true })
       if (!msg) continue
       let preview = ''
       let bodyPreview = ''
       let bodyFormat: EmailBodyFormat = 'text'
       const env = msg.envelope
+      const receivedAt = env?.date?.toISOString()
+      const internalDate = msg.internalDate?.toISOString()
+      const flags = [...(msg.flags ?? [])].map((flag) => String(flag))
+      const isRead = msg.flags?.has('\\Seen') ?? false
       let attachmentCount = 0
       if (msg.source) {
         const parsed = await simpleParser(msg.source)
@@ -495,15 +537,25 @@ export async function fetchFolder(
         attachmentCount = parsedAttachments(parsed).length
       }
       out.push({
-        id: String(uid),
+        id: String(msg.uid ?? uid),
+        uid: String(msg.uid ?? uid),
+        uidValidity: log.uidValidity,
         from: env?.from?.[0]?.address || env?.from?.[0]?.name || '',
         subject: env?.subject || '(无主题)',
-        timestamp: env?.date?.toISOString() || new Date().toISOString(),
-        unread: !msg.flags?.has('\\Seen'),
+        timestamp: receivedAt || internalDate || new Date().toISOString(),
+        snippet: bodyPreview || preview,
+        receivedAt,
+        internalDate,
+        date: receivedAt,
+        createdAt: internalDate || receivedAt,
+        flags,
+        isRead,
+        unread: !isRead,
         preview,
         bodyPreview,
         bodyFormat,
         attachmentCount,
+        messageId: env?.messageId ? String(env.messageId) : undefined,
       })
     }
     log.fetchedCount = out.length
