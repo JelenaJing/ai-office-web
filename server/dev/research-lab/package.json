@@ -1,0 +1,14 @@
+{
+  "name": "research-lab",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 5175 --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview --port 5175"
+  },
+  "devDependencies": {
+    "vite": "^5.4.0"
+  }
+}

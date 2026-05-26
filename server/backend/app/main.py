@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import logging
 
-from app.routers import paper, remake, data
+from app.routers import paper, remake, data, research_v2
 from app.config import LOG_LEVEL
 
 # 配置日志
@@ -38,6 +38,7 @@ app.add_middleware(
 app.include_router(paper.router)
 app.include_router(remake.router)
 app.include_router(data.router)
+app.include_router(research_v2.router)
 
 
 @app.get("/")

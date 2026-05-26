@@ -1,5 +1,5 @@
 import { validateDeckDocument, type DeckDocument } from '../../../../src/types/deckDocument'
-import { extractJsonFromLlmText } from '../../../../src/modules/generation/ppt/deckBuilder/buildDeckFromPrompt'
+import { extractJsonFromLlmText } from '../../../../src/features/ppt/ppt/deckBuilder/buildDeckFromPrompt'
 import { completeText } from '../llmClient'
 import type { AppSettings } from '../settingsStore'
 import { loadDeckDocument, saveDeckDocument } from '../deckDocumentService'

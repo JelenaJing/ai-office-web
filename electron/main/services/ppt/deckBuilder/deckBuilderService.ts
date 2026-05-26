@@ -2,7 +2,7 @@
  * deckBuilderService — main-process implementation of the DeckDocument builder.
  *
  * Wires the LLM client (completeText) and the deck persistence layer
- * (saveDeckDocument) to the pure builder functions in src/modules/generation/ppt/deckBuilder/.
+ * (saveDeckDocument) to the pure builder functions in src/features/ppt/ppt/deckBuilder/.
  *
  * Exposed via IPC handlers:
  *   deck:buildFromPrompt
@@ -19,15 +19,15 @@ import { saveDeckDocument } from '../../deckDocumentService'
 import {
   buildDeckFromPrompt,
   extractJsonFromLlmText,
-} from '../../../../../src/modules/generation/ppt/deckBuilder/buildDeckFromPrompt'
-import { buildDeckFromManuscript } from '../../../../../src/modules/generation/ppt/deckBuilder/buildDeckFromManuscript'
-import { buildDeckFromImportedPptx } from '../../../../../src/modules/generation/ppt/deckBuilder/buildDeckFromImportedPptx'
+} from '../../../../../src/features/ppt/ppt/deckBuilder/buildDeckFromPrompt'
+import { buildDeckFromManuscript } from '../../../../../src/features/ppt/ppt/deckBuilder/buildDeckFromManuscript'
+import { buildDeckFromImportedPptx } from '../../../../../src/features/ppt/ppt/deckBuilder/buildDeckFromImportedPptx'
 import type {
   DeckBuildRequest,
   DeckBuildResult,
   LlmCompleter,
   RawPptxSlide,
-} from '../../../../../src/modules/generation/ppt/deckBuilder/types'
+} from '../../../../../src/features/ppt/ppt/deckBuilder/types'
 
 import * as fs from 'fs'
 import JSZip from 'jszip'

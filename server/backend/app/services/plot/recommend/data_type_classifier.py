@@ -17,7 +17,7 @@ from typing import Any, Dict, Optional
 import pandas as pd
 from openai import OpenAI
 
-from app.config import DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, DEEPSEEK_MODEL
+from app.services import unified_llm
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +105,7 @@ class DataTypeClassifier:
             ]
 
             resp = client.chat.completions.create(
-                model=DEEPSEEK_MODEL,
+                model=unified_llm.get_model(),
                 messages=messages,
                 temperature=0.1,
                 max_tokens=300,
@@ -200,9 +200,12 @@ class DataTypeClassifier:
 
     @staticmethod
     def _build_client() -> Optional[OpenAI]:
-        if not DEEPSEEK_API_KEY:
+        if not unified_llm.is_llm_configured():
             return None
-        return OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
+        try:
+            return unified_llm.get_openai_client()
+        except RuntimeError:
+            return None
 
     @staticmethod
     def _build_llm_prompt(*, df: pd.DataFrame, analysis: Dict[str, Any]) -> str:

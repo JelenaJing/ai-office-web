@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 from openai import OpenAI
 
 from app.config import DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, DEEPSEEK_MODEL
+from app.services import unified_llm
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +99,7 @@ def synthesize_ideas(all_chunk_ideas: List[List[Dict[str, Any]]]) -> List[Dict[s
                 if isinstance(it, dict):
                     flattened.append(it)
     payload = json.dumps(flattened, ensure_ascii=False)
-    out = synthesize_json(
+    out = unified_llm.synthesize_json(
         system="You are a scientific editor. Output ONLY valid JSON.",
         user=(
             "Given a list of idea objects extracted from different chunks of ONE paper, "

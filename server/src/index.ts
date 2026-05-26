@@ -18,6 +18,7 @@ import documentWorkbenchRouter from './features/document/routes/documents'
 import pptRouter from './features/ppt/routes'
 import imageRouter from './features/image/routes'
 import dataAnalysisRouter from './features/data-analysis/routes'
+import researchRouter from './features/research/routes'
 import reportRouter from './features/report/routes'
 import chatRouter from './features/chat/routes'
 import communicationRouter from './features/communication/routes'
@@ -97,6 +98,7 @@ app.use('/api/documents', timeoutMiddleware(SKILL_TIMEOUT_MS), documentWorkbench
 app.use('/api/ppt', timeoutMiddleware(SKILL_TIMEOUT_MS), pptRouter)
 app.use('/api/image', timeoutMiddleware(SKILL_TIMEOUT_MS), imageRouter)
 app.use('/api/data-analysis', timeoutMiddleware(SKILL_TIMEOUT_MS), dataAnalysisRouter)
+app.use('/api/research', timeoutMiddleware(SKILL_TIMEOUT_MS), researchRouter)
 app.use('/api/work-report', timeoutMiddleware(SKILL_TIMEOUT_MS), reportRouter)
 app.use('/api/chat', timeoutMiddleware(SKILL_TIMEOUT_MS), chatRouter)
 app.use('/api/skill-center', timeoutMiddleware(SKILL_TIMEOUT_MS), skillCenterRouter)

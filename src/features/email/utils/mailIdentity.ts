@@ -6,12 +6,17 @@ function toSafeString(value: unknown): string {
   return typeof value === 'string' ? value : ''
 }
 
-export function getMailKey(mail: Pick<MailItem, 'accountId' | 'folder' | 'uidValidity' | 'uid' | 'id' | 'messageId'>): string {
+export function getMailKey(
+  mail: Pick<MailItem, 'accountId' | 'folder' | 'uidValidity' | 'uid' | 'id' | 'messageId'>
+    & Partial<Pick<MailItem, 'subject' | 'date' | 'receivedAt'>>,
+): string {
+  const stableId = toSafeString(mail.uid || mail.id || mail.messageId)
+    || `${toSafeString(mail.subject) || 'untitled'}:${toSafeString(mail.date || mail.receivedAt)}`
   return [
-    toSafeString(mail.accountId),
-    toSafeString(mail.folder),
+    toSafeString(mail.accountId) || 'unknown-account',
+    toSafeString(mail.folder) || 'inbox',
     toSafeString(mail.uidValidity),
-    toSafeString(mail.uid || mail.id || mail.messageId),
+    stableId,
   ].join(':')
 }
 
@@ -44,8 +49,10 @@ export function extractLegacyMailId(mailKeyOrId: string): string {
 export function normalizeMailReadState(mail: Pick<MailItem, 'flags' | 'isRead' | 'unread'>): { flags: string[]; isRead: boolean; unread: boolean } {
   const flags = Array.isArray(mail.flags)
     ? mail.flags.map((flag) => String(flag))
+    : typeof mail.flags === 'string'
+      ? [mail.flags]
     : []
-  const hasSeenFlag = flags.includes(SEEN_FLAG)
+  const hasSeenFlag = flags.some((flag) => String(flag).toLowerCase().includes('seen')) || flags.includes(SEEN_FLAG)
 
   const isRead = flags.length > 0
     ? hasSeenFlag

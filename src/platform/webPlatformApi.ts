@@ -503,9 +503,34 @@ export const webPlatformApi: PlatformApi = {
       const params = new URLSearchParams({ folder })
       if (options?.force) params.set('force', 'true')
       if (options?.limit) params.set('limit', String(options.limit))
-      const data = await apiFetch<{ messages: EmailMessageSummary[]; info?: string; folderPath?: string }>(
-        `/api/email/messages?${params.toString()}`,
-      )
+      const requestPath = `/api/email/messages?${params.toString()}`
+      const requestUrl = resolveWebApiUrl(requestPath)
+      console.info('[email] list messages request', {
+        requestUrl,
+        folder,
+      })
+      const res = await fetch(requestUrl, { headers: authHeaders() })
+      const payload = await res.json().catch(() => ({ message: res.statusText }))
+      if (!res.ok) {
+        console.error('[email] list messages response failed', {
+          requestUrl,
+          folder,
+          statusCode: res.status,
+          responseBody: payload,
+        })
+        const message =
+          (payload as { message?: string; error?: string }).message
+          ?? (payload as { error?: string }).error
+          ?? res.statusText
+        throw new ApiFetchError(res.status, message)
+      }
+      const data = payload as { messages: EmailMessageSummary[]; info?: string; folderPath?: string }
+      console.info('[email] list messages response success', {
+        requestUrl,
+        folder,
+        statusCode: res.status,
+        count: Array.isArray(data.messages) ? data.messages.length : 0,
+      })
       return data.messages ?? []
     },
     async discoverFolders(force = false): Promise<{ ok: boolean; folders: unknown[] }> {

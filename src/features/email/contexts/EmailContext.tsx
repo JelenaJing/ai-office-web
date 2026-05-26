@@ -409,6 +409,11 @@ export function EmailProvider({ children }: { children: ReactNode }) {
     setFetchError(null)
     try {
       const accountId = resolveEmailAccountId(_config) || _config.user || _config.email || 'local-account'
+      console.info('[email] refresh inbox start', {
+        accountId,
+        folder: 'inbox',
+        force,
+      })
       const baseMails = await emailRuntimeFetchInbox({ force, limit: 50 })
       setMails((prev) => {
         const next = mergeRemoteMails(prev, baseMails.map((mail) => normalizeMailBase(mail, accountId)), accountId)
@@ -416,7 +421,13 @@ export function EmailProvider({ children }: { children: ReactNode }) {
         return next
       })
     } catch (err) {
-      setFetchError(err instanceof Error ? err.message : String(err))
+      const message = err instanceof Error ? err.message : String(err)
+      console.error('[email] refresh inbox failed', {
+        accountId: resolveEmailAccountId(_config) || _config.user || _config.email || 'local-account',
+        folder: 'inbox',
+        error: message,
+      })
+      setFetchError(message)
     } finally {
       setIsFetchingMails(false)
     }

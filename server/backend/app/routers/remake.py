@@ -218,17 +218,20 @@ async def generate_idea(request: IdeaRequest):
     """生成新科研idea"""
     try:
         project_manager = ProjectManager()
-        
+        selected_text = (request.selected_text or "").strip()
+        if not selected_text:
+            selected_text = _read_full_text(request.project_id, None)
+
         # 调用Idea Generator Agent
         ideas = idea_generator.generate_ideas(
             project_id=request.project_id,
-            selected_text=request.selected_text,
+            selected_text=selected_text,
             context=request.context
         )
         
         # 保存结果到项目文件夹
         result_data = {
-            "selected_text": request.selected_text,
+            "selected_text": selected_text,
             "context": request.context,
             "ideas": ideas
         }

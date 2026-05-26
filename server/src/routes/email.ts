@@ -65,17 +65,46 @@ function logEmailBigIntSerializationIssue(req: Request, payload: unknown, error:
 
 function sendEmailRouteError(req: Request, res: Response, error: unknown, status = 502): Response {
   const message = error instanceof Error ? error.message : String(error)
+  const accountId = requestFieldAsString(req.query, 'accountId')
+    || requestFieldAsString(req.body, 'accountId')
+    || requestFieldAsString(req.body, 'user')
+  const folder = requestFieldAsString(req.query, 'folder') || requestFieldAsString(req.body, 'folder')
+  const lower = message.toLowerCase()
+  const errorCode = lower.includes('authenticationfailed') || lower.includes('invalid login') || lower.includes('auth')
+    ? 'IMAP_AUTH_FAILED'
+    : lower.includes('econnrefused') || lower.includes('etimedout') || lower.includes('timeout') || lower.includes('starttls') || lower.includes('certificate')
+      ? 'IMAP_CONNECTION_FAILED'
+      : lower.includes('fetch') || lower.includes('mailbox') || lower.includes('uid')
+        ? 'IMAP_FETCH_FAILED'
+        : 'EMAIL_INBOX_LOAD_FAILED'
+  const resolvedStatus = errorCode === 'IMAP_AUTH_FAILED'
+    ? 401
+    : errorCode === 'IMAP_CONNECTION_FAILED'
+      ? 502
+      : status
+  console.error('[email] list messages failed', stringifyJsonSafe({
+    requestUrl: req.originalUrl,
+    accountId,
+    folder,
+    error: message,
+    stack: error instanceof Error ? error.stack : undefined,
+  }))
   if (message.includes('Do not know how to serialize a BigInt')) {
     console.error('[email-jsonsafe] route-catch-bigint', stringifyJsonSafe({
       apiPath: req.path,
-      accountId: requestFieldAsString(req.query, 'accountId')
-        || requestFieldAsString(req.body, 'accountId')
-        || requestFieldAsString(req.body, 'user'),
-      folder: requestFieldAsString(req.query, 'folder') || requestFieldAsString(req.body, 'folder'),
+      accountId,
+      folder,
       error: message,
     }))
   }
-  return sendEmailJson(req, res, { message }, status)
+  return sendEmailJson(req, res, {
+    error: errorCode,
+    message,
+    accountId,
+    folder,
+    cause: message,
+    stack: process.env.NODE_ENV === 'production' ? undefined : (error instanceof Error ? error.stack : undefined),
+  }, resolvedStatus)
 }
 
 function sendEmailJson(req: Request, res: Response, payload: unknown, status?: number): Response {
@@ -234,12 +263,24 @@ router.get('/messages', async (req, res) => {
   if (!userId) return
   const account = getEmailAccount(userId)
   if (!account) {
-    return sendEmailJson(req, res, { message: '请先配置邮箱账号' }, 400)
+    return sendEmailJson(req, res, {
+      error: 'EMAIL_ACCOUNT_NOT_FOUND',
+      message: '请先配置邮箱账号',
+      accountId: userId,
+      folder: String(req.query.folder || 'inbox').toLowerCase(),
+    }, 400)
   }
   try {
     const folderParam = String(req.query.folder || 'inbox').toLowerCase()
     const force = req.query.force === 'true'
     const limit = Number(req.query.limit) > 0 ? Number(req.query.limit) : 50
+    console.info('[email] list messages start', stringifyJsonSafe({
+      requestUrl: req.originalUrl,
+      accountId: account.user,
+      folder: folderParam,
+      force,
+      limit,
+    }))
 
     if (folderParam === 'inbox') {
       // inbox: use INBOX path directly or mapping
@@ -247,6 +288,12 @@ router.get('/messages', async (req, res) => {
       const folderPath = mapping?.path || 'INBOX'
       const { mails, log } = await fetchFolder(account, folderPath, { limit, force })
       console.log('[EmailRoute] inbox sync:', stringifyJsonSafe(log))
+      console.info('[email] list messages success', stringifyJsonSafe({
+        requestUrl: req.originalUrl,
+        accountId: account.user,
+        folder: folderParam,
+        count: mails.length,
+      }))
       return sendEmailJson(req, res, { messages: mails, syncLog: log })
     }
 
@@ -278,6 +325,12 @@ router.get('/messages', async (req, res) => {
 
     const { mails, log } = await fetchFolder(account, mapping.path, { limit, force })
     console.log(`[EmailRoute] ${role} sync:`, stringifyJsonSafe(log))
+    console.info('[email] list messages success', stringifyJsonSafe({
+      requestUrl: req.originalUrl,
+      accountId: account.user,
+      folder: folderParam,
+      count: mails.length,
+    }))
     return sendEmailJson(req, res, { messages: mails, syncLog: log, folderPath: mapping.path })
   } catch (err) {
     sendEmailRouteError(req, res, err)

@@ -2,21 +2,14 @@
 Idea Generator Agent
 结合最新科研成果，生成新科研idea
 """
-import os
-from typing import List, Dict, Any
-from openai import OpenAI
-from app.config import DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, DEEPSEEK_MODEL
+import json
+import re
+from typing import List, Dict, Any, Optional
 from app.services.openalex_client import OpenAlexClient
+from app.services import unified_llm
 import logging
 
 logger = logging.getLogger(__name__)
-
-def get_client():
-    """获取OpenAI客户端（延迟初始化）"""
-    return OpenAI(
-        api_key=DEEPSEEK_API_KEY,
-        base_url=DEEPSEEK_BASE_URL,
-    )
 
 def get_openalex_client():
     """获取OpenAlex客户端（延迟初始化）"""
@@ -26,7 +19,9 @@ def get_openalex_client():
 def generate_ideas(
     project_id: str,
     selected_text: str,
-    context: str = None
+    context: str = None,
+    *,
+    strict_errors: bool = False,
 ) -> List[Dict[str, Any]]:
     """
     生成新科研idea
@@ -54,18 +49,14 @@ def generate_ideas(
         只返回关键词，用逗号分隔。
         """
         
-        client = get_client()
-        keywords_response = client.chat.completions.create(
-            model=DEEPSEEK_MODEL,
-            messages=[
+        keywords = unified_llm.chat_completion(
+            [
                 {"role": "system", "content": "你是一个科研关键词提取专家。"},
-                {"role": "user", "content": keywords_prompt}
+                {"role": "user", "content": keywords_prompt},
             ],
             max_tokens=100,
-            temperature=0.3
+            temperature=0.3,
         )
-        
-        keywords = keywords_response.choices[0].message.content.strip()
         
         # 2. 搜索最新论文
         openalex_client = get_openalex_client()
@@ -105,37 +96,32 @@ def generate_ideas(
         }}
         """
         
-        idea_response = client.chat.completions.create(
-            model=DEEPSEEK_MODEL,
-            messages=[
+        response_text = unified_llm.chat_completion(
+            [
                 {"role": "system", "content": "你是一个科研创新专家，擅长基于现有研究提出新idea。"},
-                {"role": "user", "content": idea_prompt}
+                {"role": "user", "content": idea_prompt},
             ],
             max_tokens=2000,
-            temperature=0.7
+            temperature=0.7,
         )
-        
-        import json
-        import re
-        response_text = idea_response.choices[0].message.content.strip()
-        
-        # 清理可能的markdown标记
-        if response_text.startswith('```'):
-            response_text = re.sub(r'^```(?:json)?\n?', '', response_text)
-            response_text = re.sub(r'\n?```$', '', response_text)
-        
+
+        if response_text.startswith("```"):
+            response_text = re.sub(r"^```(?:json)?\n?", "", response_text)
+            response_text = re.sub(r"\n?```$", "", response_text)
+
         result = json.loads(response_text)
         ideas = result.get("ideas", [])
-        
+
         logger.info(f"Generated {len(ideas)} new ideas")
         return ideas
-        
+
     except Exception as e:
         logger.error(f"Idea generation failed: {e}")
-        # 返回一个简单的fallback
+        if strict_errors:
+            raise
         return [{
             "title": "基于现有研究的扩展",
             "description": "基于选中文本的研究方向，可以进一步探索...",
             "innovation": "结合最新技术和方法",
-            "references": []
+            "references": [],
         }]

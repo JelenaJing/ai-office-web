@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import styled from 'styled-components'
 import { ArrowUp, MessageSquare, Mic, Paperclip, Square } from 'lucide-react'
-import GenerationPromptComposer from '../../../modules/generation/components/GenerationPromptComposer'
 import PlotWorkspace from '../../../modules/plot/components/PlotWorkspace'
 import { useGenerationWorkbench } from '../../../contexts/GenerationWorkbenchContext'
 import { useKnowledge } from '../../../contexts/KnowledgeContext'
@@ -48,6 +47,8 @@ import {
   UnifiedSendButton,
 } from '../../../modules/generation/components/generationDockPrimitives'
 import { getGenerationModeOption } from '../../../modules/generation/components/generationWorkbenchConfig'
+
+const LegacyGenerationPromptComposer = React.lazy(() => import('../../../modules/generation/components/GenerationPromptComposer'))
 
 type ChatRole = 'user' | 'assistant' | 'system'
 type KnowledgeTemplateMode = 'balanced' | 'structure-first' | 'style-first' | 'reference-synthesis'
@@ -1498,7 +1499,13 @@ function ImageModeDock() {
         <ModeTab $active={activeTab === 'ai-image'} onClick={() => setActiveTab('ai-image')}>AI 生图</ModeTab>
         <ModeTab $active={activeTab === 'data-plot'} onClick={() => setActiveTab('data-plot')}>数据绘图</ModeTab>
       </ModeTabs>
-      {activeTab === 'ai-image' ? <GenerationPromptComposer /> : <PlotWorkspace />}
+      {activeTab === 'ai-image'
+        ? (
+          <React.Suspense fallback={null}>
+            <LegacyGenerationPromptComposer />
+          </React.Suspense>
+        )
+        : <PlotWorkspace />}
     </>
   )
 }
@@ -1532,7 +1539,11 @@ const KnowledgeConversationDock: React.FC = () => {
       ? <WorkbenchHintDock mode="homework" testId="homework-hint-dock" />
       : generationMode === 'image'
         ? <ImageModeDock />
-        : <GenerationPromptComposer />
+        : (
+          <React.Suspense fallback={null}>
+            <LegacyGenerationPromptComposer />
+          </React.Suspense>
+        )
 
   return (
     <div>

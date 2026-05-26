@@ -9,7 +9,6 @@ import { knowledgeWritingLegacySkill } from './builtins/knowledgeWritingLegacySk
 import { paperGenerateLegacySkill } from './builtins/paperGenerateLegacySkill'
 import { dailyReportGenerateLegacySkill } from './builtins/dailyReportGenerateLegacySkill'
 import { templateDocumentGenerateLegacySkill } from './builtins/templateDocumentGenerateLegacySkill'
-import { presentationGenerateLegacySkill } from './builtins/presentationGenerateLegacySkill'
 import { imageGenerateLegacySkill } from './builtins/imageGenerateLegacySkill'
 import { mailReplyDraftLegacySkill } from './builtins/mailReplyDraftLegacySkill'
 
@@ -19,7 +18,6 @@ export function registerBuiltins(): void {
   registerSkill(paperGenerateLegacySkill)
   registerSkill(dailyReportGenerateLegacySkill)
   registerSkill(templateDocumentGenerateLegacySkill)
-  registerSkill(presentationGenerateLegacySkill)
   registerSkill(imageGenerateLegacySkill)
   registerSkill(mailReplyDraftLegacySkill)
 
@@ -30,7 +28,6 @@ export function registerBuiltins(): void {
   setDefaultSkill('paper.generate.default', 'paper.generate.legacy')
   setDefaultSkill('dailyReport.generate.default', 'dailyReport.generate.legacy')
   setDefaultSkill('templateDocument.generate.default', 'templateDocument.generate.legacy')
-  setDefaultSkill('presentation.generate.default', 'presentation.generate.legacy')
   setDefaultSkill('image.generate.default', 'image.generate.legacy')
   setDefaultSkill('mail.replyDraft.default', 'mail.replyDraft.legacy')
 }

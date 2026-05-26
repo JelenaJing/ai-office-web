@@ -1,8 +1,7 @@
-import { useEffect, useRef } from 'react'
+import { Suspense, lazy, useEffect, useRef } from 'react'
 import styled from 'styled-components'
 import DocumentEngineHost from '../modules/writing/components/DocumentEngineHost'
 import WebDocumentWorkbench from '../modules/document/components/WebDocumentWorkbench'
-import GenerationWorkbenchPanel from '../modules/generation/components/GenerationWorkbenchPanel'
 import CommunicationWorkbench from '../communication/CommunicationWorkbench'
 import HomeworkWorkbench from '../modules/homework/components/HomeworkWorkbench'
 import AiClassWorkbench from '../modules/homework/components/AiClassWorkbench'
@@ -12,6 +11,7 @@ import DailyFeedWorkbench from '../modules/feed/components/DailyFeedWorkbench'
 import ModelDevPanel from './ModelDevPanel'
 import ImageWorkspace from '../modules/image/components/ImageWorkspace'
 import WebDailyReportPanel from '../modules/report/components/WebDailyReportPanel'
+import HtmlPptPage from '../web/pages/HtmlPptPage'
 /** Web 临时 MVP：模型/AI 设置；待 FullSettingsPanel / ModelDevPanel Web 执行层就绪后替换 */
 import WebSettingsPanel from '../modules/settings/components/WebSettingsPanel'
 import WebFeatureComingSoon from './WebFeatureComingSoon'
@@ -20,6 +20,8 @@ import { isWebShim } from '../platform/detect'
 import { isWebFeatureEnabled } from '../platform/featureGate'
 import { logWebWorkbenchViewport, WEB_WORKBENCH_PANEL_COMPONENT } from '../platform/webWorkbenchDebug'
 import type { WebFeatureKey } from '../platform/featureGate'
+
+const LegacyGenerationWorkbenchPanel = lazy(() => import('../modules/generation/components/GenerationWorkbenchPanel'))
 
 const GenerationShell = styled.div`
   width: 100%;
@@ -135,10 +137,15 @@ function renderPanelContent(
         </EditorViewportShell>
       )
     case 'workbench':
+      if (isWebShim()) {
+        return <HtmlPptPage />
+      }
       return (
         <GenerationShell>
           <ViewportBody>
-            <GenerationWorkbenchPanel />
+            <Suspense fallback={null}>
+              <LegacyGenerationWorkbenchPanel />
+            </Suspense>
           </ViewportBody>
         </GenerationShell>
       )

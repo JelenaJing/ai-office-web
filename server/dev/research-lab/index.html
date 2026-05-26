@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Research Lab — Idea & Plot</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Research Lab</h1>
+      <p>Idea 生成 &amp; 模板画图 — 业务连通性测试（不接入主前端）</p>
+    </header>
+
+    <section class="config">
+      <label>入口
+        <select id="entryMode">
+          <option value="bff">BFF — Express :3001 /api/research/*</option>
+          <option value="fastapi-v1">FastAPI v1 — :8020 /api/v1/*</option>
+          <option value="fastapi-v2">FastAPI v2 — :8020 contract v2</option>
+        </select>
+      </label>
+      <label>Bearer Token（BFF 需要，可留空试 FastAPI）
+        <input id="authToken" type="text" placeholder="localStorage aios token" style="width: 100%" />
+      </label>
+      <label>project_id（可选，全文/项目模式）
+        <input id="projectId" type="text" placeholder="20260422_xxx" />
+      </label>
+    </section>
+
+    <nav class="tabs">
+      <button type="button" data-tab="idea" class="active">Idea</button>
+      <button type="button" data-tab="plot">Plot</button>
+      <button type="button" data-tab="parity">Parity</button>
+    </nav>
+
+    <main>
+      <section id="panel-idea" class="panel active">
+        <label>field <input id="ideaField" value="AI for Science" /></label>
+        <label>selected_text / text
+          <textarea id="ideaText" rows="6">钙钛矿太阳能电池的效率与稳定性仍是关键挑战，需要新的界面钝化策略。</textarea>
+        </label>
+        <label><input type="checkbox" id="ideaFulltext" /> 全文多段模式（需 project_id）</label>
+        <button type="button" id="btnIdea">生成 Idea</button>
+        <div id="ideaCards" class="cards"></div>
+      </section>
+
+      <section id="panel-plot" class="panel">
+        <label>数据文件 <input id="plotFile" type="file" accept=".csv,.xlsx,.xls,.json,.tsv" /></label>
+        <label>template_id <input id="templateId" placeholder="pl_line" /></label>
+        <label><input type="checkbox" id="useLlm" checked /> use_llm_type_detection</label>
+        <button type="button" id="btnPlotRecommend">仅推荐</button>
+        <button type="button" id="btnPlot">生成图</button>
+        <button type="button" id="btnPlotSample">用内置 sample.csv</button>
+        <img id="plotPreview" alt="plot preview" />
+      </section>
+
+      <section id="panel-parity" class="panel">
+        <button type="button" id="btnParity">检查 BFF parity</button>
+        <button type="button" id="btnHealth">FastAPI /health</button>
+      </section>
+
+      <pre id="rawLog" class="log"></pre>
+    </main>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -132,11 +132,102 @@ export interface MailSummary {
   messageId?: string
 }
 
+function toSafeString(value: unknown, fallback = ''): string {
+  if (typeof value === 'string') return value
+  if (value === undefined || value === null) return fallback
+  try {
+    return String(value)
+  } catch {
+    return fallback
+  }
+}
+
 function toIsoString(value: string | Date | undefined | null): string | undefined {
   if (!value) return undefined
   if (value instanceof Date) return value.toISOString()
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString()
+}
+
+function normalizeFlags(flags: unknown): string[] {
+  if (Array.isArray(flags)) return flags.map((flag) => toSafeString(flag)).filter(Boolean)
+  if (typeof flags === 'string') return flags.trim() ? [flags.trim()] : []
+  if (flags && typeof flags === 'object' && Symbol.iterator in flags) {
+    try {
+      return [...(flags as Iterable<unknown>)].map((flag) => toSafeString(flag)).filter(Boolean)
+    } catch {
+      return []
+    }
+  }
+  return []
+}
+
+function hasSeenFlag(flags: string[]): boolean {
+  return flags.some((flag) => flag.toLowerCase().includes('seen'))
+}
+
+function envelopeAddress(value: unknown): string {
+  if (!Array.isArray(value) || value.length === 0) return ''
+  const first = value[0]
+  if (!first || typeof first !== 'object') return ''
+  const record = first as { address?: unknown; name?: unknown }
+  return toSafeString(record.address) || toSafeString(record.name)
+}
+
+function envelopeSubject(value: unknown): string {
+  return toSafeString(value).trim() || '(无主题)'
+}
+
+function envelopeMessageId(value: unknown, fallbackId: string): string {
+  return toSafeString(value).trim() || fallbackId
+}
+
+function buildMailSummaryFromFetchedMessage(input: {
+  uid: unknown
+  uidValidity?: string
+  envelope?: { from?: unknown; subject?: unknown; date?: unknown; messageId?: unknown } | null
+  internalDate?: string | Date | null
+  flags?: unknown
+  preview?: string
+  bodyPreview?: string
+  bodyFormat?: EmailBodyFormat
+  attachmentCount?: number
+}): MailSummary {
+  const resolvedUid = toSafeString(input.uid).trim()
+  if (!resolvedUid) {
+    console.warn('[email] message summary missing uid', {
+      messageId: toSafeString(input.envelope?.messageId).trim() || null,
+      subject: envelopeSubject(input.envelope?.subject),
+    })
+  }
+  const id = resolvedUid || `mail-${Date.now()}`
+  const flags = normalizeFlags(input.flags)
+  const isRead = hasSeenFlag(flags)
+  const receivedAt = toIsoString(input.envelope?.date as string | Date | undefined | null)
+  const internalDate = toIsoString(input.internalDate)
+  const preview = input.preview || ''
+  const bodyPreview = input.bodyPreview || preview
+  return {
+    id,
+    uid: id,
+    uidValidity: input.uidValidity,
+    from: envelopeAddress(input.envelope?.from),
+    subject: envelopeSubject(input.envelope?.subject),
+    timestamp: receivedAt || internalDate || new Date().toISOString(),
+    snippet: bodyPreview || preview,
+    receivedAt,
+    internalDate,
+    date: receivedAt,
+    createdAt: internalDate || receivedAt,
+    flags,
+    isRead,
+    unread: !isRead,
+    preview,
+    bodyPreview,
+    bodyFormat: input.bodyFormat || 'text',
+    attachmentCount: input.attachmentCount || 0,
+    messageId: envelopeMessageId(input.envelope?.messageId, id),
+  }
 }
 
 export interface MailAttachmentSummary {
@@ -195,51 +286,53 @@ export async function fetchInbox(
     const all = await client.search({ all: true }, { uid: true })
     const pick = [...new Set([...(uids || []), ...(all || [])])].slice(-limit)
     for (const uid of pick.reverse()) {
-      const msg = await client.fetchOne(uid, { envelope: true, source: true }, { uid: true })
-      if (!msg) continue
-      let preview = ''
-      let bodyPreview = ''
-      let bodyFormat: EmailBodyFormat = 'text'
-      const env = msg.envelope
-      if (msg.source) {
-        const parsed = await simpleParser(msg.source)
-        const normalized = normalizeParsedMailBody(parsed)
-        preview = normalized.bodyPreview
-        bodyPreview = normalized.bodyPreview
-        bodyFormat = normalized.bodyFormat
-        const attachments = parsedAttachments(parsed)
-        out.push({
-          id: String(uid),
-          uid: String(uid),
-          from: env?.from?.[0]?.address || env?.from?.[0]?.name || '',
-          subject: env?.subject || '(无主题)',
-          timestamp: env?.date?.toISOString() || new Date().toISOString(),
-          snippet: preview,
-          flags: [...(msg.flags ?? [])].map((flag) => String(flag)),
-          isRead: msg.flags?.has('\\Seen') ?? false,
-          unread: !msg.flags?.has('\\Seen'),
+      let msg: Awaited<ReturnType<typeof client.fetchOne>> | null = null
+      try {
+        msg = await client.fetchOne(uid, { envelope: true, source: true, flags: true, internalDate: true }, { uid: true })
+        if (!msg) continue
+        let preview = ''
+        let bodyPreview = ''
+        let bodyFormat: EmailBodyFormat = 'text'
+        let attachmentCount = 0
+        if (msg.source) {
+          try {
+            const parsed = await simpleParser(msg.source)
+            const normalized = normalizeParsedMailBody(parsed)
+            preview = normalized.bodyPreview
+            bodyPreview = normalized.bodyPreview
+            bodyFormat = normalized.bodyFormat
+            attachmentCount = parsedAttachments(parsed).length
+          } catch (error) {
+            console.warn('[email] message summary map failed', {
+              accountId: account.user,
+              folder: 'INBOX',
+              uid: toSafeString(msg.uid ?? uid),
+              messageId: toSafeString(msg.envelope?.messageId).trim() || null,
+              subject: envelopeSubject(msg.envelope?.subject),
+              error: error instanceof Error ? error.message : String(error),
+            })
+          }
+        }
+        out.push(buildMailSummaryFromFetchedMessage({
+          uid: msg.uid ?? uid,
+          envelope: msg.envelope,
+          internalDate: msg.internalDate ?? null,
+          flags: msg.flags,
           preview,
           bodyPreview,
           bodyFormat,
-          attachmentCount: attachments.length,
+          attachmentCount,
+        }))
+      } catch (error) {
+        console.warn('[email] message summary map failed', {
+          accountId: account.user,
+          folder: 'INBOX',
+          uid: toSafeString(msg?.uid ?? uid),
+          messageId: toSafeString(msg?.envelope?.messageId).trim() || null,
+          subject: envelopeSubject(msg?.envelope?.subject),
+          error: error instanceof Error ? error.message : String(error),
         })
-        continue
       }
-      out.push({
-        id: String(uid),
-        uid: String(uid),
-        from: env?.from?.[0]?.address || env?.from?.[0]?.name || '',
-        subject: env?.subject || '(无主题)',
-        timestamp: env?.date?.toISOString() || new Date().toISOString(),
-        snippet: preview,
-        flags: [...(msg.flags ?? [])].map((flag) => String(flag)),
-        isRead: msg.flags?.has('\\Seen') ?? false,
-        unread: !msg.flags?.has('\\Seen'),
-        preview,
-        bodyPreview,
-        bodyFormat,
-        attachmentCount: 0,
-      })
     }
   } finally {
     lock.release()
@@ -532,46 +625,54 @@ export async function fetchFolder(
     const all = await client.search({ all: true }, { uid: true })
     const pick = (all || []).slice(-limit)
     for (const uid of pick.reverse()) {
-      const msg = await client.fetchOne(uid, { uid: true, envelope: true, flags: true, internalDate: true, source: true }, { uid: true })
-      if (!msg) continue
-      let preview = ''
-      let bodyPreview = ''
-      let bodyFormat: EmailBodyFormat = 'text'
-      const env = msg.envelope
-      const receivedAt = env?.date?.toISOString()
-      const internalDate = toIsoString(msg.internalDate)
-      const flags = [...(msg.flags ?? [])].map((flag) => String(flag))
-      const isRead = msg.flags?.has('\\Seen') ?? false
-      let attachmentCount = 0
-      if (msg.source) {
-        const parsed = await simpleParser(msg.source)
-        const normalized = normalizeParsedMailBody(parsed)
-        preview = normalized.bodyPreview
-        bodyPreview = normalized.bodyPreview
-        bodyFormat = normalized.bodyFormat
-        attachmentCount = parsedAttachments(parsed).length
+      let msg: Awaited<ReturnType<typeof client.fetchOne>> | null = null
+      try {
+        msg = await client.fetchOne(uid, { uid: true, envelope: true, flags: true, internalDate: true, source: true }, { uid: true })
+        if (!msg) continue
+        let preview = ''
+        let bodyPreview = ''
+        let bodyFormat: EmailBodyFormat = 'text'
+        let attachmentCount = 0
+        if (msg.source) {
+          try {
+            const parsed = await simpleParser(msg.source)
+            const normalized = normalizeParsedMailBody(parsed)
+            preview = normalized.bodyPreview
+            bodyPreview = normalized.bodyPreview
+            bodyFormat = normalized.bodyFormat
+            attachmentCount = parsedAttachments(parsed).length
+          } catch (error) {
+            console.warn('[email] message summary map failed', {
+              accountId: account.user,
+              folder: folderPath,
+              uid: toSafeString(msg.uid ?? uid),
+              messageId: toSafeString(msg.envelope?.messageId).trim() || null,
+              subject: envelopeSubject(msg.envelope?.subject),
+              error: error instanceof Error ? error.message : String(error),
+            })
+          }
+        }
+        out.push(buildMailSummaryFromFetchedMessage({
+          uid: msg.uid ?? uid,
+          uidValidity: log.uidValidity,
+          envelope: msg.envelope,
+          internalDate: msg.internalDate ?? null,
+          flags: msg.flags,
+          preview,
+          bodyPreview,
+          bodyFormat,
+          attachmentCount,
+        }))
+      } catch (error) {
+        console.warn('[email] message summary map failed', {
+          accountId: account.user,
+          folder: folderPath,
+          uid: toSafeString(msg?.uid ?? uid),
+          messageId: toSafeString(msg?.envelope?.messageId).trim() || null,
+          subject: envelopeSubject(msg?.envelope?.subject),
+          error: error instanceof Error ? error.message : String(error),
+        })
       }
-      out.push({
-        id: String(msg.uid ?? uid),
-        uid: String(msg.uid ?? uid),
-        uidValidity: log.uidValidity,
-        from: env?.from?.[0]?.address || env?.from?.[0]?.name || '',
-        subject: env?.subject || '(无主题)',
-        timestamp: receivedAt || internalDate || new Date().toISOString(),
-        snippet: bodyPreview || preview,
-        receivedAt,
-        internalDate,
-        date: receivedAt,
-        createdAt: internalDate || receivedAt,
-        flags,
-        isRead,
-        unread: !isRead,
-        preview,
-        bodyPreview,
-        bodyFormat,
-        attachmentCount,
-        messageId: env?.messageId ? String(env.messageId) : undefined,
-      })
     }
     log.fetchedCount = out.length
     if (out.length > 0) {

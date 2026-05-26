@@ -12,7 +12,9 @@
     "db:push": "prisma db push",
     "db:generate": "prisma generate",
     "db:studio": "prisma studio",
-    "slidev:install": "cd slidev-runtime && npm install --no-audit --no-fund"
+    "slidev:install": "cd slidev-runtime && npm install --no-audit --no-fund",
+    "dev:research-lab": "cd dev/research-lab && npm install --no-audit --no-fund && npm run dev",
+    "smoke:research-idea-plot": "DOTENV_CONFIG_PATH=.env.local ts-node -r dotenv/config scripts/smoke/research-idea-plot-smoke.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

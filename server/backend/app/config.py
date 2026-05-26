@@ -15,7 +15,8 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 DATA_ROOT = os.environ.get('PAPER_REMAKE_DATA_DIR', str(PROJECT_ROOT / 'data'))
 PROJECTS_ROOT = os.path.join(DATA_ROOT, 'projects')
 
-# DeepSeek API配置（与NFTCORE保持一致）
+# Unified LLM (preferred): LLM_PROVIDER, LLM_API_KEY, LLM_BASE_URL, LLM_MODEL — see server/.env.example
+# Legacy DeepSeek aliases (used when LLM_* unset; idea/plot paths use app.services.unified_llm)
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
