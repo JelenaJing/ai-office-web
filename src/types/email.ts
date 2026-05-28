@@ -81,6 +81,7 @@ export type DraftStatus =
 
 export interface ReplyDraft {
   mailId: string
+  draftId?: string
   content: string
   status: DraftStatus
   dirty: boolean
@@ -92,6 +93,7 @@ export interface ReplyDraft {
   errorMessage?: string
   /** Files the user has attached to this outgoing reply */
   attachments?: OutgoingAttachment[]
+  generationMeta?: EmailReplyGenerationMeta
 }
 
 export interface EmailReplyKnowledgeSelection {
@@ -141,6 +143,14 @@ export interface EmailReplyGenerationOptions {
   knowledgeSnippets?: EmailReplyKnowledgeSnippet[]
   triageContext?: EmailReplyTriageContext
   calendarContext?: EmailReplyCalendarContext
+  requirements?: EmailReplyRequirements
+  sourceMailKey?: string
+  accountId?: string
+  folder?: string
+  existingDraftId?: string
+  workspaceId?: string | null
+  mergeMode?: EmailReplyMergeMode
+  onGenerated?: (meta: EmailReplyGenerationMeta) => void
   /** Internal callback fired by EmailContext after prompt is built, for trace instrumentation. */
   onPromptBuilt?: (meta: {
     knowledgeContextLength: number
@@ -182,6 +192,93 @@ export interface EmailReplyKnowledgeTrace {
     | 'error'
 
   reason: string
+}
+
+export type EmailReplyTonePreference = 'formal' | 'friendly' | 'concise'
+
+export type EmailReplyLanguageMode = 'bilingual' | 'english_first' | 'chinese_first'
+
+export type EmailReplyGoalPreset =
+  | 'confirm'
+  | 'decline'
+  | 'request_more_info'
+  | 'submit_materials'
+  | 'delay_explanation'
+  | 'consult'
+  | 'custom'
+
+export type EmailReplyKnowledgeMode = 'workspace' | 'manual' | 'none'
+
+export type EmailReplyMergeMode = 'replace' | 'append'
+
+export interface EmailReplyRequirements {
+  userInstruction: string
+  replyTone: EmailReplyTonePreference
+  replyGoal: string
+  replyGoalPreset: EmailReplyGoalPreset
+  languageMode: EmailReplyLanguageMode
+  useKnowledgeBase: boolean
+  selectedKnowledgeBaseIds: string[]
+  includeAttachments: boolean
+  knowledgeMode: EmailReplyKnowledgeMode
+  mergeMode: EmailReplyMergeMode
+}
+
+export interface EmailReplyContextRef {
+  id: string
+  title: string
+  kind: 'knowledge' | 'attachment'
+}
+
+export interface EmailReplyGenerationMeta {
+  draftId?: string
+  requirements: EmailReplyRequirements
+  userInstructionSummary?: string
+  knowledgeSummary?: string
+  attachmentSummary?: string
+  warnings?: string[]
+  sourceRefs?: EmailReplyContextRef[]
+}
+
+export interface EmailReplyRequirementsHistoryItem {
+  id: string
+  userInstruction: string
+  replyTone: EmailReplyTonePreference
+  replyGoal: string
+  replyGoalPreset: EmailReplyGoalPreset
+  languageMode: EmailReplyLanguageMode
+  createdAt: string
+}
+
+export interface EmailReplyDraftRequest {
+  mailId: string
+  sourceMailKey?: string
+  accountId?: string
+  folder?: string
+  userInstruction: string
+  replyTone: EmailReplyTonePreference
+  replyGoal: string
+  replyGoalPreset?: EmailReplyGoalPreset
+  languageMode: EmailReplyLanguageMode
+  useKnowledgeBase: boolean
+  selectedKnowledgeBaseIds: string[]
+  includeAttachments: boolean
+  existingDraftId?: string
+  workspaceId?: string | null
+  knowledgeMode?: EmailReplyKnowledgeMode
+  triageContext?: EmailReplyTriageContext
+}
+
+export interface EmailReplyDraftResponse {
+  success: boolean
+  draftId?: string
+  draftBody: string
+  subject?: string
+  requirements: EmailReplyRequirements
+  knowledgeSummary?: string
+  attachmentSummary?: string
+  warnings?: string[]
+  sourceRefs?: EmailReplyContextRef[]
 }
 
 export interface SentMailRecord {

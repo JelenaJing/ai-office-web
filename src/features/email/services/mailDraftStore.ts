@@ -8,10 +8,13 @@
  * Users must explicitly click "Send" to dispatch any message.
  */
 import type { AiMailReplyDraft } from '../../../types/mailTriage'
+import type { EmailReplyRequirementsHistoryItem } from '../../../types/email'
 import { extractLegacyMailId } from '../utils/mailIdentity'
 
 const STORE_KEY = 'ai:mail-draft:v2'
+const REQUIREMENTS_HISTORY_KEY = 'ai:mail-reply-requirements:v1'
 const MAX_DRAFTS = 200
+const MAX_REQUIREMENT_HISTORY = 5
 
 type DraftStore = Record<string, AiMailReplyDraft>
 
@@ -48,6 +51,21 @@ function save(store: DraftStore): void {
     } else {
       localStorage.setItem(STORE_KEY, JSON.stringify(store))
     }
+  } catch {}
+}
+
+function loadRequirementsHistory(): EmailReplyRequirementsHistoryItem[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(REQUIREMENTS_HISTORY_KEY) ?? '[]') as unknown
+    return Array.isArray(raw) ? raw.filter((item): item is EmailReplyRequirementsHistoryItem => Boolean(item && typeof item === 'object')) : []
+  } catch {
+    return []
+  }
+}
+
+function saveRequirementsHistory(items: EmailReplyRequirementsHistoryItem[]): void {
+  try {
+    localStorage.setItem(REQUIREMENTS_HISTORY_KEY, JSON.stringify(items.slice(0, MAX_REQUIREMENT_HISTORY)))
   } catch {}
 }
 
@@ -126,4 +144,16 @@ export function evictAllAiDraftsForAccount(accountId: string): void {
     }
   }
   if (changed) save(store)
+}
+
+export function getReplyRequirementsHistory(): EmailReplyRequirementsHistoryItem[] {
+  return loadRequirementsHistory()
+}
+
+export function pushReplyRequirementsHistory(item: EmailReplyRequirementsHistoryItem): void {
+  const next = [
+    item,
+    ...loadRequirementsHistory().filter((entry) => entry.userInstruction.trim() !== item.userInstruction.trim()),
+  ].slice(0, MAX_REQUIREMENT_HISTORY)
+  saveRequirementsHistory(next)
 }

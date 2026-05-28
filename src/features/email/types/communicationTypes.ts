@@ -1,3 +1,5 @@
+import type { EmailReplyGenerationMeta } from '../../../types/email'
+
 /**
  * Unified Communication Workbench — shared type definitions.
  *
@@ -106,6 +108,7 @@ export interface CommunicationReplyDraft {
   status: CommDraftStatus
   dirty: boolean
   userEdited: boolean
+  draftId?: string
   attachments: Array<{
     filename: string
     path: string
@@ -115,6 +118,7 @@ export interface CommunicationReplyDraft {
   generatedAt?: string
   updatedAt?: string
   errorMessage?: string
+  generationMeta?: EmailReplyGenerationMeta
 }
 
 /* ------------------------------------------------------------------ */

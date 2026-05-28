@@ -5,6 +5,7 @@ import { stringifyJsonSafe } from '../../../lib/jsonSafe'
 import type { StoredEmailAccount } from './emailStore'
 import { normalizeEmailBody } from './emailBodyNormalization'
 import { fetchInbox, fetchMessage } from './emailMvp'
+import { searchKnowledgeCitation } from '../../knowledge/services/knowledgeSearchService'
 import {
   emptyEmailAnalysisSummary,
   getEmailTriageTask,
@@ -84,6 +85,26 @@ interface AnalysisCoreResult {
     | 'urgent_issue'
     | 'ordinary'
   suggestedTasks: string[]
+}
+
+interface ReplyGenerationInput {
+  userId: string
+  account: StoredEmailAccount
+  mailId: string
+  sourceMailKey?: string
+  accountId?: string
+  folder?: string
+  userInstruction?: string
+  replyTone?: 'formal' | 'friendly' | 'concise'
+  replyGoal?: string
+  replyGoalPreset?: string
+  languageMode?: 'bilingual' | 'english_first' | 'chinese_first'
+  useKnowledgeBase?: boolean
+  selectedKnowledgeBaseIds?: string[]
+  includeAttachments?: boolean
+  existingDraftId?: string
+  workspaceId?: string
+  triageContext?: Record<string, unknown>
 }
 
 class EmailAnalysisStageError extends Error {
@@ -422,6 +443,290 @@ function normalizeEmailForAnalysis(input: {
     bodyLength,
     truncated,
     bodyHash: shortHash(cleaned),
+  }
+}
+
+function asTrimmedString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.map((item) => String(item || '').trim()).filter(Boolean) : []
+}
+
+function summarizeAttachments(attachments: Array<{ filename: string; contentType: string; size: number }>): string {
+  if (attachments.length === 0) return ''
+  return attachments
+    .slice(0, 6)
+    .map((attachment) => `${attachment.filename}（${attachment.contentType || '未知类型'}，${Math.max(1, Math.round(attachment.size / 1024))} KB）`)
+    .join('；')
+}
+
+function resolveCachedReplyTriage(input: {
+  userId: string
+  accountId: string
+  folder: string
+  mailId: string
+  messageUid: string
+  bodyHash: string
+}): Record<string, unknown> | null {
+  const cacheKey = `${input.accountId}:${input.folder}:${input.messageUid}:${input.bodyHash}:${MAIL_ANALYSIS_PROMPT_VERSION}`
+  return getCachedEmailAnalysis(input.userId, cacheKey)?.result ?? null
+}
+
+function buildReplyTriageBlock(triage: Record<string, unknown> | null | undefined): string {
+  if (!triage) return ''
+  const lines = [
+    asTrimmedString(triage.summary) ? `摘要：${asTrimmedString(triage.summary)}` : '',
+    asTrimmedString(triage.reason) ? `判断原因：${asTrimmedString(triage.reason)}` : '',
+    asTrimmedString(triage.suggestedAction) ? `建议动作：${asTrimmedString(triage.suggestedAction)}` : '',
+    asTrimmedString(triage.category) ? `分类：${asTrimmedString(triage.category)}` : '',
+    asTrimmedString(triage.emailCategory) ? `邮件类型：${asTrimmedString(triage.emailCategory)}` : '',
+    asTrimmedString(triage.urgency) ? `紧急度：${asTrimmedString(triage.urgency)}` : '',
+    asTrimmedString(triage.deadline) ? `截止信息：${asTrimmedString(triage.deadline)}` : '',
+  ].filter(Boolean)
+  return lines.length > 0 ? `邮件 AI 分析结果：\n${lines.join('\n')}` : ''
+}
+
+function buildKnowledgeSummary(chunks: Awaited<ReturnType<typeof searchKnowledgeCitation>>['chunks']): string {
+  if (chunks.length === 0) return ''
+  return chunks
+    .slice(0, 5)
+    .map((chunk, index) => `[资料 ${index + 1}] ${chunk.title}\n${chunk.excerpt}`)
+    .join('\n\n')
+}
+
+function languageModeInstruction(mode: ReplyGenerationInput['languageMode']): string {
+  if (mode === 'chinese_first') {
+    return [
+      '请输出中英双语草稿，并将中文版本放在前面，英文版本放在后面。',
+      '使用如下结构：',
+      '中文：',
+      '<中文草稿>',
+      '',
+      'English:',
+      '<English draft>',
+    ].join('\n')
+  }
+  return [
+    '请输出中英双语草稿，并将英文版本放在前面，中文版本放在后面。',
+    '使用如下结构：',
+    'English:',
+    '<English draft>',
+    '',
+    '中文：',
+    '<中文草稿>',
+  ].join('\n')
+}
+
+function buildReplyFallback(input: {
+  fromName: string
+  subject: string
+  userInstruction: string
+  languageMode: NonNullable<ReplyGenerationInput['languageMode']>
+}): string {
+  const english = [
+    `Dear ${input.fromName || 'there'},`,
+    '',
+    `Thank you for your email regarding "${input.subject || 'the matter'}". I have received your message and will handle it carefully.`,
+    input.userInstruction ? `I will also take into account the following note: ${input.userInstruction}` : 'If any key information is still missing, I will follow up for clarification before making a commitment.',
+    '',
+    'Best regards,',
+    'AI Office User',
+  ].join('\n')
+  const chinese = [
+    `${input.fromName || '您好'}：`,
+    '',
+    `感谢您的来信，关于“${input.subject || '相关事项'}”我已收到并会谨慎处理。`,
+    input.userInstruction ? `我会结合以下补充要求起草正式回复：${input.userInstruction}` : '如仍有信息不足之处，我会先礼貌说明并请对方补充，再作进一步确认。',
+    '',
+    '祝好！',
+    'AI Office User',
+  ].join('\n')
+  return input.languageMode === 'chinese_first'
+    ? `中文：\n\n${chinese}\n\nEnglish:\n\n${english}`
+    : `English:\n\n${english}\n\n中文：\n\n${chinese}`
+}
+
+export async function generateEmailReplyDraft(input: ReplyGenerationInput): Promise<{
+  draftId: string
+  draftBody: string
+  subject: string
+  requirements: {
+    userInstruction: string
+    replyTone: 'formal' | 'friendly' | 'concise'
+    replyGoal: string
+    replyGoalPreset: string
+    languageMode: 'bilingual' | 'english_first' | 'chinese_first'
+    useKnowledgeBase: boolean
+    selectedKnowledgeBaseIds: string[]
+    includeAttachments: boolean
+    knowledgeMode: 'workspace' | 'manual' | 'none'
+    mergeMode: 'replace' | 'append'
+  }
+  knowledgeSummary?: string
+  attachmentSummary?: string
+  warnings: string[]
+  sourceRefs: Array<{ id: string; title: string; kind: 'knowledge' | 'attachment' }>
+}> {
+  const detail = await fetchMessage(input.account, input.mailId)
+  const folder = asTrimmedString(input.folder).toUpperCase() || 'INBOX'
+  const normalized = normalizeEmailForAnalysis({
+    subject: detail.subject,
+    from: detail.from,
+    to: detail.to,
+    date: detail.receivedAt || detail.internalDate || detail.timestamp,
+    body: detail.bodyText || detail.body || '',
+    htmlBody: detail.bodyHtml || detail.htmlBody || '',
+    attachments: detail.attachments.map((attachment) => ({
+      filename: attachment.filename,
+      contentType: attachment.contentType,
+      size: attachment.size,
+    })),
+  })
+
+  const warnings: string[] = []
+  const selectedKnowledgeBaseIds = asStringArray(input.selectedKnowledgeBaseIds)
+  const useKnowledgeBase = Boolean(input.useKnowledgeBase)
+  const includeAttachments = input.includeAttachments !== false
+  const replyTone: 'formal' | 'friendly' | 'concise' =
+    input.replyTone === 'friendly' || input.replyTone === 'concise' ? input.replyTone : 'formal'
+  const languageMode: 'bilingual' | 'english_first' | 'chinese_first' =
+    input.languageMode === 'chinese_first' || input.languageMode === 'english_first' ? input.languageMode : 'bilingual'
+  const replyGoal = asTrimmedString(input.replyGoal) || '礼貌回复并基于事实说明情况'
+  const replyGoalPreset = asTrimmedString(input.replyGoalPreset) || 'custom'
+  const userInstruction = asTrimmedString(input.userInstruction)
+  const knowledgeMode: 'workspace' | 'manual' | 'none' =
+    useKnowledgeBase ? (selectedKnowledgeBaseIds.length > 0 ? 'manual' : 'workspace') : 'none'
+  const requirements: {
+    userInstruction: string
+    replyTone: 'formal' | 'friendly' | 'concise'
+    replyGoal: string
+    replyGoalPreset: string
+    languageMode: 'bilingual' | 'english_first' | 'chinese_first'
+    useKnowledgeBase: boolean
+    selectedKnowledgeBaseIds: string[]
+    includeAttachments: boolean
+    knowledgeMode: 'workspace' | 'manual' | 'none'
+    mergeMode: 'replace' | 'append'
+  } = {
+    userInstruction,
+    replyTone,
+    replyGoal,
+    replyGoalPreset,
+    languageMode,
+    useKnowledgeBase,
+    selectedKnowledgeBaseIds,
+    includeAttachments,
+    knowledgeMode,
+    mergeMode: 'replace' as const,
+  }
+
+  const sourceMailKey = asTrimmedString(input.sourceMailKey) || buildSourceMailKey({
+    accountId: input.account.user,
+    folder,
+    uidValidity: detail.uidValidity,
+    uid: detail.uid,
+    mailId: input.mailId,
+    messageId: detail.messageId,
+  })
+
+  const triage =
+    (input.triageContext && typeof input.triageContext === 'object' ? input.triageContext : null)
+    || resolveCachedReplyTriage({
+      userId: input.userId,
+      accountId: input.account.user,
+      folder,
+      mailId: input.mailId,
+      messageUid: detail.uid || input.mailId,
+      bodyHash: normalized.bodyHash,
+    })
+
+  let knowledgeChunks: Awaited<ReturnType<typeof searchKnowledgeCitation>>['chunks'] = []
+  if (useKnowledgeBase) {
+    try {
+      const knowledgeResult = await searchKnowledgeCitation({
+        userId: input.userId,
+        query: [detail.subject, normalized.cleanText.slice(0, 800), userInstruction, asTrimmedString(triage?.summary)]
+          .filter(Boolean)
+          .join('\n'),
+        workspaceId: asTrimmedString(input.workspaceId),
+        selectedSourceIds: selectedKnowledgeBaseIds,
+        topK: 5,
+      })
+      knowledgeChunks = knowledgeResult.chunks
+      if (knowledgeResult.warnings?.length) warnings.push(...knowledgeResult.warnings)
+      if (knowledgeChunks.length === 0) warnings.push('未找到高度相关的知识库内容，已仅根据邮件内容生成。')
+    } catch (error) {
+      warnings.push('知识库暂不可用，已仅根据邮件内容生成。')
+      console.warn('[EmailReplyDraft] knowledge search failed:', error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  const attachmentSummary = includeAttachments ? summarizeAttachments(detail.attachments.map((attachment) => ({
+    filename: attachment.filename,
+    contentType: attachment.contentType,
+    size: attachment.size,
+  }))) : ''
+
+  const promptBlocks = [
+    '你是 AI Office 的邮件预回复助手。请基于真实邮件内容生成一份“可编辑草稿”，不能自动发送。',
+    `回复语气：${replyTone}`,
+    `回复目标：${replyGoal}`,
+    languageModeInstruction(languageMode),
+    '生成要求：',
+    '1. 必须优先依据原邮件事实、邮件 AI 分析结果、用户补充说明、知识库材料和附件摘要。',
+    '2. 不要编造事实，不要替用户承诺无法确认的时间、结果、审批意见或资源安排。',
+    '3. 如果信息不足，请委婉说明当前无法确认，并请求对方补充必要信息。',
+    '4. 涉及制度、金额、审批、采购、会议安排、材料提交时必须谨慎表述。',
+    '5. 如果使用了知识库，仅内部保留引用依据，不要把 sourceRefs、chunkId、技术字段写进邮件正文。',
+    '',
+    `原邮件主题：${detail.subject || '（无主题）'}`,
+    `发件人：${detail.from || '未知发件人'}`,
+    `收件人：${detail.to || input.account.user}`,
+    `原邮件正文：\n${normalized.cleanText}`,
+    buildReplyTriageBlock(triage),
+    userInstruction ? `用户补充说明：\n${userInstruction}` : '',
+    knowledgeChunks.length > 0 ? `可用知识库材料：\n${buildKnowledgeSummary(knowledgeChunks)}` : '',
+    attachmentSummary ? `可用附件摘要：\n${attachmentSummary}` : '',
+  ].filter(Boolean)
+
+  const draftBody = isLlmConfigured()
+    ? (await invokeLlmText(
+        [
+          { role: 'system', content: promptBlocks.slice(0, 10).join('\n') },
+          { role: 'user', content: promptBlocks.slice(10).join('\n\n') },
+        ],
+        { temperature: replyTone === 'friendly' ? 0.45 : 0.3, maxTokens: 1600 },
+      )).trim()
+    : buildReplyFallback({
+        fromName: detail.from || 'there',
+        subject: detail.subject,
+        userInstruction,
+        languageMode,
+      })
+
+  if (!isLlmConfigured()) {
+    warnings.push('模型暂不可用，已返回保守版预回复草稿。')
+  }
+
+  return {
+    draftId: `reply-${shortHash(`${input.account.user}:${sourceMailKey}:${normalized.bodyHash}:${Date.now()}`)}`,
+    draftBody: draftBody || buildReplyFallback({
+      fromName: detail.from || 'there',
+      subject: detail.subject,
+      userInstruction,
+      languageMode,
+    }),
+    subject: detail.subject,
+    requirements,
+    knowledgeSummary: knowledgeChunks.length > 0 ? `${knowledgeChunks.length} 条知识库材料已参考。` : undefined,
+    attachmentSummary: attachmentSummary || undefined,
+    warnings,
+    sourceRefs: [
+      ...knowledgeChunks.map((chunk) => ({ id: chunk.sourceId, title: chunk.title, kind: 'knowledge' as const })),
+      ...detail.attachments.map((attachment) => ({ id: attachment.id, title: attachment.filename, kind: 'attachment' as const })),
+    ],
   }
 }
 
