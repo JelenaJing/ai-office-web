@@ -4,19 +4,30 @@ import {
   escapeAttribute,
   escapeHtml,
   injectEditRuntime,
+  injectHtmlSlidesTemplateMarkers,
   injectSharedStyles,
   rebuildHtmlPresentationFromContentModel,
   resolveHtmlPresentationAssetUrl,
+  sanitizePresentationHtmlImages,
   type ContentModelBlock,
   type ContentModelRecord,
   type ContentModelSlide,
 } from './htmlPresentationPostProcess'
 import {
+  buildCandidateTemplatesSidecar,
   resolveBeautifulTemplateFile,
   resolveTemplateSelection,
   type HtmlPresentationJobOptions,
   type TemplateProfileRecord,
+  type TemplateSelectionResult,
 } from './htmlPresentationTemplates'
+import { renderBeautifulHtmlWithTemplateAdapter } from './beautifulHtmlTemplateAdapter'
+import {
+  finalizeSafeFastPresentationHtml,
+  hasBeautifulTemplateAdapterFastMapping,
+  renderSafeFastPresentationHtml,
+} from './htmlPresentationSafeFastRenderer'
+import { validateFinalHtmlSlides, validateRenderedSlides } from './htmlPresentationSlideValidation'
 
 export interface RetemplateResult {
   outputPath: string
@@ -36,6 +47,20 @@ export interface RenderHtmlPresentationResult {
   rendererMode: TemplateProfileRecord['rendererMode']
   fallbackUsed: boolean
   warning?: string
+}
+
+export interface ApplyLockedTemplateRenderingResult {
+  html: string
+  templateProfile: TemplateProfileRecord
+  rendererMode: TemplateProfileRecord['rendererMode']
+  fallbackUsed: boolean
+  warning?: string
+  candidateTemplatesSidecar: Record<string, unknown>
+  appliedTemplateSlug: string | null
+  validationOk?: boolean
+  blankSlideCount?: number
+  repairAttempted?: boolean
+  repairSucceeded?: boolean
 }
 
 function artifactIdFromDir(artifactDir: string): string {
@@ -286,6 +311,19 @@ function extractSlidesEnvelope(templateHtml: string): { prefix: string; suffix: 
   return null
 }
 
+function findElementCloseIndex(html: string, openIndex: number, tagName: string): number {
+  const tokenPattern = new RegExp(`</?${tagName}\\b[^>]*>`, 'gi')
+  tokenPattern.lastIndex = openIndex
+  let depth = 0
+  let tokenMatch: RegExpExecArray | null
+  while ((tokenMatch = tokenPattern.exec(html))) {
+    if (new RegExp(`^<${tagName}\\b`, 'i').test(tokenMatch[0])) depth += 1
+    else depth -= 1
+    if (depth === 0) return tokenMatch.index + tokenMatch[0].length
+  }
+  return -1
+}
+
 function extractSectionSlidesEnvelope(templateHtml: string): { prefix: string; suffix: string } | null {
   const matches = Array.from(templateHtml.matchAll(/<section\b[^>]*class=(["'])[^"']*\bslide\b[^"']*\1[^>]*>[\s\S]*?<\/section>/gi))
   if (matches.length === 0) return null
@@ -300,7 +338,35 @@ function extractSectionSlidesEnvelope(templateHtml: string): { prefix: string; s
   }
 }
 
+function extractDivSlideSiblingsEnvelope(templateHtml: string): { prefix: string; suffix: string } | null {
+  const slidePattern = /<div\b[^>]*class=(["'])[^"']*\bslide\b[^"']*\1[^>]*>/gi
+  const starts: number[] = []
+  let match: RegExpExecArray | null
+  while ((match = slidePattern.exec(templateHtml))) {
+    if (typeof match.index === 'number') starts.push(match.index)
+  }
+  if (starts.length === 0) return null
+  const firstIndex = starts[0]
+  const lastEnd = findElementCloseIndex(templateHtml, starts[starts.length - 1], 'div')
+  if (lastEnd < 0) return null
+  return {
+    prefix: templateHtml.slice(0, firstIndex),
+    suffix: templateHtml.slice(lastEnd),
+  }
+}
+
 export function renderBeautifulTemplateHtml(input: {
+  templateSlug: string
+  templateFile: string
+  contentModel: ContentModelRecord
+  artifactId: string
+}): string | null {
+  const adapterResult = renderBeautifulHtmlWithTemplateAdapter(input)
+  if (adapterResult.ok && adapterResult.html) return adapterResult.html
+  return renderBeautifulTemplateHtmlLegacy(input)
+}
+
+function renderBeautifulTemplateHtmlLegacy(input: {
   templateSlug: string
   templateFile: string
   contentModel: ContentModelRecord
@@ -308,7 +374,9 @@ export function renderBeautifulTemplateHtml(input: {
 }): string | null {
   const templateHtml = fs.readFileSync(input.templateFile, 'utf-8')
     .replace(/<title>[\s\S]*?<\/title>/i, `<title>${escapeHtml(input.contentModel.title || 'HTML PPT')}</title>`)
-  const envelope = extractSlidesEnvelope(templateHtml) ?? extractSectionSlidesEnvelope(templateHtml)
+  const envelope = extractSlidesEnvelope(templateHtml)
+    ?? extractSectionSlidesEnvelope(templateHtml)
+    ?? extractDivSlideSiblingsEnvelope(templateHtml)
   if (!envelope) return null
   const classNames = templateSlideClassNames(templateHtml)
   const renderSlide = input.templateSlug === 'bold-poster'
@@ -331,58 +399,349 @@ export function renderBeautifulTemplateHtml(input: {
   return `${envelope.prefix}\n${slidesHtml}\n${envelope.suffix}`
 }
 
+/** Initial generation (fast/high): keep OpenCode HTML, only markers/images/profile sync. */
+export function finalizeOpencodeTemplateDrivenJobOutput(input: {
+  outputDir: string
+  htmlPath: string
+  contentModel: ContentModelRecord
+  contentModelPath: string
+  templateSelection: TemplateSelectionResult
+  artifactId?: string
+  qualityMode: 'fast' | 'high'
+}): ApplyLockedTemplateRenderingResult {
+  const templateFile = resolveBeautifulTemplateFile(input.templateSelection.selectedTemplateSlug)
+    || input.templateSelection.templateProfile.templateFile
+  const appliedTemplateSlug = input.templateSelection.selectedTemplateSlug
+  let html = fs.existsSync(input.htmlPath) ? fs.readFileSync(input.htmlPath, 'utf-8') : ''
+  const validation = validateFinalHtmlSlides(html, {
+    minSlides: Math.min(2, Math.max(1, input.contentModel.slides.length)),
+  })
+  const rendererMode: TemplateProfileRecord['rendererMode'] = input.qualityMode === 'high'
+    ? 'opencode-template-driven-high'
+    : 'opencode-template-driven-fast'
+
+  html = injectHtmlSlidesTemplateMarkers(html, appliedTemplateSlug)
+  html = sanitizePresentationHtmlImages({
+    html,
+    contentModel: { ...input.contentModel, templateSlug: appliedTemplateSlug },
+    assetsBaseDir: input.outputDir,
+    artifactId: input.artifactId,
+  })
+  html = injectEditRuntime(injectSharedStyles(html), input.contentModel.deckId || input.contentModel.title || 'deck')
+
+  const nextProfile: TemplateProfileRecord = {
+    ...input.templateSelection.templateProfile,
+    templateFile,
+    templateSlug: appliedTemplateSlug,
+    requestedTemplateSlug: input.templateSelection.requestedTemplateSlug || appliedTemplateSlug,
+    appliedTemplateSlug,
+    templateLocked: input.templateSelection.templateLocked,
+    templateSourceKind: input.templateSelection.templateLocked ? 'user-selected' : input.templateSelection.templateProfile.templateSourceKind,
+    rendererMode,
+    fallbackUsed: false,
+    templateStyleApplied: validation.ok ? 'full' : 'not-applied',
+    blankSlideFallbackCount: validation.blankSlideFallbackCount,
+    warning: validation.ok
+      ? undefined
+      : input.qualityMode === 'high'
+        ? '部分页面内容较少，已保留 OpenCode 模板生成结果。'
+        : 'OpenCode 模板页校验未通过，将回退稳定快速渲染。',
+  }
+
+  const candidateTemplatesSidecar = buildCandidateTemplatesSidecar(input.templateSelection)
+  fs.writeFileSync(input.htmlPath, html, 'utf-8')
+  fs.writeFileSync(input.contentModelPath, JSON.stringify({ ...input.contentModel, templateSlug: appliedTemplateSlug }, null, 2), 'utf-8')
+  fs.writeFileSync(path.join(input.outputDir, 'template-profile.json'), JSON.stringify(nextProfile, null, 2), 'utf-8')
+  fs.writeFileSync(path.join(input.outputDir, 'candidate-templates.json'), JSON.stringify(candidateTemplatesSidecar, null, 2), 'utf-8')
+
+  if (!validation.ok) {
+    console.warn(
+      `[html-ppt] opencode-template-driven validation slug=${appliedTemplateSlug} blankSlides=${validation.blankSlideCount} hasDemo=${validation.hasDemoText}`,
+    )
+  }
+
+  return {
+    html,
+    templateProfile: nextProfile,
+    rendererMode,
+    fallbackUsed: false,
+    warning: nextProfile.warning,
+    candidateTemplatesSidecar,
+    appliedTemplateSlug,
+    validationOk: validation.ok,
+    blankSlideCount: validation.blankSlideCount,
+  }
+}
+
+/** Fast fallback when OpenCode template output fails validation (after optional repair). */
+export function finalizeSafeFastJobOutput(input: {
+  outputDir: string
+  htmlPath: string
+  contentModel: ContentModelRecord
+  contentModelPath: string
+  templateSelection: TemplateSelectionResult
+  artifactId?: string
+  fallbackReason?: string
+  repairAttempted?: boolean
+  repairSucceeded?: boolean
+}): ApplyLockedTemplateRenderingResult {
+  const requestedTemplateSlug = input.templateSelection.requestedTemplateSlug
+    || input.templateSelection.selectedTemplateSlug
+  const templateFile = resolveBeautifulTemplateFile(input.templateSelection.selectedTemplateSlug)
+    || input.templateSelection.templateProfile.templateFile
+  const templateProfile: TemplateProfileRecord = {
+    ...input.templateSelection.templateProfile,
+    templateFile,
+    templateSlug: requestedTemplateSlug,
+    requestedTemplateSlug,
+    appliedTemplateSlug: null,
+    templateLocked: input.templateSelection.templateLocked,
+    templateSourceKind: input.templateSelection.templateLocked ? 'user-selected' : input.templateSelection.templateProfile.templateSourceKind,
+  }
+
+  const useAdapterFast = hasBeautifulTemplateAdapterFastMapping(input.templateSelection.selectedTemplateSlug)
+  let rendererMode: TemplateProfileRecord['rendererMode'] = 'safe-fast-renderer'
+  let fallbackUsed = true
+  let fallbackReason: string | undefined = input.fallbackReason || 'fast-template-validation-failed'
+  let blankSlideFallbackCount = 0
+  let html = ''
+  let appliedTemplateSlug: string | null = null
+
+  if (useAdapterFast) {
+    const adapterResult = renderBeautifulHtmlWithTemplateAdapter({
+      templateSlug: input.templateSelection.selectedTemplateSlug,
+      templateFile,
+      contentModel: input.contentModel,
+      artifactId: input.artifactId || '',
+    })
+    const adapterValidation = adapterResult.html ? validateRenderedSlides(adapterResult.html) : { ok: false, blankSlideFallbackCount: input.contentModel.slides.length } as ReturnType<typeof validateRenderedSlides>
+    if (adapterResult.ok && adapterResult.html && adapterValidation.ok) {
+      html = injectEditRuntime(injectSharedStyles(adapterResult.html), input.contentModel.deckId || input.contentModel.title || 'deck')
+      rendererMode = 'beautiful-template-adapter-fast'
+      fallbackUsed = false
+      fallbackReason = undefined
+      appliedTemplateSlug = input.templateSelection.selectedTemplateSlug
+    } else {
+      blankSlideFallbackCount = adapterValidation.blankSlideFallbackCount
+      fallbackReason = adapterResult.fallbackReason || 'adapter-produced-blank-slides'
+    }
+  }
+
+  if (!html) {
+    const safe = finalizeSafeFastPresentationHtml({
+      contentModel: input.contentModel,
+      templateProfile,
+      appliedTemplateSlug: requestedTemplateSlug,
+      artifactId: input.artifactId,
+      assetsBaseDir: input.outputDir,
+    })
+    html = safe.html
+    blankSlideFallbackCount = safe.validation.blankSlideFallbackCount
+    rendererMode = 'safe-fast-renderer'
+    fallbackUsed = true
+    appliedTemplateSlug = null
+  }
+
+  html = injectHtmlSlidesTemplateMarkers(html, requestedTemplateSlug)
+  html = sanitizePresentationHtmlImages({
+    html,
+    contentModel: { ...input.contentModel, templateSlug: requestedTemplateSlug },
+    assetsBaseDir: input.outputDir,
+    artifactId: input.artifactId,
+  })
+
+  const nextProfile: TemplateProfileRecord = {
+    ...templateProfile,
+    rendererMode,
+    fallbackUsed,
+    fallbackReason,
+    appliedTemplateSlug,
+    templateStyleApplied: fallbackUsed ? 'not-applied' : 'full',
+    blankSlideFallbackCount,
+    repairAttempted: input.repairAttempted,
+    repairSucceeded: input.repairSucceeded,
+    warning: fallbackUsed
+      ? '所选模板未完整应用，当前为快速草稿。可使用高质量重新生成或点击「应用模板」重试。'
+      : undefined,
+  }
+
+  const candidateTemplatesSidecar = buildCandidateTemplatesSidecar(input.templateSelection)
+  fs.writeFileSync(input.htmlPath, html, 'utf-8')
+  fs.writeFileSync(
+    input.contentModelPath,
+    JSON.stringify({ ...input.contentModel, templateSlug: requestedTemplateSlug }, null, 2),
+    'utf-8',
+  )
+  fs.writeFileSync(path.join(input.outputDir, 'template-profile.json'), JSON.stringify(nextProfile, null, 2), 'utf-8')
+  fs.writeFileSync(path.join(input.outputDir, 'candidate-templates.json'), JSON.stringify(candidateTemplatesSidecar, null, 2), 'utf-8')
+
+  return {
+    html,
+    templateProfile: nextProfile,
+    rendererMode,
+    fallbackUsed,
+    warning: nextProfile.warning,
+    candidateTemplatesSidecar,
+    appliedTemplateSlug,
+    repairAttempted: input.repairAttempted,
+    repairSucceeded: input.repairSucceeded,
+  }
+}
+
+/** User-initiated “apply template” — adapter with blank-slide guard. */
+export function applyLockedTemplateRenderingToJobOutput(input: {
+  outputDir: string
+  htmlPath: string
+  contentModel: ContentModelRecord
+  contentModelPath: string
+  templateSelection: TemplateSelectionResult
+  artifactId?: string
+}): ApplyLockedTemplateRenderingResult {
+  const templateFile = resolveBeautifulTemplateFile(input.templateSelection.selectedTemplateSlug)
+    || input.templateSelection.templateProfile.templateFile
+  const templateProfile: TemplateProfileRecord = {
+    ...input.templateSelection.templateProfile,
+    templateFile,
+    requestedTemplateSlug: input.templateSelection.requestedTemplateSlug || input.templateSelection.selectedTemplateSlug,
+    appliedTemplateSlug: input.templateSelection.selectedTemplateSlug,
+    templateLocked: input.templateSelection.templateLocked,
+    templateSourceKind: input.templateSelection.templateLocked ? 'user-selected' : input.templateSelection.templateProfile.templateSourceKind,
+  }
+  const currentHtml = fs.existsSync(input.htmlPath) ? fs.readFileSync(input.htmlPath, 'utf-8') : ''
+  const renderResult = renderHtmlPresentationFromContentModel({
+    contentModel: input.contentModel,
+    templateProfile,
+    artifactId: input.artifactId || '',
+    currentHtml,
+    purpose: 'retemplate',
+  })
+  const appliedTemplateSlug = input.templateSelection.selectedTemplateSlug
+  const adapterValidation = renderResult.html ? validateRenderedSlides(renderResult.html) : null
+  const blankSlideFallbackCount = adapterValidation?.blankSlideFallbackCount ?? 0
+  const useAdapterResult = renderResult.rendererMode === 'beautiful-template-adapter-retemplate'
+    && !renderResult.fallbackUsed
+    && Boolean(adapterValidation?.ok)
+
+  const nextProfile: TemplateProfileRecord = {
+    ...templateProfile,
+    templateSlug: appliedTemplateSlug,
+    rendererMode: useAdapterResult ? 'beautiful-template-adapter-retemplate' : renderResult.rendererMode,
+    appliedTemplateSlug,
+    fallbackUsed: renderResult.fallbackUsed || !useAdapterResult,
+    fallbackReason: useAdapterResult ? undefined : (renderResult.warning || 'adapter-produced-blank-slides'),
+    blankSlideFallbackCount,
+    warning: useAdapterResult ? renderResult.warning : (renderResult.warning || '模板应用未完全成功，已保留或回退为稳定版式。'),
+  }
+  let html = useAdapterResult ? (renderResult.html || currentHtml) : (renderResult.fallbackUsed ? currentHtml : (renderResult.html || currentHtml))
+  if (!useAdapterResult && !html.trim()) {
+    html = renderSafeFastPresentationHtml({
+      contentModel: input.contentModel,
+      templateProfile,
+      artifactId: input.artifactId,
+      assetsBaseDir: input.outputDir,
+    })
+  }
+  html = injectHtmlSlidesTemplateMarkers(html, appliedTemplateSlug)
+  html = sanitizePresentationHtmlImages({
+    html,
+    contentModel: {
+      ...input.contentModel,
+      templateSlug: appliedTemplateSlug,
+    },
+    assetsBaseDir: input.outputDir,
+    artifactId: input.artifactId,
+  })
+  const candidateTemplatesSidecar = buildCandidateTemplatesSidecar(input.templateSelection)
+  fs.writeFileSync(input.htmlPath, html, 'utf-8')
+  fs.writeFileSync(input.contentModelPath, JSON.stringify({
+    ...input.contentModel,
+    templateSlug: appliedTemplateSlug,
+  }, null, 2), 'utf-8')
+  fs.writeFileSync(path.join(input.outputDir, 'template-profile.json'), JSON.stringify(nextProfile, null, 2), 'utf-8')
+  fs.writeFileSync(path.join(input.outputDir, 'candidate-templates.json'), JSON.stringify(candidateTemplatesSidecar, null, 2), 'utf-8')
+  return {
+    html,
+    templateProfile: nextProfile,
+    rendererMode: renderResult.rendererMode,
+    fallbackUsed: renderResult.fallbackUsed,
+    warning: renderResult.warning,
+    candidateTemplatesSidecar,
+    appliedTemplateSlug,
+  }
+}
+
 export function renderHtmlPresentationFromContentModel(input: {
   contentModel: ContentModelRecord
   templateProfile: TemplateProfileRecord
   artifactId: string
   currentHtml?: string
+  purpose?: 'retemplate' | 'timeout-fallback'
 }): RenderHtmlPresentationResult {
+  const purpose = input.purpose ?? 'retemplate'
   const templateFile = resolveBeautifulTemplateFile(input.templateProfile.templateSlug) || input.templateProfile.templateFile
   let html = ''
-  let rendererMode: TemplateProfileRecord['rendererMode'] = 'beautiful-template'
+  let rendererMode: TemplateProfileRecord['rendererMode'] = purpose === 'timeout-fallback'
+    ? 'safe-fast-renderer'
+    : 'beautiful-template-adapter-retemplate'
   let fallbackUsed = false
   let warning = input.templateProfile.warning?.trim() || ''
 
+  if (purpose === 'timeout-fallback') {
+    html = renderSafeFastPresentationHtml({
+      contentModel: input.contentModel,
+      templateProfile: input.templateProfile,
+      artifactId: input.artifactId,
+    })
+    return { html, rendererMode: 'safe-fast-renderer', fallbackUsed: true, warning: warning || '生成超时，已使用稳定快速渲染。' }
+  }
+
+  let adapterFallbackReason: string | undefined
   if (templateFile) {
-    const rendered = renderBeautifulTemplateHtml({
+    const adapterResult = renderBeautifulHtmlWithTemplateAdapter({
       templateSlug: input.templateProfile.templateSlug,
       templateFile,
       contentModel: input.contentModel,
       artifactId: input.artifactId,
     })
-    if (rendered) {
+    adapterFallbackReason = adapterResult.fallbackReason
+    const adapterValidation = adapterResult.html ? validateRenderedSlides(adapterResult.html) : null
+    const adapterOk = Boolean(adapterResult.ok && adapterResult.html && adapterValidation?.ok)
+    const rendered = adapterOk
+      ? adapterResult.html
+      : renderBeautifulTemplateHtmlLegacy({
+        templateSlug: input.templateProfile.templateSlug,
+        templateFile,
+        contentModel: input.contentModel,
+        artifactId: input.artifactId,
+      })
+    const legacyValidation = rendered ? validateRenderedSlides(rendered) : null
+    const legacyOk = Boolean(rendered && legacyValidation?.ok)
+    if (adapterOk && adapterResult.html) {
+      rendererMode = 'beautiful-template-adapter-retemplate'
+      html = injectEditRuntime(injectSharedStyles(adapterResult.html), input.contentModel.deckId || input.contentModel.title || 'deck')
+    } else if (legacyOk && rendered) {
+      rendererMode = 'beautiful-template'
       html = injectEditRuntime(injectSharedStyles(rendered), input.contentModel.deckId || input.contentModel.title || 'deck')
     } else if (input.currentHtml) {
       fallbackUsed = true
-      rendererMode = 'html-ppt-beautiful-fallback'
-      warning = warning || '该模板暂不支持精确换肤，已保留当前渲染样式。'
+      rendererMode = 'beautiful-template-adapter-fallback'
+      warning = warning || adapterFallbackReason || 'adapter-produced-blank-slides'
+      console.warn(
+        `[html-ppt] retemplate adapter blank/failed slug=${input.templateProfile.templateSlug} reason=${adapterFallbackReason || 'blank-slides'}`,
+      )
       html = input.currentHtml
     }
   }
 
   if (!html) {
     fallbackUsed = true
-    rendererMode = input.currentHtml ? 'html-ppt-beautiful-fallback' : 'generic-fallback'
-    warning = warning || (rendererMode === 'generic-fallback'
-      ? '该模板暂不支持精确换肤，已退回通用渲染。'
-      : '该模板暂不支持精确换肤，已保留当前渲染样式。')
-    html = rendererMode === 'generic-fallback'
-      ? injectEditRuntime(
-        injectSharedStyles(
-          rebuildHtmlPresentationFromContentModel({
-            contentModel: input.contentModel,
-            templateProfile: {
-              ...input.templateProfile,
-              templateFile,
-              rendererMode: 'generic-fallback',
-              warning,
-            },
-            artifactId: input.artifactId,
-          }),
-        ),
-        input.contentModel.deckId || input.contentModel.title || 'deck',
-      )
-      : input.currentHtml || ''
+    rendererMode = 'safe-fast-renderer'
+    warning = warning || '模板换肤失败，已使用稳定版式。'
+    html = renderSafeFastPresentationHtml({
+      contentModel: input.contentModel,
+      templateProfile: input.templateProfile,
+      artifactId: input.artifactId,
+    })
   }
 
   return {

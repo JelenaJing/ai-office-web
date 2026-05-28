@@ -15,7 +15,6 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 import pandas as pd
-from openai import OpenAI
 
 from app.services import unified_llm
 
@@ -83,10 +82,6 @@ class DataTypeClassifier:
 
     def _classify_with_llm(self, *, df: pd.DataFrame, analysis: Dict[str, Any]) -> Optional[DataTypeResult]:
         try:
-            client = self.llm_client or self._build_client()
-            if client is None:
-                return None
-
             messages = [
                 {
                     "role": "system",
@@ -104,14 +99,26 @@ class DataTypeClassifier:
                 },
             ]
 
-            resp = client.chat.completions.create(
-                model=unified_llm.get_model(),
-                messages=messages,
-                temperature=0.1,
-                max_tokens=300,
-            )
-            content = (resp.choices[0].message.content or "").strip()
-            parsed = self._safe_json_load(content)
+            if self.llm_client is not None:
+                resp = self.llm_client.chat.completions.create(
+                    model=unified_llm.get_model(),
+                    messages=messages,
+                    temperature=0.1,
+                    max_tokens=300,
+                )
+                content = (resp.choices[0].message.content or "").strip()
+                parsed = self._safe_json_load(content)
+            else:
+                if not unified_llm.is_llm_configured():
+                    return None
+                parsed = unified_llm.chat_completion_json(
+                    messages,
+                    max_tokens=300,
+                    temperature=0.1,
+                )
+                if parsed.get("raw") and "data_type" not in parsed:
+                    return None
+
             if not parsed:
                 return None
 
@@ -197,15 +204,6 @@ class DataTypeClassifier:
             if n.endswith("_mz") or n.startswith("mz_"):
                 return True
         return False
-
-    @staticmethod
-    def _build_client() -> Optional[OpenAI]:
-        if not unified_llm.is_llm_configured():
-            return None
-        try:
-            return unified_llm.get_openai_client()
-        except RuntimeError:
-            return None
 
     @staticmethod
     def _build_llm_prompt(*, df: pd.DataFrame, analysis: Dict[str, Any]) -> str:

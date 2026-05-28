@@ -1,5 +1,6 @@
 # dependencies
 node_modules/
+.certs/
 
 # build outputs
 dist/
@@ -64,3 +65,26 @@ test-results/
 playwright-report/
 .playwright/
 .playwright-artifacts-*/
+
+# Runtime generated files
+server/runtime/
+server/runtime/opencode-jobs/
+server/runtime/opencode-jobs/**
+server/runtime/**/*.log
+server/runtime/**/*.tmp
+
+# Temporary generated files
+.tmp/
+tmp/
+.cache/
+.DS_Store
+
+# Runtime / generated files
+server/runtime/
+server/runtime/**
+input/
+output/
+.tmp/
+tmp/
+.cache/
+*.log

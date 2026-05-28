@@ -5,8 +5,25 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-# 加载环境变量
-load_dotenv()
+_BACKEND_DIR = Path(__file__).resolve().parent.parent
+_SERVER_DIR = _BACKEND_DIR.parent
+
+
+def _load_layered_dotenv() -> None:
+    """
+    Load env without overriding process exports (start-research-test-stack.sh).
+    Order: backend/.env → server/.env.local → dev/research-test.env
+    """
+    for env_path in (
+        _BACKEND_DIR / ".env",
+        _SERVER_DIR / ".env.local",
+        _SERVER_DIR / "dev" / "research-test.env",
+    ):
+        if env_path.is_file():
+            load_dotenv(env_path, override=False)
+
+
+_load_layered_dotenv()
 
 # 项目根目录
 PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -22,6 +39,9 @@ DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 # deepseek-chat API: max_tokens must be in [1, 8192]
 DEEPSEEK_MAX_OUTPUT_TOKENS = int(os.getenv("DEEPSEEK_MAX_OUTPUT_TOKENS", "8192"))
+
+# Idea：PDF 仅用原文前 N 字（0=关闭，走清洗+分段；测试栈可设 1000 加速）
+IDEA_PAPER_MAX_CHARS = int(os.getenv("IDEA_PAPER_MAX_CHARS", "0") or "0")
 
 # OpenAlex配置
 OPENALEX_EMAIL = os.getenv("OPENALEX_EMAIL")

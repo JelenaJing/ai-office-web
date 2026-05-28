@@ -19,6 +19,7 @@ from app.agents import idea_generator
 from app.models import FullTextMultiRoundRequest, IdeaRequest
 from app.project_manager import ProjectManager
 from app.services.fulltext_multiround import ChunkingConfig, split_into_chunks, synthesize_ideas
+from app.services.idea_paper_source import read_paper_text_for_idea, should_use_single_pass_idea
 from app.services.plot import PlotService
 from app.services.plot.recommendation_formatter import format_recommendation_text
 from app.services.plot.template_previewer import generate_template_previews
@@ -40,12 +41,12 @@ class IdeaV2Request(IdeaRequest):
 
 class IdeaFulltextV2Request(FullTextMultiRoundRequest):
     field: Optional[str] = Field(default="未分类")
+    context: Optional[str] = None
 
 
 def _read_full_text(project_id: str, override_text: str | None = None) -> str:
-    if override_text and str(override_text).strip():
-        return str(override_text).strip()
-    return PaperProcessor().get_paper_text(project_id, variant="cleaned") or ""
+    text, _meta = read_paper_text_for_idea(project_id, override_text)
+    return text
 
 
 def _chunk_cfg(request: FullTextMultiRoundRequest) -> ChunkingConfig:
@@ -94,25 +95,46 @@ async def generate_idea_fulltext_v2(
     strict_errors: bool = Query(default=False),
 ):
     try:
-        full_text = _read_full_text(request.project_id, request.full_text)
+        full_text, paper_meta = read_paper_text_for_idea(request.project_id, request.full_text)
         if not full_text.strip():
             raise ValueError("Paper content is empty")
-        chunks = split_into_chunks(full_text, _chunk_cfg(request))
-        all_ideas: List[List[Dict[str, Any]]] = []
-        for i, ch in enumerate(chunks):
-            ideas = idea_generator.generate_ideas(
+
+        cfg = _chunk_cfg(request)
+        if should_use_single_pass_idea(paper_meta, full_text, cfg.target_chars):
+            merged = idea_generator.generate_ideas(
                 project_id=request.project_id,
-                selected_text=ch,
-                context=f"Fulltext pass1 chunk {i+1}/{len(chunks)}",
+                selected_text=full_text,
+                context=request.context,
                 strict_errors=strict_errors,
             )
-            all_ideas.append(ideas)
-        merged = synthesize_ideas(all_ideas)
+            chunks_n = 1
+            mode = paper_meta.get("mode", "single_pass")
+        else:
+            chunks = split_into_chunks(full_text, cfg)
+            all_ideas: List[List[Dict[str, Any]]] = []
+            for i, ch in enumerate(chunks):
+                ideas = idea_generator.generate_ideas(
+                    project_id=request.project_id,
+                    selected_text=ch,
+                    context=f"Fulltext pass1 chunk {i+1}/{len(chunks)}",
+                    strict_errors=strict_errors,
+                )
+                all_ideas.append(ideas)
+            merged = synthesize_ideas(all_ideas)
+            chunks_n = len(chunks)
+            mode = "fulltext_multiround"
+
         try:
             ProjectManager().save_remake_result(
                 project_id=request.project_id,
                 remake_type="idea",
-                result={"mode": "fulltext_multiround", "chunks": len(chunks), "ideas": merged, "contract": "v2"},
+                result={
+                    "mode": mode,
+                    "chunks": chunks_n,
+                    "ideas": merged,
+                    "contract": "v2",
+                    "paper_meta": paper_meta,
+                },
             )
         except ValueError:
             logger.warning("Idea fulltext v2: skip save, project not found: %s", request.project_id)
@@ -121,7 +143,7 @@ async def generate_idea_fulltext_v2(
             "success": True,
             "ideas": cards,
             "partialMissing": [],
-            "data": {"chunks": len(chunks)},
+            "data": {"chunks": chunks_n, "paper_meta": paper_meta},
         }
     except Exception as e:
         logger.error("Idea fulltext v2 failed: %s", e)
@@ -275,6 +297,20 @@ async def recommend_plot_v2(
         if strict_errors:
             raise HTTPException(status_code=500, detail=str(e)) from e
         return {"success": False, "error": str(e)}
+
+
+@router.get("/api/v1/data/plot/templates/v2")
+async def list_plot_data_templates_v2():
+    """List data-type → template mappings for UI single-select (no LLM)."""
+    from app.services.plot.data_type_catalog import list_data_type_templates
+
+    templates = list_data_type_templates()
+    return {
+        "success": True,
+        "templates": templates,
+        "count": len(templates),
+        "partialMissing": [],
+    }
 
 
 @router.post("/api/v1/data/plot/templates/preview/v2")

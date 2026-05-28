@@ -5,6 +5,7 @@ import {
   ArtifactJobCanceledError,
   assertArtifactJobNotCanceled,
   clearArtifactJobRuntime,
+  getArtifactJob,
   isArtifactJobCanceledError,
   registerArtifactJobRuntime,
   updateArtifactJob,
@@ -19,18 +20,50 @@ import {
   type ContentModelRecord,
   type ContentModelSlide,
 } from './htmlPresentationPostProcess'
-import { renderHtmlPresentationFromContentModel } from './htmlPresentationRetemplateService'
+import {
+  fulfillPlannedImages,
+  isHtmlPresentationImageProviderConfigured,
+} from './htmlPresentationImagePersistence'
+import {
+  buildHighQualityOpenCodeAttachments,
+  buildHighQualityOpenCodePrompt,
+  HIGH_QUALITY_ORIGINAL_SKILL_DIRS,
+  buildFastTemplateValidationRepairOpenCodeAttachments,
+  buildFastTemplateValidationRepairOpenCodePrompt,
+  prepareHighQualityOriginalSkillWorkspace,
+  resolveHtmlPptSkillMode,
+  validateOriginalSkillPaths,
+} from './htmlPresentationHighQualitySkills'
+import type { ArtifactJobSkillStats } from './artifactJobStore'
+import {
+  finalizeOpencodeTemplateDrivenJobOutput,
+  renderHtmlPresentationFromContentModel,
+} from './htmlPresentationRetemplateService'
+import { validateFinalHtmlSlides, type RenderedSlidesValidationResult } from './htmlPresentationSlideValidation'
 import { resolveTaskTimeoutMs } from '../../../lib/taskTimeouts'
 import {
+  appendArtifactJobLogLine,
+  buildFastTimeoutFallbackWarning,
+  buildHighQualityTimeoutFallbackWarning,
+  logHtmlPptTimeoutConfig,
+  OPENCODE_HEARTBEAT_INTERVAL_MS,
+  patchArtifactJobProgress,
+  resolveHtmlPptOpenCodeTimeoutMs,
+  sanitizeOpenCodeOutputLine,
+} from './artifactJobProgress'
+import {
+  buildCandidateTemplatesSidecar,
   resolveBeautifulTemplateFile,
   normalizeHtmlPresentationJobOptions,
   resolveTemplateSelection,
   type CandidateTemplateRecord,
   type HtmlPresentationJobOptions,
   type TemplateProfileRecord,
+  type TemplateSelectionResult,
 } from './htmlPresentationTemplates'
+import { AIOS_JOBS_DIR } from '../../../config/runtimePaths'
 
-export const ARTIFACT_JOB_ROOT = '/data/darebug/aios-agent-jobs'
+export const ARTIFACT_JOB_ROOT = AIOS_JOBS_DIR
 export const AIOS_SKILLS_ROOT = '/data/darebug/aios-skills'
 
 const OPENCODE_BIN = '/data/darebug/tools/bin/opencode'
@@ -106,13 +139,7 @@ interface HtmlPptStyleProfile {
   layoutRequirements: string[]
 }
 
-interface HtmlPptPreparedSelection {
-  selectedTemplateSlug: string
-  candidateTemplateSlugs: string[]
-  fallbackUsed: boolean
-  templateProfile: TemplateProfileRecord
-  candidateTemplates: CandidateTemplateRecord[]
-}
+type HtmlPptPreparedSelection = TemplateSelectionResult
 
 interface OpenCodeTimeoutConfig {
   timeoutMs: number
@@ -122,6 +149,7 @@ interface OpenCodeTimeoutConfig {
 interface OpenCodeExecutionResult {
   timeoutMs: number
   fallbackAfterMs: number
+  noOutputSoftTimeoutTriggered?: boolean
 }
 
 interface HtmlPresentationJobSummary {
@@ -129,12 +157,26 @@ interface HtmlPresentationJobSummary {
   warning?: string
   fallbackUsed?: boolean
   fallbackRenderer?: string
+  fallbackReason?: string
   opencodeTimedOut?: boolean
   timeoutMs?: number
   requestedTemplateSlug?: string
   selectedTemplateSlug?: string
+  appliedTemplateSlug?: string | null
   selectedStyleId?: string
   rendererMode?: string
+  templateStyleApplied?: 'full' | 'basic' | 'not-applied'
+  repairAttempted?: boolean
+  repairSucceeded?: boolean
+}
+
+type OpenCodeRunKind = 'generate' | 'repair-output-path' | 'fast-template-validation-repair'
+
+interface OpenCodeRunOverrides {
+  kind?: OpenCodeRunKind
+  attachments?: string[]
+  prompt?: string
+  validationSummary?: string
 }
 
 export class OpenCodeTimeoutError extends Error {
@@ -144,6 +186,17 @@ export class OpenCodeTimeoutError extends Error {
   constructor(timeoutMs: number) {
     super(`OpenCode 在 ${Math.round(timeoutMs / 1000)} 秒内未完成`)
     this.name = 'OpenCodeTimeoutError'
+    this.timeoutMs = timeoutMs
+  }
+}
+
+export class OpenCodeNoOutputTimeoutError extends Error {
+  readonly code = 'OPENCODE_NO_OUTPUT_TIMEOUT'
+  readonly timeoutMs: number
+
+  constructor(timeoutMs: number) {
+    super(`OpenCode 在 ${Math.round(timeoutMs / 1000)} 秒内未产出 output/index.html`)
+    this.name = 'OpenCodeNoOutputTimeoutError'
     this.timeoutMs = timeoutMs
   }
 }
@@ -190,14 +243,30 @@ function markJobPhase(jobId: string, phase: string, message: string): void {
   updateArtifactJob(jobId, { currentPhase: phase, message })
 }
 
+function markHtmlPptProgress(
+  job: ArtifactJobRecord,
+  stage: Parameters<typeof patchArtifactJobProgress>[1],
+  label: string,
+  options?: Parameters<typeof patchArtifactJobProgress>[3],
+): void {
+  patchArtifactJobProgress(job.id, stage, label, {
+    ...options,
+    currentPhase: options?.currentPhase ?? stage,
+    message: options?.message ?? label,
+    logLine: options?.logLine ?? `progress stage=${stage} label=${label}`,
+  })
+}
+
 function markPartialOutput(job: ArtifactJobRecord): void {
   updateArtifactJob(job.id, { partialOutput: ensureRegularFile(job.outputPath) })
 }
 
 function getOpenCodeTimeoutConfig(job: ArtifactJobRecord): OpenCodeTimeoutConfig {
+  const options = normalizeHtmlPresentationJobOptions(job.htmlPresentationOptions)
+  const resolved = resolveHtmlPptOpenCodeTimeoutMs({ qualityMode: options.qualityMode })
   return {
-    timeoutMs: HTML_PPT_TIMEOUT_MS,
-    fallbackAfterMs: HTML_PPT_TIMEOUT_MS,
+    timeoutMs: resolved.timeoutMs,
+    fallbackAfterMs: resolved.timeoutMs,
   }
 }
 
@@ -331,11 +400,70 @@ function buildHtmlPptLiteOpenCodePrompt(userPrompt: string, options: HtmlPresent
   ].join('\n')
 }
 
+function resolveJobTemplateSelection(job: ArtifactJobRecord): TemplateSelectionResult {
+  const options = normalizeHtmlPresentationJobOptions(job.htmlPresentationOptions)
+  return resolveTemplateSelection({
+    prompt: job.prompt,
+    inputMarkdown: fs.readFileSync(job.inputPath, 'utf-8'),
+    options,
+  })
+}
+
 function buildOpenCodePrompt(job: ArtifactJobRecord, repairOnly = false): string {
   if (job.skillId === HTML_PPT_BEAUTIFUL_SKILL_ID) {
-    return buildHtmlPptLiteOpenCodePrompt(job.prompt, normalizeHtmlPresentationJobOptions(job.htmlPresentationOptions), repairOnly)
+    const options = normalizeHtmlPresentationJobOptions(job.htmlPresentationOptions)
+    if (options.qualityMode === 'high') {
+      const templateSelection = resolveJobTemplateSelection(job)
+      return buildHighQualityOpenCodePrompt(job.prompt, options, repairOnly, templateSelection)
+    }
+    return buildHtmlPptLiteOpenCodePrompt(job.prompt, options, repairOnly)
   }
   return buildDefaultOpenCodePrompt(job.prompt)
+}
+
+function buildSkillStatsForJob(job: ArtifactJobRecord): ArtifactJobSkillStats {
+  const options = normalizeHtmlPresentationJobOptions(job.htmlPresentationOptions)
+  if (options.qualityMode !== 'high') {
+    return {
+      mode: 'fast-lite',
+      usesLiteSkill: true,
+      usesOriginalFiveSkills: false,
+    }
+  }
+  const validation = validateOriginalSkillPaths()
+  return {
+    mode: 'high-original-five-skills',
+    usesLiteSkill: false,
+    usesOriginalFiveSkills: true,
+    requiredSkills: [...HIGH_QUALITY_ORIGINAL_SKILL_DIRS],
+    loadedSkills: validation.loadedSkills,
+    missingSkills: validation.missingSkills,
+  }
+}
+
+function appendSkillModeLogs(job: ArtifactJobRecord, skillStats: ArtifactJobSkillStats, options: HtmlPresentationJobOptions): void {
+  const skillMode = resolveHtmlPptSkillMode(options)
+  appendLog(
+    job.logPath,
+    [
+      `[${new Date().toISOString()}] qualityMode=${options.qualityMode}`,
+      `[${new Date().toISOString()}] skillMode=${skillMode}`,
+      `[${new Date().toISOString()}] usesLiteSkill=${String(skillStats.usesLiteSkill ?? false)}`,
+      `[${new Date().toISOString()}] usesOriginalFiveSkills=${String(skillStats.usesOriginalFiveSkills ?? false)}`,
+      skillStats.usesOriginalFiveSkills
+        ? `[${new Date().toISOString()}] using original five skills`
+        : `[${new Date().toISOString()}] using fast lite skill workspace`,
+      options.qualityMode === 'high'
+        ? `[${new Date().toISOString()}] lite skill disabled for high quality mode`
+        : '',
+      `[${new Date().toISOString()}] enableImages=${String(options.enableImages)}`,
+      `[${new Date().toISOString()}] maxImages=${options.maxImages}`,
+      `[${new Date().toISOString()}] opencodeWorkspace=${job.jobDir}`,
+      `[${new Date().toISOString()}] orchestrationPath=${path.join(job.jobDir, 'ORCHESTRATION.md')}`,
+      ...(skillStats.loadedSkills ?? []).map((name) => `[${new Date().toISOString()}] skillLoaded=${name}`),
+      ...(skillStats.missingSkills ?? []).map((name) => `[${new Date().toISOString()}] skillMissing=${name}`),
+    ].filter(Boolean).join('\n') + '\n',
+  )
 }
 
 function titleFromPrompt(prompt: string): string {
@@ -716,25 +844,48 @@ function buildTemplateStyleMarkdown(
   prepared: HtmlPptPreparedSelection,
   options: HtmlPresentationJobOptions,
 ): string {
+  const lockedTemplateLines = prepared.templateLocked
+    ? [
+      '## User-selected template (hard lock)',
+      '',
+      `用户已选择 HTML Slides 模板：${prepared.selectedTemplate.name}`,
+      `模板 slug：${prepared.selectedTemplateSlug}`,
+      '必须使用该模板的视觉结构、版式和样式生成演示文稿。',
+      '不要自动更换模板。',
+      '不要选择其他模板。',
+      '',
+      '## Visual Direction',
+      ...prepared.templateProfile.visualRules.map((item) => `- ${item}`),
+      '',
+      '## Layout Requirements',
+      `- color scheme: ${prepared.templateProfile.colorScheme}`,
+      `- density: ${prepared.templateProfile.density}`,
+      `- best for: ${prepared.templateProfile.bestFor.join(', ') || 'general presentation'}`,
+    ]
+    : [
+      '## Visual Direction',
+      ...selection.visualDirection.map((item) => `- ${item}`),
+      '',
+      '## Layout Requirements',
+      ...selection.layoutRequirements.map((item) => `- ${item}`),
+    ]
+
   return [
     '# Selected Template Style',
     '',
-    `templateId: ${selection.styleId}`,
-    `reason: ${selection.reason}`,
-    `inspirationTemplates: ${selection.inspirationTemplates.join(', ')}`,
+    `templateId: ${prepared.templateLocked ? prepared.selectedTemplateSlug : selection.styleId}`,
+    `reason: ${prepared.templateLocked ? prepared.selectionReason : selection.reason}`,
+    `inspirationTemplates: ${prepared.templateLocked ? prepared.selectedTemplateSlug : selection.inspirationTemplates.join(', ')}`,
     `selectedTemplateSlug: ${prepared.selectedTemplateSlug}`,
     `candidateTemplateSlugs: ${prepared.candidateTemplateSlugs.join(', ')}`,
     `fallbackUsed: ${prepared.fallbackUsed}`,
+    `templateLocked: ${String(prepared.templateLocked)}`,
     `qualityMode: ${options.qualityMode}`,
     `enableImages: ${options.enableImages}`,
     `maxImages: ${options.maxImages}`,
     `imageMode: ${!options.enableImages || options.maxImages <= 0 ? 'none' : 'planned'}`,
     '',
-    '## Visual Direction',
-    ...selection.visualDirection.map((item) => `- ${item}`),
-    '',
-    '## Layout Requirements',
-    ...selection.layoutRequirements.map((item) => `- ${item}`),
+    ...lockedTemplateLines,
     '',
     '## Constraints',
     '- 单文件 HTML',
@@ -839,11 +990,7 @@ function prepareHtmlPptBeautifulLiteSkillWorkspace(input: {
     'TEMPLATE_STYLE.md',
   ))
   const templateProfileJson = JSON.stringify(prepared.templateProfile, null, 2)
-  const candidateTemplatesJson = JSON.stringify({
-    selectedTemplateSlug: prepared.selectedTemplateSlug,
-    fallbackUsed: prepared.fallbackUsed,
-    candidates: prepared.candidateTemplates,
-  }, null, 2)
+  const candidateTemplatesJson = JSON.stringify(buildCandidateTemplatesSidecar(prepared), null, 2)
   files.push(addRelativePath(
     writeTextFileWithLimit(
       path.join(input.skillDir, 'TEMPLATE_PROFILE.json'),
@@ -928,8 +1075,12 @@ function buildHtmlPptFailureMessage(job: ArtifactJobRecord, baseMessage: string)
 }
 
 function buildOpenCodeAttachments(job: ArtifactJobRecord): string[] {
-  const attachments = [job.inputPath, job.skillPath]
   if (job.skillId === HTML_PPT_BEAUTIFUL_SKILL_ID) {
+    const options = normalizeHtmlPresentationJobOptions(job.htmlPresentationOptions)
+    if (options.qualityMode === 'high') {
+      return buildHighQualityOpenCodeAttachments(job.jobDir, job.inputPath)
+    }
+    const attachments = [job.inputPath, job.skillPath]
     const extraFiles = [
       path.join(job.jobDir, 'skill', 'TEMPLATE_STYLE.md'),
       path.join(job.jobDir, 'skill', 'TEMPLATE_PROFILE.json'),
@@ -942,8 +1093,10 @@ function buildOpenCodeAttachments(job: ArtifactJobRecord): string[] {
     for (const filePath of extraFiles) {
       if (ensureRegularFile(filePath)) attachments.push(filePath)
     }
+    return attachments
   }
-  return attachments
+
+  return [job.inputPath, job.skillPath]
 }
 
 function tryMaterializeFallbackOutput(job: ArtifactJobRecord): boolean {
@@ -962,23 +1115,70 @@ function tryMaterializeFallbackOutput(job: ArtifactJobRecord): boolean {
   return false
 }
 
-function runOpenCode(job: ArtifactJobRecord, abortController: AbortController, repairOnly = false): Promise<OpenCodeExecutionResult> {
+function resolveOpenCodeRun(job: ArtifactJobRecord, overrides: OpenCodeRunOverrides = {}): {
+  kind: OpenCodeRunKind
+  attachments: string[]
+  prompt: string
+} {
+  const kind = overrides.kind ?? (overrides.prompt || overrides.attachments ? 'generate' : 'generate')
+  if (overrides.attachments && overrides.prompt) {
+    return { kind, attachments: overrides.attachments, prompt: overrides.prompt }
+  }
+  if (kind === 'fast-template-validation-repair') {
+    const templateSelection = resolveJobTemplateSelection(job)
+    return {
+      kind,
+      attachments: buildFastTemplateValidationRepairOpenCodeAttachments(job.jobDir, job.inputPath, job.outputPath),
+      prompt: buildFastTemplateValidationRepairOpenCodePrompt(
+        job.prompt,
+        templateSelection,
+        overrides.validationSummary,
+      ),
+    }
+  }
+  const repairOnly = kind === 'repair-output-path'
+  return {
+    kind: repairOnly ? 'repair-output-path' : 'generate',
+    attachments: buildOpenCodeAttachments(job),
+    prompt: buildOpenCodePrompt(job, repairOnly),
+  }
+}
+
+function runOpenCode(
+  job: ArtifactJobRecord,
+  abortController: AbortController,
+  overrides: OpenCodeRunOverrides = {},
+): Promise<OpenCodeExecutionResult> {
+  const runKind = overrides.kind ?? 'generate'
+  const repairOnly = runKind === 'repair-output-path'
+  const fastTemplateRepair = runKind === 'fast-template-validation-repair'
+  const { attachments, prompt } = resolveOpenCodeRun(job, overrides)
+
   return new Promise((resolve, reject) => {
     if (!fs.existsSync(OPENCODE_BIN)) {
       reject(new Error(`未找到 OpenCode 可执行文件：${OPENCODE_BIN}`))
       return
     }
-    assertArtifactJobNotCanceled(job.id, repairOnly ? 'opencode-repair-start' : 'opencode-start')
+    const startLabel = fastTemplateRepair
+      ? 'opencode-fast-template-repair-start'
+      : repairOnly
+        ? 'opencode-repair-start'
+        : 'opencode-start'
+    assertArtifactJobNotCanceled(job.id, startLabel)
 
-    const attachments = buildOpenCodeAttachments(job)
     const timeoutConfig = getOpenCodeTimeoutConfig(job)
     logHtmlArtifactTask(job, {
-      status: repairOnly ? 'repairing-output' : 'running',
+      status: repairOnly || fastTemplateRepair ? 'repairing-output' : 'running',
       timeoutMs: timeoutConfig.timeoutMs,
     })
+    const runLabel = fastTemplateRepair
+      ? 'fast-template-validation-repair'
+      : repairOnly
+        ? 'repair'
+        : ''
     appendLog(
       job.logPath,
-      `[${new Date().toISOString()}] Starting OpenCode in ${job.jobDir}${repairOnly ? ' (repair)' : ''}\n`
+      `[${new Date().toISOString()}] Starting OpenCode in ${job.jobDir}${runLabel ? ` (${runLabel})` : ''}\n`
       + `[${new Date().toISOString()}] Attached files:\n${attachments.map((filePath) => `- ${path.relative(job.jobDir, filePath)}`).join('\n')}\n`
       + `[${new Date().toISOString()}] OpenCode timeout budget=${timeoutConfig.timeoutMs}ms fallbackAfter=${timeoutConfig.fallbackAfterMs}ms\n`,
     )
@@ -987,7 +1187,9 @@ function runOpenCode(job: ArtifactJobRecord, abortController: AbortController, r
     for (const attachment of attachments) {
       args.push('-f', attachment)
     }
-    args.push('--', buildOpenCodePrompt(job, repairOnly))
+    args.push('--', prompt)
+    appendLog(job.logPath, `[${new Date().toISOString()}] OpenCode args: ${JSON.stringify(args)}\n`)
+    appendLog(job.logPath, `[${new Date().toISOString()}] promptChars=${prompt.length}\n`)
 
     const child = spawn(
       OPENCODE_BIN,
@@ -1000,12 +1202,51 @@ function runOpenCode(job: ArtifactJobRecord, abortController: AbortController, r
       },
     )
 
+    const presentationOptions = normalizeHtmlPresentationJobOptions(job.htmlPresentationOptions)
+    const isHtmlPptBeautiful = job.skillId === HTML_PPT_BEAUTIFUL_SKILL_ID
+    const isHighPpt = isHtmlPptBeautiful && presentationOptions.qualityMode === 'high'
+    const isFastTemplatePpt = isHtmlPptBeautiful && presentationOptions.qualityMode === 'fast'
+    if (fastTemplateRepair) {
+      markHtmlPptProgress(job, 'postprocessing', '正在修复模板页面校验问题', {
+        detail: '保留所选模板视觉系统，修复空白页与 demo 文案',
+        currentPhase: 'template-repair',
+      })
+    } else if (!repairOnly) {
+      markHtmlPptProgress(
+        job,
+        'running_opencode',
+        isHighPpt
+          ? '正在使用五个原版 Skill 生成 HTML 演示文稿'
+          : isFastTemplatePpt
+            ? '正在基于所选模板快速生成 HTML 演示文稿'
+            : '正在调用 OpenCode 生成 HTML 演示文稿',
+        {
+          detail: isHighPpt ? '高质量模式最长可能需要约 15 分钟' : isFastTemplatePpt ? '快速模式将按所选模板直接生成' : undefined,
+          currentPhase: 'opencode',
+        },
+      )
+    } else {
+      markJobPhase(job.id, 'repairing-output', '正在修复输出路径…')
+    }
+
+    const currentPhase = fastTemplateRepair
+      ? 'template-repair'
+      : repairOnly
+        ? 'repairing-output'
+        : 'opencode'
+    const progressMessage = fastTemplateRepair
+      ? '正在修复模板页面校验问题…'
+      : repairOnly
+        ? '正在修复输出路径…'
+        : (isHighPpt ? '正在使用五个原版 Skill 生成 HTML 演示文稿' : '正在调用 OpenCode 生成 HTML Artifact…')
+
     updateArtifactJob(job.id, {
       runnerPid: child.pid,
       runnerProcessGroupId: process.platform === 'linux' ? child.pid : undefined,
       cancellable: true,
-      currentPhase: repairOnly ? 'repairing-output' : 'opencode',
-      message: repairOnly ? '正在修复输出路径…' : '正在调用 OpenCode 生成 HTML Artifact…',
+      currentPhase,
+      message: progressMessage,
+      timeoutMs: timeoutConfig.timeoutMs,
     })
 
     registerArtifactJobRuntime(job.id, {
@@ -1018,6 +1259,7 @@ function runOpenCode(job: ArtifactJobRecord, abortController: AbortController, r
 
     let finished = false
     let timedOut = false
+    let noOutputSoftTimedOut = false
     let canceled = abortController.signal.aborted
 
     const settle = (callback: () => void) => {
@@ -1033,6 +1275,26 @@ function runOpenCode(job: ArtifactJobRecord, abortController: AbortController, r
       killProcessTree(child.pid, 'timeout')
     }, timeoutConfig.fallbackAfterMs)
 
+    const fastNoOutputSoftTimeoutMs = 90_000
+    const fastNoOutputProbeIntervalMs = 10_000
+    const shouldEnableFastNoOutputGuard = false
+    const noOutputSoftTimeout = shouldEnableFastNoOutputGuard
+      ? setTimeout(() => {
+          if (ensureRegularFile(job.outputPath)) return
+          noOutputSoftTimedOut = true
+          appendLog(job.logPath, `[${new Date().toISOString()}] fastNoOutputSoftTimeout=true timeoutMs=${fastNoOutputSoftTimeoutMs}\n`)
+          killProcessTree(child.pid, 'fast-no-output-soft-timeout')
+        }, fastNoOutputSoftTimeoutMs)
+      : null
+    const noOutputProbe = shouldEnableFastNoOutputGuard
+      ? setInterval(() => {
+          const exists = ensureRegularFile(job.outputPath)
+          appendLog(job.logPath, `[${new Date().toISOString()}] fastOutputProbe indexHtmlExists=${String(exists)}\n`)
+        }, fastNoOutputProbeIntervalMs)
+      : null
+    noOutputSoftTimeout?.unref?.()
+    noOutputProbe?.unref?.()
+
     const handleAbort = () => {
       canceled = true
       appendLog(job.logPath, `[${new Date().toISOString()}] abort signal received\n`)
@@ -1042,21 +1304,49 @@ function runOpenCode(job: ArtifactJobRecord, abortController: AbortController, r
     if (abortController.signal.aborted) handleAbort()
     else abortController.signal.addEventListener('abort', handleAbort, { once: true })
 
-    const writeChunk = (chunk: Buffer | string) => {
-      appendLog(job.logPath, typeof chunk === 'string' ? chunk : chunk.toString('utf-8'))
+    let lastOpenCodeOutput = ''
+    const captureOutput = (chunk: Buffer | string, stream: 'stdout' | 'stderr') => {
+      const raw = typeof chunk === 'string' ? chunk : chunk.toString('utf-8')
+      appendLog(job.logPath, raw)
+      const line = sanitizeOpenCodeOutputLine(raw, 160)
+      if (line) {
+        lastOpenCodeOutput = line
+        appendArtifactJobLogLine(job, `opencode${stream} ${line}`)
+      }
     }
 
-    child.stdout.on('data', writeChunk)
-    child.stderr.on('data', writeChunk)
+    child.stdout.on('data', (chunk) => captureOutput(chunk, 'stdout'))
+    child.stderr.on('data', (chunk) => captureOutput(chunk, 'stderr'))
+
+    const heartbeat = setInterval(() => {
+      const message = lastOpenCodeOutput
+        ? `OpenCode 正在运行：${lastOpenCodeOutput}`
+        : 'OpenCode 仍在运行，高质量生成中……'
+      appendArtifactJobLogLine(job, `opencodeHeartbeat ${message}`)
+      patchArtifactJobProgress(job.id, 'opencode_heartbeat', 'OpenCode 正在生成演示文稿', {
+        detail: message,
+        heartbeatAt: new Date().toISOString(),
+        heartbeatMessage: message,
+        currentPhase: 'opencode',
+        logLine: undefined,
+      })
+    }, OPENCODE_HEARTBEAT_INTERVAL_MS)
+    heartbeat.unref?.()
 
     child.on('error', (error) => {
+      clearInterval(heartbeat)
       clearTimeout(timeout)
+      if (noOutputSoftTimeout) clearTimeout(noOutputSoftTimeout)
+      if (noOutputProbe) clearInterval(noOutputProbe)
       abortController.signal.removeEventListener('abort', handleAbort)
       settle(() => reject(error))
     })
 
     child.on('close', (code, signal) => {
+      clearInterval(heartbeat)
       clearTimeout(timeout)
+      if (noOutputSoftTimeout) clearTimeout(noOutputSoftTimeout)
+      if (noOutputProbe) clearInterval(noOutputProbe)
       abortController.signal.removeEventListener('abort', handleAbort)
       updateArtifactJob(job.id, {
         runnerPid: undefined,
@@ -1070,11 +1360,15 @@ function runOpenCode(job: ArtifactJobRecord, abortController: AbortController, r
         settle(() => reject(new OpenCodeTimeoutError(timeoutConfig.fallbackAfterMs)))
         return
       }
+      if (noOutputSoftTimedOut) {
+        settle(() => reject(new OpenCodeNoOutputTimeoutError(fastNoOutputSoftTimeoutMs)))
+        return
+      }
       if (code !== 0) {
         settle(() => reject(new Error(`OpenCode 执行失败（exit=${code ?? 'null'}, signal=${signal ?? 'none'}）`)))
         return
       }
-      settle(() => resolve(timeoutConfig))
+      settle(() => resolve({ ...timeoutConfig, noOutputSoftTimeoutTriggered: false }))
     })
   })
 }
@@ -1083,7 +1377,53 @@ function isOpenCodeTimeoutError(error: unknown): error is OpenCodeTimeoutError {
   return error instanceof OpenCodeTimeoutError
 }
 
-function createTimeoutFallbackArtifact(job: ArtifactJobRecord, timeoutError: OpenCodeTimeoutError): HtmlPresentationJobSummary {
+function isOpenCodeNoOutputTimeoutError(error: unknown): error is OpenCodeNoOutputTimeoutError {
+  return error instanceof OpenCodeNoOutputTimeoutError
+}
+
+function summarizeValidationFailure(validation: RenderedSlidesValidationResult): string {
+  const parts: string[] = []
+  if (validation.slideCount < 2) parts.push(`slides=${validation.slideCount}`)
+  if (validation.blankSlideCount > 0) parts.push(`blankSlides=${validation.blankSlideCount}`)
+  if (validation.hasDemoText) parts.push('hasDemoText=true')
+  if (validation.hasImagePromptText) parts.push('hasImagePromptText=true')
+  return parts.join(', ') || 'validation-failed'
+}
+
+function syncJobSummaryFromTemplateApply(
+  jobSummary: HtmlPresentationJobSummary,
+  templateApplyResult: Awaited<ReturnType<typeof finalizeOpencodeTemplateDrivenJobOutput>>,
+  lockedSelection: TemplateSelectionResult,
+  options: ReturnType<typeof normalizeHtmlPresentationJobOptions>,
+): HtmlPresentationJobSummary {
+  const requested = lockedSelection.requestedTemplateSlug || options.templateSlug || ''
+  const applied = templateApplyResult.appliedTemplateSlug
+  const templateApplied = Boolean(applied) && !templateApplyResult.fallbackUsed
+    && (templateApplyResult.rendererMode === 'opencode-template-driven-fast'
+      || templateApplyResult.rendererMode === 'opencode-template-driven-high'
+      || templateApplyResult.rendererMode === 'opencode-template-driven'
+      || templateApplyResult.rendererMode === 'beautiful-template-adapter-fast')
+
+  return {
+    ...jobSummary,
+    requestedTemplateSlug: requested,
+    selectedTemplateSlug: templateApplied ? (applied ?? undefined) : undefined,
+    appliedTemplateSlug: applied,
+    rendererMode: templateApplyResult.rendererMode,
+    fallbackUsed: templateApplyResult.fallbackUsed,
+    fallbackReason: templateApplyResult.templateProfile.fallbackReason,
+    templateStyleApplied: templateApplyResult.templateProfile.templateStyleApplied,
+    repairAttempted: templateApplyResult.repairAttempted,
+    repairSucceeded: templateApplyResult.repairSucceeded,
+    warning: templateApplyResult.warning || jobSummary.warning,
+  }
+}
+
+function createTimeoutFallbackArtifact(
+  job: ArtifactJobRecord,
+  timeoutError: OpenCodeTimeoutError | OpenCodeNoOutputTimeoutError,
+  reason: 'opencode-timeout' | 'fast-opencode-no-output-timeout' = 'opencode-timeout',
+): HtmlPresentationJobSummary {
   const inputMarkdown = fs.readFileSync(job.inputPath, 'utf-8')
   const options = normalizeHtmlPresentationJobOptions(job.htmlPresentationOptions)
   const styleSelection = chooseHtmlPptStyle(job.prompt, inputMarkdown)
@@ -1106,11 +1446,21 @@ function createTimeoutFallbackArtifact(job: ArtifactJobRecord, timeoutError: Ope
       templateFile,
     },
     artifactId: '',
+    purpose: 'timeout-fallback',
   })
+  const requestedTemplateSlug = templateSelection.requestedTemplateSlug
+    || options.templateSlug
+    || templateSelection.selectedTemplateSlug
   const profile: TemplateProfileRecord = {
     ...templateSelection.templateProfile,
     templateFile,
+    templateSlug: requestedTemplateSlug,
+    requestedTemplateSlug,
+    appliedTemplateSlug: templateSelection.selectedTemplateSlug,
     rendererMode: renderResult.rendererMode,
+    fallbackUsed: true,
+    fallbackReason: reason,
+    templateStyleApplied: 'full',
     warning: renderResult.warning,
   }
   const outputDir = path.join(job.jobDir, 'output')
@@ -1125,11 +1475,24 @@ function createTimeoutFallbackArtifact(job: ArtifactJobRecord, timeoutError: Ope
   fs.writeFileSync(path.join(outputDir, 'template-profile.json'), JSON.stringify(profile, null, 2), 'utf-8')
   fs.writeFileSync(path.join(outputDir, 'candidate-templates.json'), JSON.stringify(candidatePayload, null, 2), 'utf-8')
 
+  const timeoutSeconds = Math.round(timeoutError.timeoutMs / 1000)
   const warningLines = [
-    `PPT 已生成，但 OpenCode 在 ${Math.round(timeoutError.timeoutMs / 1000)} 秒内未完成，已使用快速备用渲染器完成初稿。`,
+    options.qualityMode === 'high'
+      ? buildHighQualityTimeoutFallbackWarning(timeoutSeconds)
+      : buildFastTimeoutFallbackWarning(timeoutSeconds),
   ]
   if (renderResult.warning) warningLines.push(renderResult.warning)
   const warning = warningLines.join(' ')
+
+  markHtmlPptProgress(
+    job,
+    'fallback',
+    options.qualityMode === 'high' ? '高质量生成超时，已生成可预览草稿' : '生成超时，已生成可预览初稿',
+    {
+      detail: `OpenCode 在 ${timeoutSeconds} 秒内未完成，已生成一个可预览版本`,
+      logLine: `fallback opencode timeout after ${timeoutError.timeoutMs}ms`,
+    },
+  )
 
   appendLog(
     job.logPath,
@@ -1150,16 +1513,19 @@ function createTimeoutFallbackArtifact(job: ArtifactJobRecord, timeoutError: Ope
   )
 
   return {
-    message: 'HTML Artifact 生成完成（已使用快速备用渲染器）',
+    message: 'HTML Artifact 生成完成（超时保底草稿）',
     warning,
     fallbackUsed: true,
     fallbackRenderer: 'server',
     opencodeTimedOut: true,
     timeoutMs: timeoutError.timeoutMs,
-    requestedTemplateSlug: options.templateSlug || '',
-    selectedTemplateSlug: templateSelection.selectedTemplateSlug,
+    requestedTemplateSlug,
+    selectedTemplateSlug: profile.appliedTemplateSlug ?? undefined,
+    appliedTemplateSlug: profile.appliedTemplateSlug ?? null,
     selectedStyleId: styleSelection.styleId,
     rendererMode: renderResult.rendererMode,
+    fallbackReason: reason,
+    templateStyleApplied: profile.templateStyleApplied,
   }
 }
 
@@ -1201,31 +1567,53 @@ export function prepareArtifactJobWorkspace(input: {
     fs.rmSync(errorPath, { force: true })
   }
 
+  let resolvedSkillPath = skillPath
+
   if (input.skillId) {
-    const sourceSkillDir = validateAndResolveSkillDir(input.skillId)
     if (input.skillId === HTML_PPT_BEAUTIFUL_SKILL_ID) {
       const htmlPresentationOptions = normalizeHtmlPresentationJobOptions(input.htmlPresentationOptions)
-      prepareHtmlPptBeautifulLiteSkillWorkspace({
-        jobDir,
-        inputMarkdown: input.inputMarkdown,
+      const templateSelection = resolveTemplateSelection({
         prompt: input.prompt,
-        sourceSkillDir,
-        skillDir,
-        outputDir,
-        skillPrepareLogPath,
+        inputMarkdown: input.inputMarkdown,
         options: htmlPresentationOptions,
       })
+      if (htmlPresentationOptions.qualityMode === 'high') {
+        prepareHighQualityOriginalSkillWorkspace({
+          jobDir,
+          options: htmlPresentationOptions,
+          skillPrepareLogPath,
+          templateSelection,
+        })
+      } else {
+        const sourceSkillDir = validateAndResolveSkillDir(input.skillId)
+        prepareHtmlPptBeautifulLiteSkillWorkspace({
+          jobDir,
+          inputMarkdown: input.inputMarkdown,
+          prompt: input.prompt,
+          sourceSkillDir,
+          skillDir,
+          outputDir,
+          options: htmlPresentationOptions,
+          skillPrepareLogPath,
+        })
+      }
+      resolvedSkillPath = htmlPresentationOptions.qualityMode === 'high'
+        ? path.join(jobDir, 'ORCHESTRATION.md')
+        : path.join(skillDir, 'SKILL.md')
     } else {
+      const sourceSkillDir = validateAndResolveSkillDir(input.skillId)
       copyDirRecursive(sourceSkillDir, skillDir)
+      resolvedSkillPath = path.join(skillDir, 'SKILL.md')
     }
   } else {
     fs.writeFileSync(skillPath, DEFAULT_HTML_SKILL, 'utf-8')
+    resolvedSkillPath = skillPath
   }
 
   return {
     jobDir,
     inputPath,
-    skillPath,
+    skillPath: resolvedSkillPath,
     outputPath,
     logPath,
     errorPath,
@@ -1248,30 +1636,77 @@ export async function runHtmlArtifactJob(job: ArtifactJobRecord): Promise<{
   timeoutMs?: number
   requestedTemplateSlug?: string
   selectedTemplateSlug?: string
+  appliedTemplateSlug?: string | null
   selectedStyleId?: string
   rendererMode?: string
+  fallbackReason?: string
+  templateStyleApplied?: 'full' | 'basic' | 'not-applied'
+  repairAttempted?: boolean
+  repairSucceeded?: boolean
 }> {
+  assertArtifactJobNotCanceled(job.id, 'job-start')
   const abortController = new AbortController()
   let jobSummary: HtmlPresentationJobSummary = {}
   const startedAt = Date.now()
+  const presentationOptions = normalizeHtmlPresentationJobOptions(job.htmlPresentationOptions)
+  const skillStats = buildSkillStatsForJob(job)
+  updateArtifactJob(job.id, { skillStats, timeoutMs: resolveHtmlPptOpenCodeTimeoutMs({ qualityMode: presentationOptions.qualityMode }).timeoutMs })
+  if (job.skillId === HTML_PPT_BEAUTIFUL_SKILL_ID) {
+    const timeoutConfig = resolveHtmlPptOpenCodeTimeoutMs({ qualityMode: presentationOptions.qualityMode })
+    logHtmlPptTimeoutConfig(presentationOptions.qualityMode)
+    appendLog(
+      job.logPath,
+      `[${new Date().toISOString()}] htmlPptTimeout qualityMode=${presentationOptions.qualityMode} timeoutMs=${timeoutConfig.timeoutMs} timeoutSeconds=${timeoutConfig.timeoutSeconds} timeoutSource=${timeoutConfig.timeoutSource}\n`,
+    )
+    appendSkillModeLogs(job, skillStats, presentationOptions)
+    markHtmlPptProgress(job, 'preparing', '正在准备生成工作区')
+    if (presentationOptions.qualityMode === 'high') {
+      markHtmlPptProgress(job, 'loading_skills', '正在加载高质量 PPT Skill', {
+        detail: '正在加载 beautiful-html-templates / frontend-slides / guizang-ppt-skil / html-ppt-beautiful / html-ppt-skill',
+      })
+    } else {
+      markHtmlPptProgress(job, 'loading_skills', '正在加载模板与 Skill', {
+        detail: '正在准备 selected-template 与 beautiful-html-templates',
+      })
+    }
+    markHtmlPptProgress(job, 'analyzing', '正在分析主题与生成要求')
+    if (presentationOptions.enableImages && presentationOptions.maxImages > 0) {
+      markHtmlPptProgress(job, 'planning_visuals', '正在规划配图槽位', {
+        detail: '配图数量将根据模板槽位自动规划',
+      })
+    } else {
+      markHtmlPptProgress(job, 'planning_slides', '正在规划页面结构')
+    }
+  }
 
   try {
-    markJobPhase(job.id, 'opencode', '正在调用 OpenCode 生成 HTML Artifact…')
-    await runOpenCode(job, abortController)
+    if (job.skillId !== HTML_PPT_BEAUTIFUL_SKILL_ID) {
+      markJobPhase(job.id, 'opencode', '正在调用 OpenCode 生成 HTML Artifact…')
+    }
+    const execution = await runOpenCode(job, abortController, { kind: 'generate' })
+    if (execution.noOutputSoftTimeoutTriggered) {
+      updateArtifactJob(job.id, { noOutputSoftTimeoutTriggered: true })
+    }
   } catch (error) {
     if (isArtifactJobCanceledError(error)) {
       markPartialOutput(job)
       throw error
     }
-    if (job.skillId === HTML_PPT_BEAUTIFUL_SKILL_ID && isOpenCodeTimeoutError(error)) {
+    if (job.skillId === HTML_PPT_BEAUTIFUL_SKILL_ID && (isOpenCodeTimeoutError(error) || isOpenCodeNoOutputTimeoutError(error))) {
       assertArtifactJobNotCanceled(job.id, 'timeout-fallback')
-      markJobPhase(job.id, 'postprocess', 'OpenCode 超时，正在切换备用渲染器…')
+      markHtmlPptProgress(job, 'postprocessing', 'OpenCode 超时，正在切换备用渲染器…', {
+        currentPhase: 'postprocess',
+      })
       updateArtifactJob(job.id, {
         opencodeTimedOut: true,
         timeoutMs: error.timeoutMs,
+        noOutputSoftTimeoutTriggered: isOpenCodeNoOutputTimeoutError(error),
       })
       try {
-        jobSummary = createTimeoutFallbackArtifact(job, error)
+        const fallbackReason = isOpenCodeNoOutputTimeoutError(error)
+          ? 'fast-opencode-no-output-timeout'
+          : 'opencode-timeout'
+        jobSummary = createTimeoutFallbackArtifact(job, error, fallbackReason)
       } catch (fallbackError) {
         markPartialOutput(job)
         const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
@@ -1285,10 +1720,14 @@ export async function runHtmlArtifactJob(job: ArtifactJobRecord): Promise<{
         fallbackRenderer: jobSummary.fallbackRenderer,
         opencodeTimedOut: jobSummary.opencodeTimedOut,
         timeoutMs: jobSummary.timeoutMs,
+        noOutputSoftTimeoutTriggered: isOpenCodeNoOutputTimeoutError(error),
         requestedTemplateSlug: jobSummary.requestedTemplateSlug,
         selectedTemplateSlug: jobSummary.selectedTemplateSlug,
+        appliedTemplateSlug: jobSummary.appliedTemplateSlug,
         selectedStyleId: jobSummary.selectedStyleId,
         rendererMode: jobSummary.rendererMode,
+        fallbackReason: jobSummary.fallbackReason,
+        templateStyleApplied: jobSummary.templateStyleApplied,
         message: jobSummary.message,
       })
     } else if (!tryMaterializeFallbackOutput(job)) {
@@ -1316,7 +1755,7 @@ export async function runHtmlArtifactJob(job: ArtifactJobRecord): Promise<{
 
     appendLog(job.logPath, `\n[${new Date().toISOString()}] Missing output/index.html after first pass, retrying once with repair prompt\n`)
     markJobPhase(job.id, 'repairing-output', '正在修复输出路径…')
-    await runOpenCode(job, abortController, true).catch((error) => {
+    await runOpenCode(job, abortController, { kind: 'repair-output-path' }).catch((error) => {
       if (isArtifactJobCanceledError(error)) throw error
       if (!tryMaterializeFallbackOutput(job)) {
         const message = error instanceof Error ? error.message : String(error)
@@ -1360,18 +1799,190 @@ export async function runHtmlArtifactJob(job: ArtifactJobRecord): Promise<{
         })()
 
     if (!jobSummary.fallbackUsed) {
-      markJobPhase(job.id, 'postprocess', '正在注入模板与编辑运行时…')
+      assertArtifactJobNotCanceled(job.id, 'before-postprocess')
+      markHtmlPptProgress(job, 'postprocessing', '正在检查和整理页面结构', {
+        currentPhase: 'postprocess',
+        message: '正在注入模板与编辑运行时…',
+      })
+      const lockedSelection = resolveTemplateSelection({
+        prompt: job.prompt,
+        inputMarkdown: fs.readFileSync(job.inputPath, 'utf-8'),
+        options,
+      })
+      const isTemplateDrivenOpenCode = job.skillId === HTML_PPT_BEAUTIFUL_SKILL_ID
       const postProcessed = postProcessHtmlPresentationOutput({
         jobId: job.id,
         outputDir: path.join(job.jobDir, 'output'),
         htmlPath: job.outputPath,
         title: titleFromPrompt(job.prompt),
-        templateProfile,
-        candidateTemplates: candidatePayload.candidates,
-        selectedTemplateSlug: candidatePayload.selectedTemplateSlug,
-        fallbackUsed: candidatePayload.fallbackUsed,
+        templateProfile: lockedSelection.templateProfile,
+        candidateTemplates: lockedSelection.candidateTemplates,
+        selectedTemplateSlug: lockedSelection.selectedTemplateSlug,
+        fallbackUsed: lockedSelection.fallbackUsed,
+        candidateTemplatesSidecar: buildCandidateTemplatesSidecar(lockedSelection),
         options,
+        preserveSourceHtml: isTemplateDrivenOpenCode,
         assertNotCanceled: () => assertArtifactJobNotCanceled(job.id, 'postprocess'),
+      })
+
+      let renderContentModel = postProcessed.contentModel
+      let generatedImageCount = postProcessed.generatedImageCount
+      let placeholderCount = postProcessed.placeholderCount
+      let unfilledImageCount = Math.max(0, postProcessed.plannedImageCount - generatedImageCount)
+      let resolvedBudget = postProcessed.imageBudget
+
+      if (options.qualityMode === 'high' && options.enableImages && options.maxImages > 0) {
+        markHtmlPptProgress(job, 'fulfilling_images', '正在生成配图', {
+          detail: '正在调用图片 provider 生成主题图片',
+          currentPhase: 'image-fulfillment',
+        })
+        assertArtifactJobNotCanceled(job.id, 'before-image-fulfillment')
+        const fulfillment = await fulfillPlannedImages({
+          jobId: job.id,
+          outputDir: path.join(job.jobDir, 'output'),
+          htmlPath: job.outputPath,
+          contentModelPath: postProcessed.contentModelPath,
+          contentModel: postProcessed.contentModel,
+          options,
+          plannedBudget: postProcessed.imageBudget,
+          logAppend: (line) => appendLog(job.logPath, `[${new Date().toISOString()}] ${line}\n`),
+        })
+        generatedImageCount = fulfillment.generatedImageCount
+        placeholderCount = fulfillment.placeholderCount
+        unfilledImageCount = fulfillment.unfilled
+        resolvedBudget = fulfillment.imageBudget
+        renderContentModel = fulfillment.contentModel
+      }
+
+      markHtmlPptProgress(job, 'postprocessing', '正在整理模板页面', {
+        currentPhase: 'template-apply',
+        message: `保留 OpenCode 模板页面：${lockedSelection.selectedTemplate.name}`,
+      })
+      let templateApplyResult = finalizeOpencodeTemplateDrivenJobOutput({
+        outputDir: path.join(job.jobDir, 'output'),
+        htmlPath: job.outputPath,
+        contentModel: renderContentModel,
+        contentModelPath: postProcessed.contentModelPath,
+        templateSelection: lockedSelection,
+        qualityMode: options.qualityMode,
+      })
+      let repairAttempted = false
+      let repairSucceeded = false
+      if (options.qualityMode === 'fast' && !templateApplyResult.validationOk) {
+        const validationSummary = summarizeValidationFailure(
+          validateFinalHtmlSlides(fs.readFileSync(job.outputPath, 'utf-8'), {
+            minSlides: Math.min(2, renderContentModel.slides.length),
+          }),
+        )
+        appendLog(
+          job.logPath,
+          [
+            `[${new Date().toISOString()}] fastTemplateValidationFailed=true`,
+            `[${new Date().toISOString()}] fastTemplateRepairAttempted=true`,
+            `[${new Date().toISOString()}] validationSummary=${validationSummary}`,
+            `[${new Date().toISOString()}] blankSlides=${templateApplyResult.blankSlideCount ?? 0}`,
+          ].join('\n') + '\n',
+        )
+        repairAttempted = true
+        assertArtifactJobNotCanceled(job.id, 'before-fast-template-repair')
+        markHtmlPptProgress(job, 'postprocessing', '正在修复模板页面', {
+          currentPhase: 'template-repair',
+          message: 'OpenCode 输出未通过校验，正在保留模板视觉进行修复',
+        })
+        try {
+          await runOpenCode(job, abortController, {
+            kind: 'fast-template-validation-repair',
+            validationSummary,
+          })
+          tryMaterializeFallbackOutput(job)
+          const repairPostProcessed = postProcessHtmlPresentationOutput({
+            jobId: job.id,
+            outputDir: path.join(job.jobDir, 'output'),
+            htmlPath: job.outputPath,
+            title: titleFromPrompt(job.prompt),
+            templateProfile: lockedSelection.templateProfile,
+            candidateTemplates: lockedSelection.candidateTemplates,
+            selectedTemplateSlug: lockedSelection.selectedTemplateSlug,
+            fallbackUsed: lockedSelection.fallbackUsed,
+            candidateTemplatesSidecar: buildCandidateTemplatesSidecar(lockedSelection),
+            options,
+            preserveSourceHtml: true,
+            assertNotCanceled: () => assertArtifactJobNotCanceled(job.id, 'postprocess-after-fast-repair'),
+          })
+          renderContentModel = repairPostProcessed.contentModel
+          templateApplyResult = finalizeOpencodeTemplateDrivenJobOutput({
+            outputDir: path.join(job.jobDir, 'output'),
+            htmlPath: job.outputPath,
+            contentModel: renderContentModel,
+            contentModelPath: repairPostProcessed.contentModelPath,
+            templateSelection: lockedSelection,
+            qualityMode: options.qualityMode,
+          })
+          templateApplyResult = {
+            ...templateApplyResult,
+            repairAttempted: true,
+            repairSucceeded: Boolean(templateApplyResult.validationOk),
+          }
+          repairSucceeded = Boolean(templateApplyResult.validationOk)
+          appendLog(
+            job.logPath,
+            `[${new Date().toISOString()}] fastTemplateRepairSucceeded=${String(repairSucceeded)}\n`,
+          )
+        } catch (repairError) {
+          if (isArtifactJobCanceledError(repairError)) throw repairError
+          const repairMessage = repairError instanceof Error ? repairError.message : String(repairError)
+          appendLog(
+            job.logPath,
+            `[${new Date().toISOString()}] fastTemplateRepairFailed=true reason=${repairMessage}\n`,
+          )
+        }
+      }
+      if (options.qualityMode === 'fast' && !templateApplyResult.validationOk) {
+        appendLog(
+          job.logPath,
+          `[${new Date().toISOString()}] fastTemplateValidationFailedAfterRepair=${String(repairAttempted)} keep=opencode-template-output blankSlides=${templateApplyResult.blankSlideCount ?? 0}\n`,
+        )
+      }
+
+      const finalValidation = validateFinalHtmlSlides(
+        fs.readFileSync(job.outputPath, 'utf-8'),
+        { minSlides: Math.min(2, renderContentModel.slides.length) },
+      )
+      appendLog(
+        job.logPath,
+        [
+          `[${new Date().toISOString()}] finalHtmlValidationOk=${String(finalValidation.ok)}`,
+          `[${new Date().toISOString()}] finalHtmlSlideCount=${finalValidation.slideCount}`,
+          `[${new Date().toISOString()}] finalBlankSlideCount=${finalValidation.blankSlideCount}`,
+        ].join('\n'),
+      )
+      appendLog(
+        job.logPath,
+        [
+          '',
+          `[${new Date().toISOString()}] appliedTemplateSlug=${templateApplyResult.appliedTemplateSlug}`,
+          `[${new Date().toISOString()}] templateRendererMode=${templateApplyResult.rendererMode}`,
+          `[${new Date().toISOString()}] templateApplyFallbackUsed=${String(templateApplyResult.fallbackUsed)}`,
+          templateApplyResult.warning
+            ? `[${new Date().toISOString()}] templateApplyWarning=${templateApplyResult.warning}`
+            : '',
+        ].filter(Boolean).join('\n'),
+      )
+      jobSummary = syncJobSummaryFromTemplateApply(jobSummary, templateApplyResult, lockedSelection, options)
+
+      const providerConfigured = await isHtmlPresentationImageProviderConfigured()
+      updateArtifactJob(job.id, {
+        imageStats: {
+          planned: postProcessed.plannedImageCount,
+          required: postProcessed.requiredImageCount,
+          optional: postProcessed.optionalImageCount,
+          resolvedMaxImages: resolvedBudget.maxImages,
+          generated: generatedImageCount,
+          placeholder: placeholderCount,
+          unfilled: unfilledImageCount,
+          budgetSource: resolvedBudget.source,
+          providerConfigured,
+        },
       })
 
       appendLog(
@@ -1384,15 +1995,22 @@ export async function runHtmlArtifactJob(job: ArtifactJobRecord): Promise<{
           `[${new Date().toISOString()}] templateSelectionFallbackUsed=${String(postProcessed.fallbackUsed)}`,
           `[${new Date().toISOString()}] fallbackUsed=${String(jobSummary.fallbackUsed ?? false)}`,
           `[${new Date().toISOString()}] qualityMode=${options.qualityMode}`,
+          `[${new Date().toISOString()}] skillMode=${resolveHtmlPptSkillMode(options)}`,
           `[${new Date().toISOString()}] imagePlanningEnabled=${String(postProcessed.imagePlanningEnabled)}`,
+          `[${new Date().toISOString()}] imageProviderConfigured=${String(providerConfigured)}`,
           `[${new Date().toISOString()}] plannedImageCount=${postProcessed.plannedImageCount}`,
-          `[${new Date().toISOString()}] generatedImageCount=${postProcessed.generatedImageCount}`,
-          `[${new Date().toISOString()}] placeholderCount=${postProcessed.placeholderCount}`,
+          `[${new Date().toISOString()}] requiredImageCount=${postProcessed.requiredImageCount}`,
+          `[${new Date().toISOString()}] optionalImageCount=${postProcessed.optionalImageCount}`,
+          `[${new Date().toISOString()}] resolvedMaxImages=${resolvedBudget.maxImages}`,
+          `[${new Date().toISOString()}] budgetSource=${resolvedBudget.source}`,
+          `[${new Date().toISOString()}] generatedImageCount=${generatedImageCount}`,
+          `[${new Date().toISOString()}] placeholderCount=${placeholderCount}`,
+          `[${new Date().toISOString()}] unfilledImageCount=${unfilledImageCount}`,
         ].join('\n'),
       )
     }
 
-    if (!jobSummary.selectedTemplateSlug) {
+    if (!jobSummary.requestedTemplateSlug && !jobSummary.selectedTemplateSlug) {
       jobSummary = {
         ...jobSummary,
         requestedTemplateSlug: options.templateSlug || '',
@@ -1403,6 +2021,10 @@ export async function runHtmlArtifactJob(job: ArtifactJobRecord): Promise<{
     }
   }
 
+  assertArtifactJobNotCanceled(job.id, 'before-packaging')
+  if (job.skillId === HTML_PPT_BEAUTIFUL_SKILL_ID) {
+    markHtmlPptProgress(job, 'packaging', '正在打包预览文件', { currentPhase: 'finalizing' })
+  }
   markJobPhase(job.id, 'final-check', '正在完成最终检查…')
   const finalCheckWarning = await runFinalCheck(job)
   if (finalCheckWarning) {
@@ -1410,6 +2032,10 @@ export async function runHtmlArtifactJob(job: ArtifactJobRecord): Promise<{
   }
 
   assertArtifactJobNotCanceled(job.id, 'before-artifact-create')
+  const latestBeforeArtifact = getArtifactJob(job.id)
+  if (!latestBeforeArtifact || latestBeforeArtifact.status === 'canceled') {
+    throw new ArtifactJobCanceledError(job.cancelReason || 'Artifact job canceled')
+  }
   markJobPhase(job.id, 'finalizing', '正在写入预览产物…')
   const artifact = createHtmlArtifact({
     userId: job.userId,
@@ -1446,9 +2072,13 @@ export async function runHtmlArtifactJob(job: ArtifactJobRecord): Promise<{
     clearArtifactJobRuntime(job.id)
   }
 
+  if (job.skillId === HTML_PPT_BEAUTIFUL_SKILL_ID) {
+    markHtmlPptProgress(job, 'completed', '生成完成')
+  }
+
   logHtmlArtifactTask(job, {
     status: 'succeeded',
-    timeoutMs: jobSummary.timeoutMs ?? HTML_PPT_TIMEOUT_MS,
+    timeoutMs: jobSummary.timeoutMs ?? resolveHtmlPptOpenCodeTimeoutMs({ qualityMode: presentationOptions.qualityMode }).timeoutMs,
     elapsedMs: Date.now() - startedAt,
   })
 

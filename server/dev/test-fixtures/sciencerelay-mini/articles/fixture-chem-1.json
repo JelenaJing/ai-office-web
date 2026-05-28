@@ -1,0 +1,11 @@
+{
+  "id": "fixture-chem-1",
+  "title": "Fixture: 电催化析氧机理",
+  "topic": "化学",
+  "publishedDate": "2025-09-20",
+  "doi": "10.1000/fixture.chem.1",
+  "citation": "Test C et al., Fixture Chemistry, 2025",
+  "journal": "Fixture Chemistry",
+  "subjects": ["OER", "catalyst", "descriptor"],
+  "oneLineSummary": "用于测试栈冒烟：中间体吸附能描述符。"
+}

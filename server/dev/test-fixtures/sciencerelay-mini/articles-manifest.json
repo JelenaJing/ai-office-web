@@ -1,0 +1,28 @@
+{
+  "articles": [
+    {
+      "id": "fixture-physics-1",
+      "title": "Fixture: 钙钛矿界面钝化进展",
+      "topic": "物理",
+      "oneLineSummary": "用于测试栈冒烟：界面钝化与缺陷态密度。",
+      "publishedDate": "2025-11-01",
+      "authors": ["Test Author"]
+    },
+    {
+      "id": "fixture-bio-1",
+      "title": "Fixture: 单细胞转录组降噪",
+      "topic": "生物",
+      "oneLineSummary": "用于测试栈冒烟：批次效应校正方法比较。",
+      "publishedDate": "2025-10-15",
+      "authors": ["Test Author B"]
+    },
+    {
+      "id": "fixture-chem-1",
+      "title": "Fixture: 电催化析氧机理",
+      "topic": "化学",
+      "oneLineSummary": "用于测试栈冒烟：中间体吸附能描述符。",
+      "publishedDate": "2025-09-20",
+      "authors": ["Test Author C"]
+    }
+  ]
+}

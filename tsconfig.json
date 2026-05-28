@@ -18,9 +18,10 @@
     "jsx": "react-jsx",
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@ai4science/*": ["../ai4science/webui/src/*"]
     }
   },
   "include": ["src", "electron"],
-  "exclude": ["node_modules", "dist", "dist-electron", "release"]
+  "exclude": ["node_modules", "dist", "dist-electron", "release", "src/modules/materials-research/test"]
 }

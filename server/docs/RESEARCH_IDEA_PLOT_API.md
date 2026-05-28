@@ -20,7 +20,7 @@
 | `PAPER_REMAKE_BASE_URL` | BFF 代理目标，默认 `http://127.0.0.1:8020` | Express |
 | `OPENALEX_EMAIL` | Idea 论文检索 mailto | FastAPI |
 
-**说明：** 模板画图输出为 **matplotlib PNG**，不走 `/api/image/jobs`（AI 生图）。
+**说明：** 模板画图输出为 **matplotlib PNG**，不走 `/api/image/jobs`（AI 生图）。**测试栈** LLM/端口配置见 [`server/dev/README.md`](../dev/README.md) 与 `dev/research-test.env.example`。
 
 ---
 
@@ -64,6 +64,20 @@
   "partialMissing": []
 }
 ```
+
+**`POST /api/research/feed/rank`** — 对已有 `ResearchIdeaCard[]` 规则排序（Phase A，借鉴 x-algorithm 流水线）
+
+```json
+{
+  "ideas": [ /* ResearchIdeaCard[] */ ],
+  "field": "AI for Science",
+  "servedIdeaIds": ["idea-abc"],
+  "subscriptionQueries": ["perovskite solar"],
+  "topK": 20
+}
+```
+
+响应含 `rankScore`、`rankBreakdown`  per idea。测试版默认在生成后自动调用。
 
 **`POST /api/research/ideas/generate/fulltext`**
 
@@ -155,15 +169,26 @@ uvicorn app.main:app --host 0.0.0.0 --port 8020
 
 2. 启动 Express（3001）：`cd ai-office-web/server && npm run dev`
 
-3. 测试 UI（5175，不改主前端）：
+3. **科研工作台测试版**（端口 **25176**，与主站 5173 隔离）：
+
+```bash
+# 建议用测试栈端口，见 server/dev/README.md
+cd ai-office-web/server && npm run dev:research-test-stack   # 一键：18020 + 13001 + 25176
+```
+
+浏览器打开 `http://127.0.0.1:25176`。代码目录：`server/dev/research-frontend-test/`。
+
+4. 简易调试页（端口 **25175**）：
 
 ```bash
 cd ai-office-web/server && npm run dev:research-lab
 ```
 
-浏览器打开 `http://127.0.0.1:5175`，可切换 BFF / FastAPI v1 / v2。
+浏览器打开 `http://127.0.0.1:25175`，可切换 BFF (:13001) / FastAPI v1/v2 (:18020)。
 
-4. CLI smoke：
+测试端口一览：[`server/dev/research-test.ports.env.example`](../dev/research-test.ports.env.example)
+
+5. CLI smoke：
 
 ```bash
 cd ai-office-web/server
@@ -181,6 +206,10 @@ RESEARCH_SMOKE_SKIP_IDEA=1 npm run smoke:research-idea-plot
 
 ---
 
+## X 推荐算法融合（探索）
+
+X / xAI 2026 年开放的 For You 算法已克隆至 `third_party/x-algorithm/`，与科研 Idea Feed 的融合思路见 **[X_ALGORITHM_FUSION_EXPLORATION.md](./X_ALGORITHM_FUSION_EXPLORATION.md)**。
+
 ## 相关文件
 
 | 文件 | 说明 |
@@ -188,5 +217,6 @@ RESEARCH_SMOKE_SKIP_IDEA=1 npm run smoke:research-idea-plot
 | `backend/app/services/unified_llm.py` | Python 统一 LLM |
 | `backend/app/routers/research_v2.py` | FastAPI v2 路由 |
 | `server/src/features/research/` | Express BFF |
-| `server/dev/research-lab/` | 独立测试页 |
+| `server/dev/research-lab/` | 简易 API 调试页 |
+| `server/dev/research-frontend-test/` | 科研工作台 UI 测试版（复制自主前端 research） |
 | `server/docs/IDEA_PLOT_DEPLOY_10_20_5_61.md` | 部署到 5.61 |

@@ -1,0 +1,11 @@
+{
+  "id": "fixture-bio-1",
+  "title": "Fixture: 单细胞转录组降噪",
+  "topic": "生物",
+  "publishedDate": "2025-10-15",
+  "doi": "10.1000/fixture.bio.1",
+  "citation": "Test B et al., Fixture Biology, 2025",
+  "journal": "Fixture Biology",
+  "subjects": ["scRNA-seq", "batch correction"],
+  "oneLineSummary": "用于测试栈冒烟：批次效应校正方法比较。"
+}

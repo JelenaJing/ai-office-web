@@ -33,6 +33,7 @@ from app.agents import domain_generator
 from app.services.deepsyn_client import DeepSynClient
 from app.services.paper_processor import PaperProcessor
 from app.services.fulltext_multiround import ChunkingConfig, split_into_chunks, synthesize_ideas, synthesize_experiment_design, synthesize_content_check
+from app.services.idea_paper_source import read_paper_text_for_idea, should_use_single_pass_idea
 from app.services.theory_fulltext_merge import run_analyze_theory_fulltext
 from app.services.full_paper_remake.orchestrator import (
     execute_full_paper_coremake,
@@ -50,10 +51,8 @@ router = APIRouter(prefix="/api/v1/remake", tags=["remake"])
 
 
 def _read_full_text(project_id: str, override_text: str | None = None) -> str:
-    if override_text and str(override_text).strip():
-        return str(override_text).strip()
-    # Use cached cleaned fulltext by default (created once per project)
-    return PaperProcessor().get_paper_text(project_id, variant="cleaned") or ""
+    text, _meta = read_paper_text_for_idea(project_id, override_text)
+    return text
 
 
 def _chunk_cfg(request: FullTextMultiRoundRequest) -> ChunkingConfig:
@@ -258,25 +257,42 @@ async def generate_idea_fulltext(request: FullTextMultiRoundRequest):
     """全文分段多轮：Idea（后端负责覆盖全文与综合）"""
     try:
         project_manager = ProjectManager()
-        full_text = _read_full_text(request.project_id, request.full_text)
+        full_text, paper_meta = read_paper_text_for_idea(request.project_id, request.full_text)
         if not full_text.strip():
             raise ValueError("Paper content is empty")
-        chunks = split_into_chunks(full_text, _chunk_cfg(request))
-        all_ideas = []
-        for i, ch in enumerate(chunks):
-            ideas = idea_generator.generate_ideas(
+        cfg = _chunk_cfg(request)
+        if should_use_single_pass_idea(paper_meta, full_text, cfg.target_chars):
+            merged = idea_generator.generate_ideas(
                 project_id=request.project_id,
-                selected_text=ch,
-                context=f"Fulltext pass1 chunk {i+1}/{len(chunks)}",
+                selected_text=full_text,
+                context="Idea from paper preview",
             )
-            all_ideas.append(ideas)
-        merged = synthesize_ideas(all_ideas)
+            chunks_n = 1
+            mode = paper_meta.get("mode", "single_pass")
+        else:
+            chunks = split_into_chunks(full_text, cfg)
+            all_ideas = []
+            for i, ch in enumerate(chunks):
+                ideas = idea_generator.generate_ideas(
+                    project_id=request.project_id,
+                    selected_text=ch,
+                    context=f"Fulltext pass1 chunk {i+1}/{len(chunks)}",
+                )
+                all_ideas.append(ideas)
+            merged = synthesize_ideas(all_ideas)
+            chunks_n = len(chunks)
+            mode = "fulltext_multiround"
         project_manager.save_remake_result(
             project_id=request.project_id,
             remake_type="idea",
-            result={"mode": "fulltext_multiround", "chunks": len(chunks), "ideas": merged},
+            result={"mode": mode, "chunks": chunks_n, "ideas": merged, "paper_meta": paper_meta},
         )
-        return IdeaResponse(status="success", message="Idea(fulltext) completed", ideas=merged, data={"chunks": len(chunks)})
+        return IdeaResponse(
+            status="success",
+            message="Idea(fulltext) completed",
+            ideas=merged,
+            data={"chunks": chunks_n, "paper_meta": paper_meta},
+        )
     except Exception as e:
         logger.error(f"Idea(fulltext) failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))

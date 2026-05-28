@@ -33,12 +33,18 @@ export function openArtifactLabel(artifact: Artifact): string {
   if (PPT_ARTIFACT_TYPES.has(artifact.type)) return '打开汇报'
   const meta = artifact.metadata as Record<string, unknown> | undefined
   if (meta?.deckId) return '打开汇报'
+  if (meta?.documentStudio === true) return '打开 Document Studio'
   return '打开文稿'
 }
 
-export function resolveArtifactOpenKind(artifact: Artifact): 'html-ppt' | 'ppt' | 'document' | null {
+export function resolveArtifactOpenKind(
+  artifact: Artifact,
+): 'html-ppt' | 'ppt' | 'document-studio' | 'document' | null {
   if (HTML_PPT_ARTIFACT_TYPES.has(artifact.type)) return 'html-ppt'
   const meta = artifact.metadata as Record<string, unknown> | undefined
+  if (meta?.documentStudio === true && typeof meta?.studioDocumentId === 'string') {
+    return 'document-studio'
+  }
   if (meta?.deckId || PPT_ARTIFACT_TYPES.has(artifact.type)) return 'ppt'
   if (artifact.type === 'document' || meta?.documentArtifact) return 'document'
   const format = artifact.exports?.[0]?.format

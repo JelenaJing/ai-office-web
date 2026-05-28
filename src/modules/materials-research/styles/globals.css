@@ -1,0 +1,96 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* AI 助手 Markdown */
+.assistant-markdown p {
+  margin: 0.35em 0;
+}
+.assistant-markdown p:first-child {
+  margin-top: 0;
+}
+.assistant-markdown p:last-child {
+  margin-bottom: 0;
+}
+.assistant-markdown ul,
+.assistant-markdown ol {
+  margin: 0.35em 0;
+  padding-left: 1.25em;
+}
+.assistant-markdown li {
+  margin: 0.15em 0;
+}
+.assistant-markdown h1,
+.assistant-markdown h2,
+.assistant-markdown h3 {
+  margin: 0.5em 0 0.25em;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.assistant-markdown h1 {
+  font-size: 1.05em;
+}
+.assistant-markdown h2 {
+  font-size: 1em;
+}
+.assistant-markdown h3 {
+  font-size: 0.95em;
+}
+.assistant-markdown strong {
+  font-weight: 600;
+  color: inherit;
+}
+.assistant-markdown code {
+  border-radius: 0.25rem;
+  background: rgb(226 232 240 / 0.8);
+  padding: 0.1em 0.35em;
+  font-size: 0.85em;
+}
+.assistant-markdown pre {
+  margin: 0.5em 0;
+  overflow-x: auto;
+  border-radius: 0.5rem;
+  background: rgb(30 41 59);
+  padding: 0.65rem 0.75rem;
+  font-size: 0.8em;
+  color: rgb(248 250 252);
+}
+.assistant-markdown pre code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+}
+.assistant-markdown blockquote {
+  margin: 0.35em 0;
+  border-left: 3px solid rgb(203 213 225);
+  padding-left: 0.75em;
+  color: rgb(100 116 139);
+}
+.assistant-markdown table {
+  margin: 0.5em 0;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85em;
+}
+.assistant-markdown th,
+.assistant-markdown td {
+  border: 1px solid rgb(226 232 240);
+  padding: 0.25em 0.5em;
+  text-align: left;
+}
+.assistant-markdown th {
+  background: rgb(248 250 252);
+  font-weight: 600;
+}
+.assistant-markdown a {
+  color: rgb(37 99 235);
+  text-decoration: underline;
+}
+.assistant-markdown hr {
+  margin: 0.5em 0;
+  border-color: rgb(226 232 240);
+}
+
+body {
+  @apply bg-surface text-slate-800 antialiased;
+}

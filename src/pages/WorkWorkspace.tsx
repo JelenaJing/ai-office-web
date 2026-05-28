@@ -1,108 +1,122 @@
-import styled from 'styled-components'
+import React from 'react'
 import { FileText, Mail, BarChart2, Presentation, CalendarClock } from 'lucide-react'
 import { useWorkspaceMode } from '../contexts/WorkspaceModeContext'
-import { SceneFeatureRow } from '../components/scene/SceneFeatureRow'
 import type { PrimarySection } from '../components/nav/PrimaryNav'
+import { applyDocumentStudioUrl } from '../features/document-studio/services/documentStudioSession'
+import {
+  ScenarioEntryCard,
+  ScenarioEntryGrid,
+  ScenarioEntryHeader,
+  ScenarioEntryMain,
+  ScenarioEntryPage,
+  ScenarioEntrySubtitle,
+  ScenarioEntryTitle,
+  type EntryCardTheme,
+} from '../components/scene/ScenarioEntryCards'
 
 interface WorkWorkspaceProps {
   onGoToWorkspace: () => void
   onNavigate: (section: PrimarySection) => void
 }
 
-const Page = styled.div`
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow-y: auto;
-  background: #f4f7fc;
-  padding: 40px 56px;
-`
+interface WorkFeatureDef {
+  id: string
+  title: string
+  theme: EntryCardTheme
+  icon: React.ReactElement
+  hidden?: boolean
+  onActivate: (ctx: {
+    onGoToWorkspace: () => void
+    onNavigate: (section: PrimarySection) => void
+    enterEmailMode: () => void
+    enterDataMode: () => void
+  }) => void
+}
 
-const PageHeader = styled.div`
-  margin-bottom: 28px;
-  flex-shrink: 0;
-`
-
-const PageTitle = styled.h1`
-  margin: 0 0 6px;
-  font-size: 28px;
-  font-weight: 800;
-  color: #1a2f47;
-`
-
-const PageSubtitle = styled.p`
-  margin: 0;
-  font-size: 14px;
-  color: #6b7f94;
-`
-
-const FeatureList = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  width: 100%;
-`
+const WORK_FEATURE_DEFS: WorkFeatureDef[] = [
+  {
+    id: 'document',
+    title: '文稿',
+    theme: { accent: '#1f6fd6', accentBg: '#e6f0fc', iconBg: '#deeeff' },
+    icon: <FileText size={30} color="#1f6fd6" />,
+    onActivate: ({ onNavigate }) => {
+      applyDocumentStudioUrl()
+      onNavigate('document-studio')
+    },
+  },
+  {
+    id: 'email',
+    title: '邮件',
+    theme: { accent: '#7c4dff', accentBg: '#ede4ff', iconBg: '#ede4ff' },
+    icon: <Mail size={30} color="#7c4dff" />,
+    onActivate: ({ onGoToWorkspace, enterEmailMode }) => {
+      enterEmailMode()
+      onGoToWorkspace()
+    },
+  },
+  {
+    id: 'calendar',
+    title: '日程管理',
+    theme: { accent: '#4338ca', accentBg: '#e0e7ff', iconBg: '#e0e7ff' },
+    icon: <CalendarClock size={30} color="#4338ca" />,
+    hidden: true,
+    onActivate: ({ onNavigate }) => {
+      onNavigate('calendar')
+    },
+  },
+  {
+    id: 'data',
+    title: '数据分析',
+    theme: { accent: '#00897b', accentBg: '#d0f0ec', iconBg: '#d0f0ec' },
+    icon: <BarChart2 size={30} color="#00897b" />,
+    onActivate: ({ onGoToWorkspace, enterDataMode }) => {
+      enterDataMode()
+      onGoToWorkspace()
+    },
+  },
+  {
+    id: 'slides',
+    title: 'Slides',
+    theme: { accent: '#c05c15', accentBg: '#fdf0e6', iconBg: '#fce5cf' },
+    icon: <Presentation size={30} color="#c05c15" />,
+    onActivate: ({ onNavigate }) => {
+      onNavigate('html-ppt')
+    },
+  },
+]
 
 export default function WorkWorkspace({ onGoToWorkspace, onNavigate }: WorkWorkspaceProps) {
-  const {
-    enterFreeMode,
+  const { enterEmailMode, enterDataMode } = useWorkspaceMode()
+
+  const visibleFeatures = WORK_FEATURE_DEFS.filter(f => !f.hidden)
+
+  const activateCtx = {
+    onGoToWorkspace,
+    onNavigate,
     enterEmailMode,
     enterDataMode,
-    enterPptGenerationMode,
-  } = useWorkspaceMode()
-
-  const go = (fn: () => void) => { fn(); onGoToWorkspace() }
+  }
 
   return (
-    <Page>
-      <PageHeader>
-        <PageTitle>行政场景</PageTitle>
-        <PageSubtitle>文稿编辑、邮件收发、日程管理、数据分析与 PPT 生成</PageSubtitle>
-      </PageHeader>
+    <ScenarioEntryPage>
+      <ScenarioEntryHeader>
+        <ScenarioEntryTitle>行政场景</ScenarioEntryTitle>
+        <ScenarioEntrySubtitle>文稿、邮件、数据分析与 Slides</ScenarioEntrySubtitle>
+      </ScenarioEntryHeader>
 
-      <FeatureList>
-        <SceneFeatureRow
-          icon={<FileText size={24} />}
-          title="文稿编辑"
-          description="新建、编辑、生成和导出文稿 / PPT / 模板材料"
-          accent="blue"
-          actionLabel="进入"
-          onClick={() => go(enterFreeMode)}
-        />
-        <SceneFeatureRow
-          icon={<Mail size={24} />}
-          title="邮件收发"
-          description="收发邮件、新建邮件、AI 预回复和附件管理"
-          accent="purple"
-          actionLabel="进入"
-          onClick={() => go(enterEmailMode)}
-        />
-        <SceneFeatureRow
-          icon={<CalendarClock size={24} />}
-          title="日程管理"
-          description="AI识别邮件中的会议、截止事项和候选时间，自动生成日程并检测时间冲突"
-          accent="indigo"
-          actionLabel="进入"
-          onClick={() => onNavigate('calendar')}
-        />
-        <SceneFeatureRow
-          icon={<BarChart2 size={24} />}
-          title="数据分析"
-          description="分析表格、生成图表、整理数据结论"
-          accent="teal"
-          actionLabel="进入"
-          onClick={() => go(enterDataMode)}
-        />
-        <SceneFeatureRow
-          icon={<Presentation size={24} />}
-          title="演示文稿生成"
-          description="根据主题和提纲生成 HTML 演示文稿（由 OpenCode + html-ppt-beautiful 驱动）"
-          accent="orange"
-          actionLabel="进入"
-          onClick={() => onNavigate('html-ppt')}
-        />
-      </FeatureList>
-    </Page>
+      <ScenarioEntryMain>
+        <ScenarioEntryGrid>
+          {visibleFeatures.map(feature => (
+            <ScenarioEntryCard
+              key={feature.id}
+              theme={feature.theme}
+              icon={feature.icon}
+              title={feature.title}
+              onClick={() => feature.onActivate(activateCtx)}
+            />
+          ))}
+        </ScenarioEntryGrid>
+      </ScenarioEntryMain>
+    </ScenarioEntryPage>
   )
 }

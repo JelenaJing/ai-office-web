@@ -31,6 +31,9 @@ projects/
 # Logs
 *.log
 logs/
+dev/.logs/
+dev/research-test.env
+dev/research-test.ports.env
 
 # Frontend
 frontend/node_modules/

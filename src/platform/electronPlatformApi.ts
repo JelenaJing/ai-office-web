@@ -182,6 +182,13 @@ export const electronPlatformApi: PlatformApi = {
       prompt?: string
       options?: Record<string, unknown>
       workspacePath?: string
+      onProgress?: (update: {
+        status: 'queued' | 'running' | 'completed' | 'succeeded' | 'failed' | 'cancelled'
+        stage?: string
+        message?: string
+        progress?: number
+        error?: string
+      }) => void
     }): Promise<{
       artifactId: string
       title?: string
@@ -214,6 +221,12 @@ export const electronPlatformApi: PlatformApi = {
         title: String(raw.title ?? '表格分析'),
         type: 'excel_analysis',
       }
+    },
+  },
+
+  dataAnalysis: {
+    async downloadTemplate(_modelId: string): Promise<void> {
+      notSupported('platformApi.dataAnalysis.downloadTemplate')
     },
   },
 

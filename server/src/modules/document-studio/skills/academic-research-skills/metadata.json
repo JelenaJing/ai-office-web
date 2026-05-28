@@ -1,0 +1,30 @@
+{
+  "id": "academic-research-skills",
+  "name": "论文写作",
+  "description": "用于论文选题、大纲、初稿、审阅和修改的多阶段学术写作流程",
+  "category": "document-pipeline",
+  "runner": "opencode",
+  "entryFile": "SKILL.md",
+  "version": "1.0.0",
+  "scope": ["pipeline"],
+  "supportedDocumentTypes": ["paper"],
+  "outputMode": "document_artifact",
+  "timeoutMs": 900000,
+  "enabled": false,
+  "status": "pending",
+  "materialize": {
+    "mode": "copy",
+    "include": ["SKILL.md", "skills/**", "prompts/**", "examples/**"],
+    "exclude": [".git/**", "node_modules/**", "test/**"]
+  },
+  "opencode": {
+    "skillName": "academic-research-skills",
+    "permissions": {
+      "skill": { "academic-research-skills": "allow", "*": "deny" }
+    }
+  },
+  "source": {
+    "type": "github",
+    "url": "https://github.com/imbad0202/academic-research-skills"
+  }
+}

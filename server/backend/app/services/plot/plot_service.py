@@ -4,7 +4,6 @@ PlotService: load data -> recommend chart -> render plot -> return base64 + meta
 
 from __future__ import annotations
 
-import io
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,6 +12,7 @@ from typing import Any, Dict, List, Optional, Union
 import pandas as pd
 
 from .loaders import CSVLoader, ExcelLoader, JSONLoader
+from .loaders.tabular_io import read_csv_from_path, read_csv_from_text
 from .plotters import (
     BarPlotter,
     BoxPlotter,
@@ -60,24 +60,10 @@ SUPPORTED_CHART_TYPES = {
 }
 
 
-def _guess_delimiter(text: str) -> str:
-    # Heuristic: prefer tab if many tabs, otherwise comma if many commas, else whitespace.
-    tab = text.count("\t")
-    comma = text.count(",")
-    if tab >= comma and tab > 0:
-        return "\t"
-    if comma > 0:
-        return ","
-    return r"\s+"
-
-
 def _load_from_raw_text(raw_text: str) -> pd.DataFrame:
-    raw_text = raw_text.strip()
-    if not raw_text:
+    if not raw_text or not raw_text.strip():
         raise ValueError("raw_text is empty")
-    sep = _guess_delimiter(raw_text)
-    # engine='python' allows regex separators
-    return pd.read_csv(io.StringIO(raw_text), sep=sep, engine="python")
+    return read_csv_from_text(raw_text)
 
 
 def _load_from_file_path(file_path: str) -> pd.DataFrame:
@@ -89,9 +75,8 @@ def _load_from_file_path(file_path: str) -> pd.DataFrame:
         return JSONLoader().load(str(path))
     if suffix in [".xlsx", ".xls"]:
         return ExcelLoader().load(str(path))
-    if suffix in [".txt"]:
-        # treat as delimited text
-        return _load_from_raw_text(path.read_text(encoding="utf-8", errors="ignore"))
+    if suffix in [".txt", ".tsv"]:
+        return read_csv_from_path(path)
     raise ValueError(f"Unsupported file format: {suffix}")
 
 

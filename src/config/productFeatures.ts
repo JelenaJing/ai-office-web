@@ -16,7 +16,7 @@ export const PRODUCT_FEATURES = {
   skills: true,
   communication: true,
   settings: true,
-  aios: true,
+  aios: false,
 } as const
 
 export type ProductFeatureKey = keyof typeof PRODUCT_FEATURES

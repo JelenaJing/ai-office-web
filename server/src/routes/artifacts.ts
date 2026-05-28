@@ -10,6 +10,9 @@
  */
 
 import { Router } from 'express'
+import { randomUUID } from 'crypto'
+import { spawnSync } from 'child_process'
+import { tmpdir } from 'os'
 import path from 'path'
 import fs from 'fs'
 import { deleteArtifact, getArtifact, getArtifactFilePath, listArtifactsByUser, updateArtifact } from '../artifacts/ArtifactStore'
@@ -34,6 +37,7 @@ import { assertWorkspaceAccess, WorkspaceAccessError } from '../lib/workspaceAcc
 
 const router = Router()
 const HTML_PPT_SIDECAR_FILES = new Set(['content-model.json', 'template-profile.json', 'candidate-templates.json'])
+const HTML_PPT_ASSET_EXTS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.svg'])
 
 function sendWorkspaceError(res: import('express').Response, error: unknown): void {
   const workspaceError = error instanceof WorkspaceAccessError ? error : null
@@ -179,6 +183,115 @@ router.get('/:artifactId/sidecars/:filename', async (req, res) => {
   res.setHeader('Cache-Control', 'no-store')
   res.setHeader('Content-Type', 'application/json; charset=utf-8')
   return res.sendFile(filePath)
+})
+
+// ── GET /api/artifacts/:artifactId/download-html-ppt ─────────────────────────
+// Downloads a zip package for HTML PPT artifacts:
+//   index.html
+//   assets/*
+//   content-model.json
+//   template-profile.json
+//   candidate-templates.json
+router.get('/:artifactId/download-html-ppt', async (req, res) => {
+  const { artifactId } = req.params
+  const htmlArtifact = getHtmlArtifact(artifactId)
+  if (!htmlArtifact) {
+    return res.status(404).json({ message: 'HTML PPT artifact not found', artifactId })
+  }
+
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+  if (!assertArtifactOwnership(userId, htmlArtifact, res)) return
+
+  const artifactDirPath = getHtmlArtifactDir(artifactId)
+  const indexPath = getHtmlArtifactFilePath(artifactId)
+
+  if (!fs.existsSync(indexPath)) {
+    return res.status(404).json({ message: 'index.html missing on disk', artifactId })
+  }
+
+  const safeTitle = (htmlArtifact.title || artifactId)
+    .replace(/[^\w\u4e00-\u9fff-]+/g, '_')
+    .replace(/_+/g, '_')
+    .slice(0, 60) || artifactId
+  const zipName = `html-ppt-${safeTitle}.zip`
+  const zipPath = path.join(tmpdir(), `html-ppt-${safeTitle}-${randomUUID()}.zip`)
+
+  const stagingDir = path.join(tmpdir(), `html-ppt-staging-${safeTitle}-${randomUUID()}`)
+  fs.mkdirSync(stagingDir, { recursive: true })
+
+  try {
+    // index.html (single entrypoint)
+    fs.copyFileSync(indexPath, path.join(stagingDir, 'index.html'))
+
+    // Sidecar json files
+    for (const filename of HTML_PPT_SIDECAR_FILES) {
+      const src = path.join(artifactDirPath, filename)
+      const dst = path.join(stagingDir, filename)
+      if (!fs.existsSync(src)) continue
+      fs.copyFileSync(src, dst)
+    }
+
+    // assets/*
+    const assetsSrcDir = path.join(artifactDirPath, 'assets')
+    const assetsDstDir = path.join(stagingDir, 'assets')
+    fs.mkdirSync(assetsDstDir, { recursive: true })
+
+    if (fs.existsSync(assetsSrcDir) && fs.statSync(assetsSrcDir).isDirectory()) {
+      const entries = fs.readdirSync(assetsSrcDir, { withFileTypes: true })
+      for (const entry of entries) {
+        if (!entry.isFile()) continue
+        const ext = path.extname(entry.name).toLowerCase()
+        if (!HTML_PPT_ASSET_EXTS.has(ext)) continue
+        const src = path.join(assetsSrcDir, entry.name)
+        const dst = path.join(assetsDstDir, entry.name)
+        fs.copyFileSync(src, dst)
+      }
+    }
+
+    // Build zip from stagingDir
+    const zip = spawnSync('zip', ['-r', '-q', zipPath, '.'], {
+      cwd: stagingDir,
+      encoding: 'utf-8',
+      timeout: 120_000,
+    })
+    if (zip.status !== 0) {
+      const msg = (zip.stderr || zip.stdout || '').toString().trim() || `zip exited with code ${zip.status ?? 'unknown'}`
+      throw new Error(msg)
+    }
+    if (!fs.existsSync(zipPath)) {
+      throw new Error('ZIP 打包失败：未找到输出 zip 文件')
+    }
+
+    res.setHeader('Content-Type', 'application/zip')
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(zipName)}`)
+    res.setHeader('X-Content-Type-Options', 'nosniff')
+    return res.sendFile(zipPath, () => {
+      try {
+        fs.rmSync(stagingDir, { recursive: true, force: true })
+      } catch {
+        // ignore
+      }
+      try {
+        fs.unlinkSync(zipPath)
+      } catch {
+        // ignore
+      }
+    })
+  } catch (error) {
+    try {
+      fs.rmSync(stagingDir, { recursive: true, force: true })
+    } catch {
+      // ignore
+    }
+    try {
+      if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath)
+    } catch {
+      // ignore
+    }
+    const message = error instanceof Error ? error.message : String(error)
+    return res.status(500).json({ success: false, error: message })
+  }
 })
 
 // TODO(phase-2): add POST /api/html-ppt/:artifactId/patch to persist local edit patches.

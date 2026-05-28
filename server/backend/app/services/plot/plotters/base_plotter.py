@@ -42,7 +42,7 @@ class BasePlotter:
                 "axes.linewidth": 1.5,
                 "grid.linewidth": 0.5,
                 "lines.linewidth": 2,
-                "lines.markersize": 6,
+                "lines.markersize": 3,
             },
         },
         "default": {

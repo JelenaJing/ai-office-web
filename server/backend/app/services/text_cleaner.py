@@ -7,14 +7,7 @@ import logging
 import re
 from typing import List
 
-from openai import OpenAI
-
-from app.config import (
-    DEEPSEEK_API_KEY,
-    DEEPSEEK_BASE_URL,
-    DEEPSEEK_MAX_OUTPUT_TOKENS,
-    DEEPSEEK_MODEL,
-)
+from app.services import unified_llm
 
 logger = logging.getLogger(__name__)
 
@@ -28,14 +21,6 @@ def _strip_json_fence(text: str) -> str:
         t = re.sub(r"^```(?:json)?\n?", "", t)
         t = re.sub(r"\n?```$", "", t)
     return t.strip()
-
-
-def get_client():
-    """获取OpenAI客户端（延迟初始化）"""
-    return OpenAI(
-        api_key=DEEPSEEK_API_KEY,
-        base_url=DEEPSEEK_BASE_URL,
-    )
 
 
 def _split_paragraph_blocks(text: str) -> List[str]:
@@ -84,7 +69,10 @@ def _structured_clean_batch(body: str) -> List[str]:
     """
     单批：JSON paragraphs。适用于全文任意片段（摘要、各节、参考文献等）。
     """
-    client = get_client()
+    if not unified_llm.is_llm_configured():
+        raise RuntimeError(
+            "LLM 未配置：PDF 清洗需要 unified_llm（见 server/.env.example 的 LLM_*）"
+        )
     prompt = f"""You clean academic text extracted from a PDF (may be a fragment of the full paper).
 
 Goals:
@@ -103,20 +91,19 @@ Input:
 {body}
 """
 
-    response = client.chat.completions.create(
-        model=DEEPSEEK_MODEL,
-        messages=[
+    data = unified_llm.chat_completion_json(
+        [
             {
                 "role": "system",
                 "content": 'You output only valid JSON: {"paragraphs": ["..."]}. No markdown.',
             },
             {"role": "user", "content": prompt},
         ],
-        max_tokens=min(DEEPSEEK_MAX_OUTPUT_TOKENS, 16384),
+        max_tokens=min(unified_llm.get_max_output_tokens(), 16384),
         temperature=0.12,
     )
-    raw = response.choices[0].message.content or ""
-    data = json.loads(_strip_json_fence(raw))
+    if "raw" in data and "paragraphs" not in data:
+        raise ValueError("LLM returned non-JSON paragraphs payload")
     paras = data.get("paragraphs")
     if not isinstance(paras, list):
         raise ValueError("missing paragraphs array")
@@ -132,7 +119,10 @@ Input:
 
 def _legacy_plain_clean_batch(chunk: str) -> str:
     """单批旧版纯文本清理（JSON 失败时回退）。"""
-    client = get_client()
+    if not unified_llm.is_llm_configured():
+        raise RuntimeError(
+            "LLM 未配置：PDF 清洗需要 unified_llm（见 server/.env.example 的 LLM_*）"
+        )
     prompt = f"""你是一个文本提取专家。从以下从PDF提取的文本中，提取出真实的原文内容。
 
 要求：
@@ -149,19 +139,17 @@ def _legacy_plain_clean_batch(chunk: str) -> str:
 
 请直接返回清理后的文本，不要添加任何说明或标记。只返回提取出的真实原文内容。"""
 
-    response = client.chat.completions.create(
-        model=DEEPSEEK_MODEL,
-        messages=[
+    cleaned_text = unified_llm.chat_completion(
+        [
             {
                 "role": "system",
                 "content": "你是一个文本提取专家。你的任务是从格式混乱的PDF提取文本中提取真实原文，只做提取不做改写。直接返回清理后的文本，不要添加任何说明。",
             },
             {"role": "user", "content": prompt},
         ],
-        max_tokens=min(DEEPSEEK_MAX_OUTPUT_TOKENS, 16384),
+        max_tokens=min(unified_llm.get_max_output_tokens(), 16384),
         temperature=0.1,
     )
-    cleaned_text = (response.choices[0].message.content or "").strip()
     if cleaned_text.startswith("```"):
         lines = cleaned_text.split("\n")
         if lines[0].strip().startswith("```"):

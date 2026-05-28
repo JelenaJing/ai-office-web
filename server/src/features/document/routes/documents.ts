@@ -28,6 +28,8 @@ import { continueDocumentAtCursor } from '../services/documentContinuationServic
 import { extractDocxContent } from '../services/docxExtractService'
 import { buildWorkbenchDraftFromHtml, persistWorkbenchDocument } from '../services/documentWorkbenchBridge'
 import { buildWorkbenchDocumentArtifact } from '../services/documentWorkbenchArtifact'
+import { isStudioDocumentId } from '../../../modules/document-studio/editorJsonUtils'
+import { updateStudioFromWorkbenchHtml } from '../../../modules/document-studio/documentArtifact.service'
 import type { DocumentEngine, DocumentFallbackMode, DocumentKnowledgeRefInput, DocumentLanguage, DocumentRecord, DocumentType } from '../types'
 
 const router = Router()
@@ -130,6 +132,12 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
   })
 }
 
+function normalizePreferredOutline(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const outline = value.map((item) => String(item || '').trim()).filter(Boolean)
+  return outline.length > 0 ? outline : undefined
+}
+
 async function runDocumentGeneration(input: {
   userId: string
   prompt: string
@@ -139,6 +147,9 @@ async function runDocumentGeneration(input: {
   knowledgeRefs: Awaited<ReturnType<typeof resolveDocumentKnowledgeRefs>>
   documentType: DocumentType
   language?: DocumentLanguage
+  preferredOutline?: string[]
+  tone?: string
+  taskType?: string
   engineConfig: ReturnType<typeof resolveDocumentEngine>
 }): Promise<Awaited<ReturnType<typeof runBuiltinDocumentEngine>>> {
   if (isDocumentAcceptanceMode()) {
@@ -155,6 +166,9 @@ async function runDocumentGeneration(input: {
         knowledgeRefs: input.knowledgeRefs,
         documentType: input.documentType,
         language: input.language === 'en-US' ? 'en-US' : 'zh-CN',
+        preferredOutline: input.preferredOutline,
+        tone: input.tone,
+        taskType: input.taskType,
       }),
       DOCUMENT_TASK_TIMEOUT_MS,
       `内置文稿引擎生成超时（${Math.floor(DOCUMENT_TASK_TIMEOUT_MS / 1000)} 秒）`,
@@ -172,6 +186,9 @@ async function runDocumentGeneration(input: {
         knowledgeRefs: input.knowledgeRefs,
         documentType: input.documentType,
         language: input.language,
+        preferredOutline: input.preferredOutline,
+        tone: input.tone,
+        taskType: input.taskType,
       }),
       MINIMAX_ATTEMPT_TIMEOUT_MS,
       `MiniMax DOCX Skill 超时（${Math.floor(MINIMAX_ATTEMPT_TIMEOUT_MS / 1000)} 秒）`,
@@ -191,6 +208,9 @@ async function runDocumentGeneration(input: {
         knowledgeRefs: input.knowledgeRefs,
         documentType: input.documentType,
         language: input.language === 'en-US' ? 'en-US' : 'zh-CN',
+        preferredOutline: input.preferredOutline,
+        tone: input.tone,
+        taskType: input.taskType,
       }),
       BUILTIN_ATTEMPT_TIMEOUT_MS,
       `内置文稿引擎回退后仍超时（${Math.floor(BUILTIN_ATTEMPT_TIMEOUT_MS / 1000)} 秒）`,
@@ -257,6 +277,9 @@ router.post('/start', async (req, res) => {
     : []
   const documentType = normalizeDocumentType(req.body?.documentType)
   const language = req.body?.language === 'en-US' ? 'en-US' : (req.body?.language === 'zh-CN' ? 'zh-CN' : undefined)
+  const preferredOutline = normalizePreferredOutline(req.body?.preferredOutline ?? req.body?.outline)
+  const tone = typeof req.body?.tone === 'string' ? req.body.tone.trim() : undefined
+  const taskType = typeof req.body?.taskType === 'string' ? req.body.taskType.trim() : undefined
 
   if (!prompt) {
     res.status(400).json({ success: false, error: 'prompt 不能为空' })
@@ -269,7 +292,7 @@ router.post('/start', async (req, res) => {
     status: 'running',
     progress: 5,
     engine: engineConfig.engine,
-    message: engineConfig.engine === 'minimax_docx' ? '正在启动 MiniMax DOCX Skill…' : '正在启动内置文稿引擎…',
+    message: '正在分析写作任务',
     startedAt: new Date().toISOString(),
   })
 
@@ -300,11 +323,7 @@ router.post('/start', async (req, res) => {
       if (finalized) return
       updateDocumentTask(task.taskId, {
         progress: 28,
-        message: isDocumentAcceptanceMode()
-          ? 'DOCUMENT_ACCEPTANCE_MODE 已启用，正在生成稳定验收文稿…'
-          : engineConfig.engine === 'minimax_docx'
-            ? '正在生成文稿并准备 DOCX artifact…'
-            : '正在使用内置文稿引擎生成文稿…',
+        message: '正在撰写正文',
       })
       const runResult = await runDocumentGeneration({
         userId,
@@ -315,6 +334,9 @@ router.post('/start', async (req, res) => {
         knowledgeRefs: refs,
         documentType,
         language,
+        preferredOutline,
+        tone,
+        taskType,
         engineConfig,
       })
       if (finalized) return
@@ -325,7 +347,7 @@ router.post('/start', async (req, res) => {
         documentId: runResult.record.documentId,
         status: 'completed',
         progress: 100,
-        message: runResult.result.engine === 'minimax_docx' ? 'MiniMax DOCX Skill 任务已完成' : '内置文稿引擎任务已完成',
+        message: '文稿生成完成',
         engine: runResult.result.engine,
         fallbackFrom: runResult.result.fallbackFrom,
         fallbackReason: runResult.result.fallbackReason,
@@ -669,20 +691,98 @@ router.post('/save-initial', async (req, res) => {
   }
 })
 
-router.post('/:documentId/save', async (req, res) => {
+router.get('/:documentId', async (req, res, next) => {
   const userId = await requireAccountUser(req, res)
   if (!userId) return
 
-  const record = getDocumentRecord(req.params.documentId, userId)
+  const { documentId } = req.params
+  if (isStudioDocumentId(documentId)) {
+    next()
+    return
+  }
+
+  const record = getDocumentRecord(documentId, userId)
   if (!record || record.userId !== userId) {
     res.status(404).json({ success: false, error: '文稿不存在或无权限访问' })
     return
   }
 
-  const userFileId = typeof req.body?.userFileId === 'string' ? req.body.userFileId.trim() : ''
+  res.json({
+    success: true,
+    documentId: record.documentId,
+    artifactId: record.artifactId,
+    title: record.title,
+    html: record.html,
+    document: record.draft,
+    documentArtifact: record.documentArtifact,
+    outline: buildDocumentOutline(record.draft),
+    engine: record.engine,
+    exportUrl: record.exportUrl,
+    updatedAt: record.updatedAt,
+  })
+})
+
+router.post('/:documentId/save', async (req, res) => {
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+
+  const { documentId } = req.params
+  const body = (req.body || {}) as Record<string, unknown>
+  const html = typeof body.html === 'string' ? body.html : ''
+  if (!html.trim()) {
+    res.status(400).json({ success: false, error: 'html 不能为空' })
+    return
+  }
+
+  const taskType = typeof body.taskType === 'string' ? body.taskType.trim() : undefined
+  const tone = typeof body.tone === 'string' ? body.tone.trim() : undefined
+
+  if (isStudioDocumentId(documentId)) {
+    try {
+      const updated = updateStudioFromWorkbenchHtml({
+        documentId,
+        userId,
+        html,
+        title: typeof body.title === 'string' ? body.title : undefined,
+        documentDraft: body.document || body.documentDraft
+          ? (body.document || body.documentDraft) as Record<string, unknown>
+          : undefined,
+        metadata: { taskType, tone, source: 'document-studio-workbench' },
+      })
+      res.json({
+        success: true,
+        ok: true,
+        documentId: updated.documentId,
+        savedAt: updated.updatedAt,
+        updatedAt: updated.updatedAt,
+        title: updated.title,
+      })
+    } catch (error) {
+      res.status(500).json({ success: false, error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
+  const record = getDocumentRecord(documentId, userId)
+  if (!record || record.userId !== userId) {
+    res.status(404).json({ success: false, error: '文稿不存在或无权限访问' })
+    return
+  }
+
+  const userFileId = typeof body.userFileId === 'string' ? body.userFileId.trim() : ''
 
   try {
-    const requestRecord = updateRecordFromRequest(record, (req.body || {}) as Record<string, unknown>)
+    const requestRecord = updateRecordFromRequest(record, body)
+    if (taskType || tone) {
+      requestRecord.draft = {
+        ...requestRecord.draft,
+        metadata: {
+          ...requestRecord.draft.metadata,
+          ...(taskType ? { taskType } : {}),
+          ...(tone ? { tone } : {}),
+        },
+      }
+    }
     const exported = await saveDocumentDraftDocxArtifact({
       userId,
       workspacePath: requestRecord.workspacePath,

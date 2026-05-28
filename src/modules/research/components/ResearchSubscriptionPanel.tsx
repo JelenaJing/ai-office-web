@@ -1,4 +1,7 @@
 import { useState } from 'react'
+import clsx from 'clsx'
+import { SectionCard } from '../../materials-research/components/common/SectionCard'
+import { ResearchButton } from './ResearchUi'
 import type { ResearchSubscription } from '../types'
 
 interface ResearchSubscriptionPanelProps {
@@ -12,12 +15,15 @@ interface ResearchSubscriptionPanelProps {
 }
 
 const subscriptionTypeLabelMap: Record<ResearchSubscription['type'], string> = {
-  keyword: '关键词订阅',
-  field: '学科方向订阅',
-  author: '作者订阅',
-  conference: '会议订阅',
-  journal: '期刊订阅',
+  keyword: '关键词',
+  field: '学科方向',
+  author: '作者',
+  conference: '会议',
+  journal: '期刊',
 }
+
+const inputClass =
+  'mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20'
 
 export default function ResearchSubscriptionPanel({
   subscriptions,
@@ -31,45 +37,38 @@ export default function ResearchSubscriptionPanel({
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!title.trim() || !query.trim()) return
-
-    onAddSubscription({
-      title: title.trim(),
-      type,
-      query: query.trim(),
-    })
-
+    onAddSubscription({ title: title.trim(), type, query: query.trim() })
     setTitle('')
     setQuery('')
     setType('keyword')
   }
 
   return (
-    <section className="research-panel">
-      <div className="research-panel__header">
-        <div>
-          <h2 className="research-panel__title">科研订阅</h2>
-          <p className="research-panel__subtitle">管理关键词、方向、作者与期刊订阅，本地 mock 即可完整演示。</p>
-        </div>
-      </div>
-
-      <div className="research-list research-list--compact">
+    <SectionCard title="科研订阅" subtitle="用于 Feed 排序时的订阅词加权。">
+      <div className="space-y-2">
         {subscriptions.map(subscription => (
-          <div key={subscription.id} className="research-subscription-card">
-            <div>
-              <div className="research-subscription-card__title-row">
-                <strong>{subscription.title}</strong>
-                <span className="research-badge">{subscriptionTypeLabelMap[subscription.type]}</span>
+          <div
+            key={subscription.id}
+            className="flex items-start justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50/60 p-3"
+          >
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <strong className="text-sm text-slate-800">{subscription.title}</strong>
+                <span className="rounded bg-white px-1.5 py-0.5 text-[10px] text-muted">
+                  {subscriptionTypeLabelMap[subscription.type]}
+                </span>
               </div>
-              <p className="research-subscription-card__query">{subscription.query}</p>
-              <div className="research-meta-row">
-                <span>今日候选论文 {subscription.paperCount}</span>
-                <span>最近更新 {new Date(subscription.lastUpdatedAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
-              </div>
+              <p className="mt-1 truncate text-xs text-muted">{subscription.query}</p>
             </div>
             <button
               type="button"
-              className={`research-toggle${subscription.enabled ? ' is-enabled' : ''}`}
               onClick={() => onToggleSubscription(subscription.id)}
+              className={clsx(
+                'shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium',
+                subscription.enabled
+                  ? 'bg-success/10 text-success'
+                  : 'bg-slate-200 text-slate-600',
+              )}
             >
               {subscription.enabled ? '已开启' : '已暂停'}
             </button>
@@ -77,34 +76,31 @@ export default function ResearchSubscriptionPanel({
         ))}
       </div>
 
-      <form className="research-form" onSubmit={handleSubmit}>
-        <div className="research-form__row">
-          <input
-            className="research-input"
-            value={title}
-            onChange={event => setTitle(event.target.value)}
-            placeholder="添加订阅名称，例如：Medical agent benchmarks"
-          />
+      <form className="mt-4 space-y-3 border-t border-slate-100 pt-4" onSubmit={handleSubmit}>
+        <label className="block text-xs font-medium text-slate-700">
+          标题
+          <input className={inputClass} value={title} onChange={e => setTitle(e.target.value)} />
+        </label>
+        <label className="block text-xs font-medium text-slate-700">
+          订阅词
+          <input className={inputClass} value={query} onChange={e => setQuery(e.target.value)} />
+        </label>
+        <label className="block text-xs font-medium text-slate-700">
+          类型
           <select
-            className="research-select"
+            className={inputClass}
             value={type}
-            onChange={event => setType(event.target.value as ResearchSubscription['type'])}
+            onChange={e => setType(e.target.value as ResearchSubscription['type'])}
           >
-            {Object.entries(subscriptionTypeLabelMap).map(([value, label]) => (
-              <option key={value} value={value}>{label}</option>
+            {Object.entries(subscriptionTypeLabelMap).map(([k, label]) => (
+              <option key={k} value={k}>{label}</option>
             ))}
           </select>
-        </div>
-        <div className="research-form__row">
-          <input
-            className="research-input"
-            value={query}
-            onChange={event => setQuery(event.target.value)}
-            placeholder="输入关键词、作者或期刊检索式"
-          />
-          <button type="submit" className="research-button research-button--primary">添加订阅</button>
-        </div>
+        </label>
+        <ResearchButton type="submit" className="w-full">
+          添加订阅
+        </ResearchButton>
       </form>
-    </section>
+    </SectionCard>
   )
 }

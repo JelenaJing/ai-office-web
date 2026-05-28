@@ -15,6 +15,8 @@ export interface ResearchPaperRef {
   abstract: string
   tags: string[]
   relevanceScore: number
+  citation?: string
+  doi?: string
 }
 
 export interface ResearchIdeaCard {

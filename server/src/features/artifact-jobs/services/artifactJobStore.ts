@@ -13,6 +13,31 @@ export interface ArtifactJobHtmlPresentationOptions {
   qualityMode: ArtifactJobQualityMode
 }
 
+export interface ArtifactJobImageStats {
+  planned: number
+  required?: number
+  optional?: number
+  resolvedMaxImages?: number
+  generated: number
+  placeholder: number
+  unfilled?: number
+  budgetSource?: string
+  providerConfigured?: boolean
+}
+
+export interface ArtifactJobSkillStats {
+  mode: 'fast-lite' | 'fast-template-driven' | 'high-original-five-skills'
+  requiredSkills?: string[]
+  loadedSkills?: string[]
+  missingSkills?: string[]
+  usesLiteSkill?: boolean
+  usesOriginalFiveSkills?: boolean
+}
+
+import { patchArtifactJobProgress, type ArtifactJobProgress } from './artifactJobProgress'
+
+export type { ArtifactJobProgress, ArtifactJobStage } from './artifactJobProgress'
+
 export interface ArtifactJobRecord {
   id: string
   userId: string
@@ -45,11 +70,20 @@ export interface ArtifactJobRecord {
   fallbackUsed?: boolean
   fallbackRenderer?: string
   opencodeTimedOut?: boolean
+  noOutputSoftTimeoutTriggered?: boolean
   timeoutMs?: number
   requestedTemplateSlug?: string
   selectedTemplateSlug?: string
+  appliedTemplateSlug?: string | null
   selectedStyleId?: string
   rendererMode?: string
+  fallbackReason?: string
+  templateStyleApplied?: 'full' | 'basic' | 'not-applied'
+  repairAttempted?: boolean
+  repairSucceeded?: boolean
+  imageStats?: ArtifactJobImageStats
+  skillStats?: ArtifactJobSkillStats
+  progress?: ArtifactJobProgress
 }
 
 export interface RegisterArtifactJobInput {
@@ -127,6 +161,14 @@ export function registerArtifactJob(input: RegisterArtifactJobInput): ArtifactJo
     message: '任务已排队',
     currentPhase: 'queued',
     cancellable: true,
+    progress: {
+      stage: 'queued',
+      label: '已加入生成队列',
+      percent: 0,
+      startedAt: new Date(now).toISOString(),
+      updatedAt: new Date(now).toISOString(),
+      elapsedSeconds: 0,
+    },
     createdAt: now,
     updatedAt: now,
   }
@@ -173,12 +215,19 @@ export function assertArtifactJobNotCanceled(jobId: string, phase?: string): voi
 export function requestArtifactJobCancel(jobId: string, reason = 'user_cancelled'): {
   job: ArtifactJobRecord
   alreadyFinished: boolean
+  message: string
 } | undefined {
   const job = jobs.get(jobId)
   if (!job) return undefined
 
-  if (isArtifactJobTerminalStatus(job.status)) {
-    return { job, alreadyFinished: true }
+  if (job.status === 'succeeded') {
+    return { job, alreadyFinished: true, message: 'already completed' }
+  }
+  if (job.status === 'failed') {
+    return { job, alreadyFinished: true, message: 'already failed' }
+  }
+  if (job.status === 'canceled') {
+    return { job, alreadyFinished: true, message: 'already cancelled' }
   }
 
   const canceledAt = new Date().toISOString()
@@ -191,15 +240,25 @@ export function requestArtifactJobCancel(jobId: string, reason = 'user_cancelled
     cancelReason: reason,
     cancellable: false,
     updatedAt: Date.now(),
+    progress: {
+      stage: 'canceled',
+      label: '已停止生成',
+      detail: '任务已被用户取消。',
+      percent: 100,
+      startedAt: job.progress?.startedAt ?? canceledAt,
+      updatedAt: canceledAt,
+      elapsedSeconds: job.progress?.elapsedSeconds,
+    } satisfies ArtifactJobProgress,
   } satisfies Partial<ArtifactJobRecord>)
 
   appendJobLog(job, `cancel requested: ${reason}`)
+  console.info(`htmlPptJobCancelled jobId=${jobId} reason=${reason}`)
 
   const runtime = runtimes.get(jobId)
   if (!runtime) {
     appendJobLog(job, 'runner terminated')
     appendJobLog(job, 'cleanup completed')
-    return { job, alreadyFinished: false }
+    return { job, alreadyFinished: false, message: 'cancelled' }
   }
 
   try {
@@ -211,14 +270,20 @@ export function requestArtifactJobCancel(jobId: string, reason = 'user_cancelled
   void Promise.resolve(runtime.terminate?.(reason))
     .then(() => {
       appendJobLog(job, 'runner terminated')
+      console.info(`opencodeProcessKilled jobId=${jobId}`)
     })
     .catch((error) => {
       const message = error instanceof Error ? error.message : String(error)
       appendJobLog(job, `runner terminate warning: ${message}`)
     })
     .finally(() => {
+      clearArtifactJobRuntime(jobId)
+      patchArtifactJobProgress(jobId, 'canceled', '已停止生成', {
+        detail: '任务已被用户取消。',
+        currentPhase: 'canceled',
+      })
       appendJobLog(job, 'cleanup completed')
     })
 
-  return { job, alreadyFinished: false }
+  return { job, alreadyFinished: false, message: 'cancelled' }
 }

@@ -129,6 +129,8 @@ export interface DocumentDraft {
     engine: string
     templateId?: string
     knowledgeRefs?: DocumentKnowledgeRef[]
+    taskType?: string
+    tone?: string
   }
 }
 
@@ -524,11 +526,15 @@ export async function startDocumentTask(input: {
   knowledgeRefs?: DocumentKnowledgeRefInput[]
   documentType?: DocumentType
   language?: DocumentLanguage
+  taskType?: string
+  outline?: string[]
+  tone?: string
 }): Promise<{ success: boolean; taskId: string; status: string }> {
   const payload = {
     ...input,
     documentType: input.documentType || 'report',
     language: input.language || 'zh-CN',
+    preferredOutline: input.outline,
   }
   return requestJson('/api/documents/start', {
     method: 'POST',
@@ -683,6 +689,8 @@ export async function saveEditableDocument(input: {
   documentDraft: DocumentDraft
   outline: DocumentDraft['outline']
   userFileId?: string | null
+  taskType?: string
+  tone?: string
 }): Promise<DocumentSaveResponse> {
   return requestJson(`/api/documents/${encodeURIComponent(input.documentId)}/save`, {
     method: 'POST',
@@ -693,8 +701,24 @@ export async function saveEditableDocument(input: {
       document: input.documentDraft,
       outline: input.outline,
       userFileId: input.userFileId || undefined,
+      taskType: input.taskType,
+      tone: input.tone,
     }),
   })
+}
+
+export async function fetchWorkbenchDocument(documentId: string): Promise<{
+  success: boolean
+  documentId: string
+  artifactId?: string
+  title: string
+  html: string
+  document: DocumentDraft
+  documentArtifact?: DocumentWorkbenchArtifact
+  outline: DocumentDraft['outline']
+  updatedAt?: string
+}> {
+  return requestJson(`/api/documents/${encodeURIComponent(documentId)}`)
 }
 
 /** 新建文稿首次保存：在服务端创建 document 记录并写入「我的文件」。 */

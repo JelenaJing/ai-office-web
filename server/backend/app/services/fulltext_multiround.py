@@ -14,9 +14,6 @@ import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from openai import OpenAI
-
-from app.config import DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, DEEPSEEK_MODEL
 from app.services import unified_llm
 
 logger = logging.getLogger(__name__)
@@ -52,18 +49,6 @@ def split_into_chunks(text: str, cfg: ChunkingConfig) -> List[str]:
     return chunks
 
 
-def _client() -> OpenAI:
-    return OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
-
-
-def _strip_fence(text: str) -> str:
-    t = (text or "").strip()
-    if t.startswith("```"):
-        t = re.sub(r"^```(?:json)?\n?", "", t)
-        t = re.sub(r"\n?```$", "", t)
-    return t.strip()
-
-
 def synthesize_json(
     *,
     system: str,
@@ -71,24 +56,13 @@ def synthesize_json(
     max_tokens: int = 2500,
     temperature: float = 0.2,
 ) -> Dict[str, Any]:
-    """
-    Ask model to return JSON. Best-effort parse; falls back to {"raw": "..."}.
-    """
-    client = _client()
-    resp = client.chat.completions.create(
-        model=DEEPSEEK_MODEL,
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
+    """Ask model to return JSON via unified_llm (same rules as Express ai-gateway)."""
+    return unified_llm.synthesize_json(
+        system=system,
+        user=user,
         max_tokens=max_tokens,
         temperature=temperature,
     )
-    raw = _strip_fence(resp.choices[0].message.content or "")
-    try:
-        return json.loads(raw)
-    except Exception:
-        return {"raw": raw}
 
 
 def synthesize_ideas(all_chunk_ideas: List[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:

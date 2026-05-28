@@ -1,6 +1,8 @@
+import { patchArtifactJobProgress } from './artifactJobProgress'
 import {
   getArtifactJob,
   isArtifactJobCanceledError,
+  isArtifactJobCancellationRequested,
   updateArtifactJob,
 } from './artifactJobStore'
 import { recordArtifactJobFailure, runHtmlArtifactJob } from './opencodeHtmlArtifactRunner'
@@ -18,6 +20,15 @@ function scheduleNext(): void {
     enqueuedJobIds.delete(nextJobId)
     const job = getArtifactJob(nextJobId)
     if (!job || job.status !== 'queued') continue
+    if (isArtifactJobCancellationRequested(job.id)) {
+      updateArtifactJob(job.id, {
+        status: 'canceled',
+        message: '已停止生成',
+        currentPhase: 'canceled',
+        cancellable: false,
+      })
+      continue
+    }
 
     runningJobs += 1
       updateArtifactJob(job.id, {
@@ -26,11 +37,19 @@ function scheduleNext(): void {
         currentPhase: 'starting',
         cancellable: true,
       })
+      patchArtifactJobProgress(job.id, 'preparing', '正在准备生成工作区', {
+        currentPhase: 'starting',
+      })
 
       void runHtmlArtifactJob(job)
         .then((result) => {
           const latest = getArtifactJob(job.id)
           if (!latest || latest.status === 'canceled') return
+          const completedStage = result.fallbackUsed ? 'fallback' as const : 'completed' as const
+          const completedLabel = result.fallbackUsed
+            ? '高质量生成超时，已生成快速草稿'
+            : '生成完成'
+          patchArtifactJobProgress(job.id, completedStage, completedLabel)
           updateArtifactJob(job.id, {
             status: 'succeeded',
             message: result.message || 'HTML Artifact 生成完成',
@@ -45,8 +64,15 @@ function scheduleNext(): void {
             timeoutMs: result.timeoutMs,
             requestedTemplateSlug: result.requestedTemplateSlug,
             selectedTemplateSlug: result.selectedTemplateSlug,
+            appliedTemplateSlug: result.appliedTemplateSlug,
             selectedStyleId: result.selectedStyleId,
             rendererMode: result.rendererMode,
+            fallbackReason: result.fallbackReason,
+            templateStyleApplied: result.templateStyleApplied,
+            repairAttempted: result.repairAttempted,
+            repairSucceeded: result.repairSucceeded,
+            imageStats: latest?.imageStats,
+            skillStats: latest?.skillStats,
           })
         })
         .catch((error) => {
@@ -63,6 +89,9 @@ function scheduleNext(): void {
           }
           const message = error instanceof Error ? error.message : String(error)
           recordArtifactJobFailure(job, message)
+          patchArtifactJobProgress(job.id, 'failed', '生成失败', {
+            detail: message.slice(0, 200),
+          })
           updateArtifactJob(job.id, {
             status: 'failed',
             message,

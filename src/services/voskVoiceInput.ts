@@ -1,4 +1,9 @@
-// 语音识别 WebSocket API 地址，服务端接受 float32 PCM (16kHz) 二进制帧
+import {
+  startMeetingRealtimeSpeechInput,
+  supportsMeetingRealtimeSpeechInput,
+} from './meetingRealtimeSpeechInput'
+
+// Electron 主进程代理（旧 8123 路径）；Web 端优先走 meetingRealtimeSpeechInput（8600）
 const WS_VOICE_API_URL = 'wss://10.20.5.62:8123/ws'
 const SAMPLE_RATE = 16000
 const WS_CONNECT_TIMEOUT_MS = 10_000
@@ -339,6 +344,10 @@ export function supportsVoskVoiceInput(): boolean {
     return true
   }
 
+  if (supportsMeetingRealtimeSpeechInput()) {
+    return true
+  }
+
   if (shouldPreferBrowserSpeechRecognition()) {
     return true
   }
@@ -392,6 +401,17 @@ export async function startChineseVoskVoiceInput(
 ): Promise<VoskVoiceInputSession> {
   if (isVoskVoiceInputTestMode()) {
     return startSmokeVoskVoiceInput(handlers)
+  }
+
+  const isElectronRenderer = typeof window !== 'undefined' && Boolean(window.electronAPI?.voiceStart)
+
+  if (!isElectronRenderer && supportsMeetingRealtimeSpeechInput()) {
+    try {
+      return await startMeetingRealtimeSpeechInput(handlers)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      handlers.onStatusChange?.(`会议助手语音不可用，尝试备用方案…（${message}）`)
+    }
   }
 
   if (shouldPreferBrowserSpeechRecognition()) {

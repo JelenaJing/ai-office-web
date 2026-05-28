@@ -1,3 +1,4 @@
+import http from 'node:http'
 import express, { type Request, type Response, type NextFunction } from 'express'
 import cors from 'cors'
 import authRouter from './routes/auth'
@@ -19,11 +20,21 @@ import pptRouter from './features/ppt/routes'
 import imageRouter from './features/image/routes'
 import dataAnalysisRouter from './features/data-analysis/routes'
 import researchRouter from './features/research/routes'
+import scienceRelayRouter from './features/sciencerelay/routes'
+import { materialsPlatformProxy } from './features/materials-platform/proxy'
+import { calcServiceProxy } from './features/materials-platform/calcProxy'
 import reportRouter from './features/report/routes'
 import chatRouter from './features/chat/routes'
 import communicationRouter from './features/communication/routes'
 import skillCenterRouter from './features/skill-center/routes'
 import artifactJobsRouter from './features/artifact-jobs/routes'
+import documentStudioRouter, { documentsRouter as documentStudioDocumentsRouter } from './modules/document-studio/documentStudio.routes'
+import ai4scienceBatteryRouter from './modules/ai4science-battery/ai4scienceBattery.routes'
+import { ai4scienceProxy } from './features/ai4science/proxy'
+import {
+  attachSpeechRealtimeWsUpgrade,
+  speechRealtimeHttpProxy,
+} from './features/speech-realtime/proxy'
 import aiosSkillsRouter from './features/skills/routes'
 import integrationsRouter from './features/integrations/routes/contentHandoff'
 import {
@@ -43,6 +54,7 @@ import { bootstrapWorkspaceForUser } from './lib/workspaceAccess'
 import { purgeExpiredArtifacts } from './artifacts/ArtifactStore'
 import { purgeExpiredHtmlArtifacts } from './features/artifact-jobs/services/htmlArtifactStore'
 import { getEmailAccount, maskAccount } from './features/email/services/emailStore'
+import { logHtmlPptHighQualitySkillPreflight } from './features/artifact-jobs/services/htmlPresentationHighQualitySkills'
 
 const app = express()
 const PORT = Number(process.env.PORT ?? 3001)
@@ -79,6 +91,8 @@ app.use(
       'http://localhost:4173',
       'http://127.0.0.1:5173',
       'http://127.0.0.1:4173',
+      'https://localhost:5173',
+      'https://127.0.0.1:5173',
       ...(process.env.WEB_ORIGIN ? [process.env.WEB_ORIGIN] : []),
     ],
   }),
@@ -87,6 +101,9 @@ app.use(
 // ── Global middleware ──────────────────────────────────────────────────────────
 app.use('/api', globalRateLimit)
 
+// 会议助手 FunASR WebSocket（/api/speech-realtime → 8600）
+app.use(speechRealtimeHttpProxy)
+
 // Skill runs first — must not pass through the 30s /api timeout below
 app.use('/api/skills/store', storeRouter)
 app.use('/api/skills', timeoutMiddleware(SKILL_TIMEOUT_MS), skillsRouter)
@@ -94,11 +111,18 @@ app.use('/api/skills', timeoutMiddleware(SKILL_TIMEOUT_MS), skillsRouter)
 // Document routes include LLM-heavy operations (paper workflow) — give them
 // the same long timeout as skills.  Must be registered BEFORE the 30 s catch-all.
 app.use('/api/document', timeoutMiddleware(SKILL_TIMEOUT_MS), documentRouter)
+app.use('/api', timeoutMiddleware(SKILL_TIMEOUT_MS), documentStudioRouter)
+app.use('/api/documents', timeoutMiddleware(SKILL_TIMEOUT_MS), documentStudioDocumentsRouter)
 app.use('/api/documents', timeoutMiddleware(SKILL_TIMEOUT_MS), documentWorkbenchRouter)
 app.use('/api/ppt', timeoutMiddleware(SKILL_TIMEOUT_MS), pptRouter)
 app.use('/api/image', timeoutMiddleware(SKILL_TIMEOUT_MS), imageRouter)
 app.use('/api/data-analysis', timeoutMiddleware(SKILL_TIMEOUT_MS), dataAnalysisRouter)
+app.use('/api/ai4science/battery', timeoutMiddleware(SKILL_TIMEOUT_MS), ai4scienceBatteryRouter)
+app.use('/ai4science/api', timeoutMiddleware(SKILL_TIMEOUT_MS), ai4scienceProxy)
 app.use('/api/research', timeoutMiddleware(SKILL_TIMEOUT_MS), researchRouter)
+app.use('/api/sciencerelay', timeoutMiddleware(SKILL_TIMEOUT_MS), scienceRelayRouter)
+app.use('/calc', timeoutMiddleware(SKILL_TIMEOUT_MS), calcServiceProxy)
+app.use('/api', timeoutMiddleware(SKILL_TIMEOUT_MS), materialsPlatformProxy)
 app.use('/api/work-report', timeoutMiddleware(SKILL_TIMEOUT_MS), reportRouter)
 app.use('/api/chat', timeoutMiddleware(SKILL_TIMEOUT_MS), chatRouter)
 app.use('/api/skill-center', timeoutMiddleware(SKILL_TIMEOUT_MS), skillCenterRouter)
@@ -215,11 +239,16 @@ function runArtifactRetentionCleanup(): void {
 
 const ARTIFACT_RETENTION_INTERVAL_MS = 6 * 60 * 60 * 1000
 
-app.listen(PORT, '0.0.0.0', () => {
+const httpServer = http.createServer(app)
+attachSpeechRealtimeWsUpgrade(httpServer)
+
+httpServer.listen(PORT, '0.0.0.0', () => {
   runArtifactRetentionCleanup()
   setInterval(runArtifactRetentionCleanup, ARTIFACT_RETENTION_INTERVAL_MS)
+  const speechBase = process.env.SPEECH_REALTIME_HTTP_BASE ?? 'http://10.20.5.62:8600'
   console.log(`\n🚀 AIOS server running on http://0.0.0.0:${PORT}`)
-  console.log(`   AccountCenter proxy → ${AC_URL}\n`)
+  console.log(`   AccountCenter proxy → ${AC_URL}`)
+  console.log(`   Speech realtime WS  → ${speechBase} (via /api/speech-realtime)\n`)
   const pptEngine = process.env.PPT_ENGINE === 'builtin' ? 'builtin' : 'minimax_pptx_generator'
   const pptFallback = process.env.PPT_ENGINE_FALLBACK === 'none' ? 'none' : 'builtin'
   const documentEngine = process.env.DOCUMENT_ENGINE === 'builtin' ? 'builtin' : 'minimax_docx'
@@ -232,4 +261,5 @@ app.listen(PORT, '0.0.0.0', () => {
   console.info(`[ppt-runtime] fallback=${pptFallback}`)
   console.info(`[ppt-runtime] env.PPT_ENGINE=${process.env.PPT_ENGINE ?? '(not set, defaults to minimax_pptx_generator)'}`)
   console.info(`[ppt-runtime] env.PPT_ENGINE_FALLBACK=${process.env.PPT_ENGINE_FALLBACK ?? '(not set, defaults to builtin)'}`)
+  logHtmlPptHighQualitySkillPreflight()
 })

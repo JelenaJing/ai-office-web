@@ -7,14 +7,26 @@ import {
   getArtifactJob,
   registerArtifactJob,
   requestArtifactJobCancel,
+  updateArtifactJob,
 } from './services/artifactJobStore'
 import { prepareArtifactJobWorkspace } from './services/opencodeHtmlArtifactRunner'
 import { getSkill } from '../skills/skillRegistry'
 import {
+  getTemplateThumbnailFile,
+  hasTemplateThumbnail,
+  isKnownHtmlPresentationTemplateSlug,
   listAvailableHtmlPresentationTemplates,
   normalizeHtmlPresentationJobOptions,
 } from './services/htmlPresentationTemplates'
-import { resolveTaskTimeoutMs } from '../../lib/taskTimeouts'
+import {
+  assertFastTemplateSkillsPreflight,
+  assertHtmlPptHighQualitySkillsPreflight,
+} from './services/htmlPresentationHighQualitySkills'
+import {
+  logHtmlPptTimeoutConfig,
+  readArtifactJobLogTail,
+  resolveHtmlPptOpenCodeTimeoutMs,
+} from './services/artifactJobProgress'
 
 const router = Router()
 
@@ -22,7 +34,7 @@ const ALLOWED_TYPES = ['html', 'html_presentation'] as const
 type AllowedType = (typeof ALLOWED_TYPES)[number]
 
 function sendNotFound(res: Response): void {
-  res.status(404).json({ success: false, error: '任务不存在或已过期' })
+  res.status(404).json({ success: false, ok: false, reason: 'not_found', error: '任务不存在或已过期' })
 }
 
 function sendForbidden(res: Response): void {
@@ -40,10 +52,44 @@ function normalizeInputMarkdown(value: unknown): string {
 router.get('/html-presentation/templates', async (req, res) => {
   const userId = await requireAccountUser(req, res)
   if (!userId) return
+  const templates = listAvailableHtmlPresentationTemplates().map((template) => ({
+    ...template,
+    id: template.slug,
+    description: template.tagline,
+    thumbnailUrl: hasTemplateThumbnail(template.slug)
+      ? `/api/artifact-jobs/html-presentation/templates/${encodeURIComponent(template.slug)}/thumbnail`
+      : undefined,
+  }))
   res.json({
     success: true,
-    templates: listAvailableHtmlPresentationTemplates(),
+    templates,
   })
+})
+
+router.get('/html-presentation/templates/:templateSlug/thumbnail', async (req, res) => {
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+  const templateSlug = decodeURIComponent(String(req.params.templateSlug || '')).trim()
+  if (!/^[a-z0-9_-]+$/i.test(templateSlug)) {
+    return res.status(400).json({ success: false, error: 'invalid template slug' })
+  }
+  const templates = listAvailableHtmlPresentationTemplates()
+  const exists = templates.some((t) => t.slug === templateSlug)
+  if (!exists) {
+    return res.status(404).json({ success: false, error: 'template not found' })
+  }
+  const file = getTemplateThumbnailFile(templateSlug)
+  if (!file) {
+    return res.status(404).json({ success: false, error: 'thumbnail not found' })
+  }
+  const contentType = file.ext === 'png'
+    ? 'image/png'
+    : file.ext === 'webp'
+      ? 'image/webp'
+      : 'image/jpeg'
+  res.setHeader('Content-Type', contentType)
+  res.setHeader('Cache-Control', 'public, max-age=86400')
+  return res.sendFile(file.path)
 })
 
 router.post('/', async (req, res) => {
@@ -59,6 +105,8 @@ router.post('/', async (req, res) => {
   const htmlPresentationOptions = normalizeHtmlPresentationJobOptions({
     ...(req.body?.htmlPresentationOptions && typeof req.body.htmlPresentationOptions === 'object' ? req.body.htmlPresentationOptions : {}),
     templateSlug: req.body?.templateSlug,
+    templateId: req.body?.templateId,
+    template: req.body?.template,
     enableImages: req.body?.enableImages,
     maxImages: req.body?.maxImages,
     qualityMode: req.body?.qualityMode,
@@ -71,6 +119,15 @@ router.post('/', async (req, res) => {
   if (type === 'html_presentation' && !skillId) {
     res.status(400).json({ success: false, error: 'type=html_presentation 需要提供 skillId' })
     return
+  }
+  if (type === 'html_presentation' && htmlPresentationOptions.templateSlug && !isKnownHtmlPresentationTemplateSlug(htmlPresentationOptions.templateSlug)) {
+    res.status(400).json({ success: false, error: `Unknown HTML Slides template: ${htmlPresentationOptions.templateSlug}` })
+    return
+  }
+  if (type === 'html_presentation') {
+    console.info(
+      `htmlPptTemplateRequest templateSlug=${htmlPresentationOptions.templateSlug || ''} qualityMode=${htmlPresentationOptions.qualityMode}`,
+    )
   }
   if (!prompt) {
     res.status(400).json({ success: false, error: 'prompt 不能为空' })
@@ -91,6 +148,14 @@ router.post('/', async (req, res) => {
   }
 
   try {
+    if (type === 'html_presentation') {
+      if (htmlPresentationOptions.qualityMode === 'high') {
+        assertHtmlPptHighQualitySkillsPreflight()
+      } else {
+        assertFastTemplateSkillsPreflight()
+      }
+    }
+
     const jobId = randomUUID()
     const workspace = prepareArtifactJobWorkspace({
       jobId,
@@ -113,30 +178,42 @@ router.post('/', async (req, res) => {
       logPath: workspace.logPath,
       errorPath: workspace.errorPath,
     })
-    const timeoutMs = htmlPresentationOptions.enableImages
-      ? resolveTaskTimeoutMs('image')
-      : resolveTaskTimeoutMs(type === 'html_presentation' ? 'html_ppt' : 'default')
-    console.info(`[artifact-job] jobId=${job.id} type=${job.type} skillId=${job.skillId || ''} status=${job.status} timeoutMs=${timeoutMs} startedAt=${new Date(job.createdAt).toISOString()}`)
+    if (type === 'html_presentation') {
+      const timeoutConfig = resolveHtmlPptOpenCodeTimeoutMs({ qualityMode: htmlPresentationOptions.qualityMode })
+      logHtmlPptTimeoutConfig(htmlPresentationOptions.qualityMode)
+      updateArtifactJob(job.id, { timeoutMs: timeoutConfig.timeoutMs })
+    }
+    const responseJob = getArtifactJob(job.id) ?? job
+    console.info(`[artifact-job] jobId=${responseJob.id} type=${responseJob.type} skillId=${responseJob.skillId || ''} status=${responseJob.status} qualityMode=${htmlPresentationOptions.qualityMode} timeoutMs=${responseJob.timeoutMs ?? 'n/a'} startedAt=${new Date(responseJob.createdAt).toISOString()}`)
     enqueueArtifactJob(job.id)
     res.status(202).json({
       success: true,
-      jobId: job.id,
-      status: job.status,
-      type: job.type,
-      skillId: job.skillId,
-      htmlPresentationOptions: job.htmlPresentationOptions,
-      message: job.message,
-      currentPhase: job.currentPhase,
-      cancellable: job.cancellable,
-      warning: job.warning,
-      fallbackUsed: job.fallbackUsed,
-      fallbackRenderer: job.fallbackRenderer,
-      opencodeTimedOut: job.opencodeTimedOut,
-      timeoutMs: job.timeoutMs,
-      requestedTemplateSlug: job.requestedTemplateSlug,
-      selectedTemplateSlug: job.selectedTemplateSlug,
-      selectedStyleId: job.selectedStyleId,
-      rendererMode: job.rendererMode,
+      jobId: responseJob.id,
+      status: responseJob.status,
+      type: responseJob.type,
+      skillId: responseJob.skillId,
+      htmlPresentationOptions: responseJob.htmlPresentationOptions,
+      message: responseJob.message,
+      currentPhase: responseJob.currentPhase,
+      cancellable: responseJob.cancellable,
+      warning: responseJob.warning,
+      fallbackUsed: responseJob.fallbackUsed,
+      fallbackRenderer: responseJob.fallbackRenderer,
+      opencodeTimedOut: responseJob.opencodeTimedOut,
+      noOutputSoftTimeoutTriggered: responseJob.noOutputSoftTimeoutTriggered,
+      timeoutMs: responseJob.timeoutMs,
+      requestedTemplateSlug: responseJob.requestedTemplateSlug,
+      selectedTemplateSlug: responseJob.selectedTemplateSlug,
+      appliedTemplateSlug: responseJob.appliedTemplateSlug,
+      selectedStyleId: responseJob.selectedStyleId,
+      rendererMode: responseJob.rendererMode,
+      fallbackReason: responseJob.fallbackReason,
+      templateStyleApplied: responseJob.templateStyleApplied,
+      repairAttempted: responseJob.repairAttempted,
+      repairSucceeded: responseJob.repairSucceeded,
+      imageStats: responseJob.imageStats,
+      skillStats: responseJob.skillStats,
+      progress: responseJob.progress,
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
@@ -172,19 +249,28 @@ router.get('/:jobId', async (req, res) => {
     fallbackUsed: job.fallbackUsed,
     fallbackRenderer: job.fallbackRenderer,
     opencodeTimedOut: job.opencodeTimedOut,
+    noOutputSoftTimeoutTriggered: job.noOutputSoftTimeoutTriggered,
     timeoutMs: job.timeoutMs,
     artifactId: job.artifactId,
     artifactFileUrl: job.artifactFileUrl,
     requestedTemplateSlug: job.requestedTemplateSlug,
     selectedTemplateSlug: job.selectedTemplateSlug,
+    appliedTemplateSlug: job.appliedTemplateSlug,
     selectedStyleId: job.selectedStyleId,
     rendererMode: job.rendererMode,
+    fallbackReason: job.fallbackReason,
+    templateStyleApplied: job.templateStyleApplied,
+    repairAttempted: job.repairAttempted,
+    repairSucceeded: job.repairSucceeded,
     cancelRequestedAt: job.cancelRequestedAt,
     canceledAt: job.canceledAt,
     cancelReason: job.cancelReason,
     runnerPid: job.runnerPid,
     runnerProcessGroupId: job.runnerProcessGroupId,
     partialOutput: job.partialOutput,
+    imageStats: job.imageStats,
+    skillStats: job.skillStats,
+    progress: job.progress,
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
   })
@@ -215,11 +301,14 @@ router.post('/:jobId/cancel', async (req, res) => {
   res.setHeader('Cache-Control', 'no-store')
   res.json({
     success: true,
+    ok: true,
     jobId: result.job.id,
     status: result.job.status,
+    message: result.message,
     cancelRequestedAt: result.job.cancelRequestedAt,
     canceledAt: result.job.canceledAt,
     alreadyFinished: result.alreadyFinished,
+    progress: result.job.progress,
   })
 })
 
@@ -235,11 +324,21 @@ router.get('/:jobId/logs', async (req, res) => {
     sendForbidden(res)
     return
   }
+  const limitRaw = typeof req.query.limit === 'string' ? Number.parseInt(req.query.limit, 10) : 10
+  const limit = Number.isFinite(limitRaw) ? Math.min(50, Math.max(1, limitRaw)) : 10
+  const entries = readArtifactJobLogTail(job.logPath, limit)
+  let logs = ''
+  if (fs.existsSync(job.logPath)) {
+    const full = fs.readFileSync(job.logPath, 'utf-8')
+    logs = full.length > 80_000 ? full.slice(-80_000) : full
+  }
+
   res.setHeader('Cache-Control', 'no-store')
   res.json({
     success: true,
     jobId: job.id,
-    logs: fs.existsSync(job.logPath) ? fs.readFileSync(job.logPath, 'utf-8') : '',
+    logs,
+    entries,
     error: job.error,
     updatedAt: job.updatedAt,
   })

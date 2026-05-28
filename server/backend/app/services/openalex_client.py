@@ -3,12 +3,54 @@ OpenAlex客户端服务
 直接实现OpenAlex搜索功能，不依赖NFTCORE
 """
 import logging
+import re
 import requests
 from requests.exceptions import RequestException
 from typing import List, Dict, Optional
 from datetime import date
 
 logger = logging.getLogger(__name__)
+
+# Strip from Idea/Intro search strings — long queries hurt OpenAlex recall.
+_OPENALEX_NOISE_PATTERNS = [
+    re.compile(p, re.IGNORECASE)
+    for p in (
+        r"\b(19|20)\d{2}\b",
+        r"\bNature\s+Communications\b",
+        r"\bNature\b",
+        r"\bScience\b",
+        r"\bCell\b",
+        r"\bPNAS\b",
+        r"\bACS\b",
+    )
+]
+
+
+def clamp_openalex_search_query(query: str, max_words: int = 6) -> str:
+    """Keep a short OpenAlex `search` string (few English content words)."""
+    q = " ".join((query or "").split())
+    if not q:
+        return q
+    words = q.split()
+    if len(words) <= max_words:
+        return q
+    return " ".join(words[:max_words])
+
+
+def normalize_openalex_search_query(raw: str) -> str:
+    """Remove years/journal names; prefer first short English phrase if comma-separated."""
+    q = " ".join((raw or "").split())
+    if not q:
+        return q
+    for pat in _OPENALEX_NOISE_PATTERNS:
+        q = pat.sub(" ", q)
+    q = re.sub(r"[，,;；]+", " ", q)
+    q = " ".join(q.split())
+    # If mixed CJK + Latin, keep Latin tokens (OpenAlex works best in English).
+    latin = re.findall(r"[A-Za-z][A-Za-z0-9\-]{1,}", q)
+    if latin:
+        return clamp_openalex_search_query(" ".join(latin), max_words=6)
+    return clamp_openalex_search_query(q, max_words=6)
 
 
 class OpenAlexFetcher:
@@ -217,6 +259,7 @@ class OpenAlexClient:
         Returns:
             论文列表
         """
+        topic = normalize_openalex_search_query(topic)
         logger.info(f"[OpenAlex] Starting paper search, topic='{topic}', max_results={max_results}")
         results = self.fetcher.search_works(topic, max_results=max_results)
         logger.info(f"[OpenAlex] Search completed, returned {len(results)} results")

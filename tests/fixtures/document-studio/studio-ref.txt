@@ -1,0 +1,2 @@
+STUDIO_E2E_TXT_MARKER_XYZZY
+AI Office attachment reference line.

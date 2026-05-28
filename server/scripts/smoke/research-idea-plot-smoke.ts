@@ -5,7 +5,8 @@
  *   npm run smoke:research-idea-plot
  *
  * Env:
- *   PAPER_REMAKE_BASE_URL (default http://127.0.0.1:8020)
+ *   PAPER_REMAKE_BASE_URL (default http://127.0.0.1:8020，测试栈用 18020)
+ *   RESEARCH_SMOKE_BFF_BASE (default http://127.0.0.1:3001，测试栈用 13001)
  *   RESEARCH_SMOKE_SKIP_IDEA=1  — skip idea LLM call
  */
 

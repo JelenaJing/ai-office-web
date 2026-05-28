@@ -1,0 +1,14 @@
+# Research / Paper Remake FastAPI 后端（conda）
+# 创建: conda env create -f environment.yml
+# 更新: conda env update -f environment.yml --prune
+name: aios-research-backend
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - numpy>=1.24
+  - pandas>=2.0
+  - matplotlib>=3.8
+  - pillow>=10
+  - openpyxl>=3.1

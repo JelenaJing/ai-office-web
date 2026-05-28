@@ -1,0 +1,178 @@
+.ai4scienceBattery {
+  color-scheme: light;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji",
+    "Segoe UI Emoji";
+  background: #ffffff;
+  color: #111827;
+  padding: 16px;
+  min-height: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: auto;
+}
+
+.ai4scienceBattery * {
+  box-sizing: border-box;
+}
+
+.ai4scienceBattery .topBar {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ai4scienceBattery .title {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.ai4scienceBattery .subtitle {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.ai4scienceBattery .layout {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1.25fr 1fr;
+  gap: 12px;
+}
+
+.ai4scienceBattery .col {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ai4scienceBattery .card {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 12px;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.ai4scienceBattery .cardHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.ai4scienceBattery .cardTitle {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.ai4scienceBattery .cardHint {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.ai4scienceBattery .row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ai4scienceBattery .btn {
+  border: 1px solid #d1d5db;
+  background: #f9fafb;
+  padding: 6px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.ai4scienceBattery .btnPrimary {
+  border: 1px solid #2563eb;
+  background: #2563eb;
+  color: white;
+}
+
+.ai4scienceBattery .btnDanger {
+  border: 1px solid #ef4444;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.ai4scienceBattery .input,
+.ai4scienceBattery .select {
+  border: 1px solid #d1d5db;
+  padding: 6px 10px;
+  border-radius: 10px;
+  min-width: 140px;
+}
+
+.ai4scienceBattery .plotWrap {
+  height: 420px;
+}
+
+.ai4scienceBattery .plotWrapTall {
+  height: 320px;
+}
+
+.ai4scienceBattery .reportBody {
+  min-height: 240px;
+  border: 1px dashed #e5e7eb;
+  border-radius: 12px;
+  background: #fafafa;
+  padding: 12px;
+  font-size: 13px;
+  line-height: 1.65;
+  color: #374151;
+  overflow: auto;
+}
+
+.ai4scienceBattery .reportBody h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  color: #111827;
+}
+
+.ai4scienceBattery .reportBody ul {
+  margin: 6px 0 12px;
+  padding-left: 18px;
+}
+
+.ai4scienceBattery .reportBody strong {
+  color: #111827;
+}
+
+.ai4scienceBattery .reportMarkdown h2,
+.ai4scienceBattery .reportMarkdown h3 {
+  margin: 12px 0 8px;
+  font-size: 15px;
+  color: #111827;
+}
+
+.ai4scienceBattery .reportMarkdown p {
+  margin: 6px 0;
+  line-height: 1.55;
+}
+
+.ai4scienceBattery .reportMarkdown table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 13px;
+}
+
+.ai4scienceBattery .reportMarkdown th,
+.ai4scienceBattery .reportMarkdown td {
+  border: 1px solid #e5e7eb;
+  padding: 6px 8px;
+  text-align: left;
+}
+
+@media (max-width: 1200px) {
+  .ai4scienceBattery .layout {
+    grid-template-columns: 1fr;
+  }
+}

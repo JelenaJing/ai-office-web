@@ -27,6 +27,8 @@ export interface CandidateTemplateRecord {
   slug: string
   name: string
   tagline: string
+  description?: string
+  thumbnailUrl?: string
   score: number
   mood: string[]
   occasion: string[]
@@ -43,7 +45,24 @@ export interface TemplateProfileRecord {
   templateSlug: string
   templateName: string
   templateFile: string
-  rendererMode: 'beautiful-template' | 'html-ppt-beautiful-fallback' | 'generic-fallback'
+  rendererMode:
+    | 'opencode-template-driven-high'
+    | 'opencode-template-driven-fast'
+    | 'opencode-template-driven'
+    | 'safe-fast-renderer'
+    | 'beautiful-template-adapter-fast'
+    | 'beautiful-template-adapter-retemplate'
+    | 'beautiful-template-adapter-fallback'
+    | 'beautiful-template-adapter'
+    | 'beautiful-template'
+    | 'html-ppt-beautiful-fallback'
+    | 'generic-fallback'
+  fallbackUsed?: boolean
+  fallbackReason?: string
+  templateStyleApplied?: 'full' | 'basic' | 'not-applied'
+  repairAttempted?: boolean
+  repairSucceeded?: boolean
+  blankSlideFallbackCount?: number
   availableLayouts: string[]
   colorScheme: string
   density: string
@@ -51,6 +70,10 @@ export interface TemplateProfileRecord {
   avoidFor: string[]
   visualRules: string[]
   warning?: string
+  requestedTemplateSlug?: string
+  appliedTemplateSlug?: string | null
+  templateLocked?: boolean
+  templateSourceKind?: 'user-selected' | 'auto-selected' | 'fallback'
   imagePolicy: {
     maxImages: number
     fallback: 'svg-placeholder'
@@ -61,6 +84,8 @@ export interface TemplateSelectionResult {
   selectedTemplateSlug: string
   candidateTemplateSlugs: string[]
   fallbackUsed: boolean
+  templateLocked: boolean
+  requestedTemplateSlug?: string
   selectedTemplate: CandidateTemplateRecord
   candidateTemplates: CandidateTemplateRecord[]
   templateProfile: TemplateProfileRecord
@@ -74,6 +99,7 @@ interface TemplateIndexPayload {
 
 const BEAUTIFUL_TEMPLATES_INDEX = '/data/darebug/aios-skills/beautiful-html-templates/index.json'
 const BEAUTIFUL_TEMPLATES_ROOT = '/data/darebug/aios-skills/beautiful-html-templates/templates'
+const BEAUTIFUL_TEMPLATES_SCREENSHOTS = '/data/darebug/aios-skills/beautiful-html-templates/screenshots'
 
 const FALLBACK_TEMPLATE_LIBRARY: CandidateTemplateRecord[] = [
   {
@@ -260,6 +286,91 @@ export function resolveBeautifulTemplateFile(slug: string): string {
   return fs.existsSync(candidate) ? candidate : ''
 }
 
+export function resolveBeautifulTemplateDir(slug: string): string {
+  const normalized = slug.trim()
+  if (!normalized) return ''
+  const candidate = path.join(BEAUTIFUL_TEMPLATES_ROOT, normalized)
+  return fs.existsSync(candidate) && fs.statSync(candidate).isDirectory() ? candidate : ''
+}
+
+export function prepareSelectedBeautifulTemplateForJob(input: {
+  jobDir: string
+  templateSlug: string
+  templateName?: string
+}): {
+  selectedTemplateDir: string
+  selectedTemplateDocPath: string
+  templateHtmlPath: string
+} {
+  const normalizedSlug = input.templateSlug.trim()
+  const templateDir = resolveBeautifulTemplateDir(normalizedSlug)
+  if (!templateDir) {
+    throw new Error(`Unknown beautiful-html-templates slug: ${normalizedSlug}`)
+  }
+
+  const selectedTemplateDir = path.join(input.jobDir, 'selected-template')
+  fs.mkdirSync(selectedTemplateDir, { recursive: true })
+
+  const referenceFiles = listBeautifulTemplateReferenceFiles(normalizedSlug)
+  for (const file of referenceFiles) {
+    fs.copyFileSync(file.sourcePath, path.join(selectedTemplateDir, file.relativePath))
+  }
+
+  const indexPath = path.join(BEAUTIFUL_TEMPLATES_ROOT, 'index.json')
+  if (fs.existsSync(indexPath) && fs.statSync(indexPath).isFile()) {
+    fs.copyFileSync(indexPath, path.join(selectedTemplateDir, 'templates-index.json'))
+  }
+
+  const templateHtmlPath = path.join(selectedTemplateDir, 'template.html')
+  const templateJsonPath = path.join(selectedTemplateDir, 'template.json')
+  const designMdPath = path.join(selectedTemplateDir, 'design.md')
+  const selectedTemplateDocPath = path.join(input.jobDir, 'SELECTED_TEMPLATE.md')
+  const displayName = input.templateName?.trim() || normalizedSlug
+
+  fs.writeFileSync(
+    selectedTemplateDocPath,
+    [
+      '# Selected HTML Slide Template',
+      '',
+      `- templateSlug: ${normalizedSlug}`,
+      `- templateName: ${displayName}`,
+      `- template.html: selected-template/template.html`,
+      `- template.json: ${fs.existsSync(templateJsonPath) ? 'selected-template/template.json' : '(missing)'}`,
+      `- design.md: ${fs.existsSync(designMdPath) ? 'selected-template/design.md' : '(missing)'}`,
+      `- templates index: ${fs.existsSync(path.join(selectedTemplateDir, 'templates-index.json')) ? 'selected-template/templates-index.json' : '(missing)'}`,
+      '',
+      'OpenCode must generate the final deck from selected-template/template.html and design.md.',
+      'Do not use a generic renderer or beautifulHtmlTemplateAdapter for initial generation.',
+    ].join('\n'),
+    'utf-8',
+  )
+
+  return {
+    selectedTemplateDir,
+    selectedTemplateDocPath,
+    templateHtmlPath,
+  }
+}
+
+export function listBeautifulTemplateReferenceFiles(slug: string): Array<{ relativePath: string; sourcePath: string }> {
+  const templateDir = resolveBeautifulTemplateDir(slug)
+  if (!templateDir) return []
+  const files: Array<{ relativePath: string; sourcePath: string }> = []
+  const candidates = [
+    { relativePath: 'template.html', sourcePath: path.join(templateDir, 'template.html') },
+    { relativePath: 'template.json', sourcePath: path.join(templateDir, 'template.json') },
+    { relativePath: 'design.md', sourcePath: path.join(templateDir, 'design.md') },
+  ]
+  for (const item of candidates) {
+    if (fs.existsSync(item.sourcePath) && fs.statSync(item.sourcePath).isFile()) files.push(item)
+  }
+  const agentsPath = path.join(BEAUTIFUL_TEMPLATES_ROOT, 'AGENTS.md')
+  if (fs.existsSync(agentsPath) && fs.statSync(agentsPath).isFile()) {
+    files.push({ relativePath: 'AGENTS.md', sourcePath: agentsPath })
+  }
+  return files
+}
+
 export function listAvailableHtmlPresentationTemplates(): CandidateTemplateRecord[] {
   try {
     return loadBeautifulTemplateIndex()
@@ -270,10 +381,75 @@ export function listAvailableHtmlPresentationTemplates(): CandidateTemplateRecor
   }
 }
 
-function buildTemplateProfile(candidate: CandidateTemplateRecord, options: HtmlPresentationJobOptions, fallbackUsed: boolean): TemplateProfileRecord {
+const DIRECT_TEMPLATE_IMAGE_BASENAMES = [
+  'thumbnail',
+  'preview',
+  'cover',
+  'screenshot',
+]
+
+const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'webp']
+
+function safeSlug(slug: string): string {
+  return slug.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '')
+}
+
+function resolveExistingTemplateThumbnailPath(slug: string): string {
+  const normalized = safeSlug(slug)
+  if (!normalized) return ''
+
+  // 1) template dir local image files
+  const templateDir = path.join(BEAUTIFUL_TEMPLATES_ROOT, normalized)
+  for (const base of DIRECT_TEMPLATE_IMAGE_BASENAMES) {
+    for (const ext of IMAGE_EXTS) {
+      const p = path.join(templateDir, `${base}.${ext}`)
+      if (fs.existsSync(p)) return p
+    }
+  }
+
+  // 2) screenshots dir (prefer -1 as cover)
+  for (const ext of IMAGE_EXTS) {
+    const first = path.join(BEAUTIFUL_TEMPLATES_SCREENSHOTS, `${normalized}-1.${ext}`)
+    if (fs.existsSync(first)) return first
+  }
+  for (const ext of IMAGE_EXTS) {
+    for (const idx of [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) {
+      const alt = path.join(BEAUTIFUL_TEMPLATES_SCREENSHOTS, `${normalized}-${idx}.${ext}`)
+      if (fs.existsSync(alt)) return alt
+    }
+  }
+  return ''
+}
+
+export function hasTemplateThumbnail(slug: string): boolean {
+  return Boolean(resolveExistingTemplateThumbnailPath(slug))
+}
+
+export function getTemplateThumbnailFile(slug: string): { path: string; ext: string } | null {
+  const p = resolveExistingTemplateThumbnailPath(slug)
+  if (!p) return null
+  const ext = path.extname(p).slice(1).toLowerCase()
+  if (!IMAGE_EXTS.includes(ext)) return null
+  return { path: p, ext }
+}
+
+function buildTemplateProfile(
+  candidate: CandidateTemplateRecord,
+  options: HtmlPresentationJobOptions,
+  fallbackUsed: boolean,
+  lock?: {
+    requestedTemplateSlug?: string
+    templateLocked?: boolean
+    templateSourceKind?: TemplateProfileRecord['templateSourceKind']
+  },
+): TemplateProfileRecord {
   const bestFor = candidate.bestFor.length > 0 ? candidate.bestFor : uniqueStrings([...candidate.mood, ...candidate.occasion]).slice(0, 4)
   const avoidFor = candidate.avoidFor.length > 0 ? candidate.avoidFor : ['overcrowded slides', 'mismatched tone']
   const templateFile = fallbackUsed ? '' : resolveBeautifulTemplateFile(candidate.slug)
+  const requestedTemplateSlug = lock?.requestedTemplateSlug?.trim() || undefined
+  const templateLocked = Boolean(lock?.templateLocked)
+  const templateSourceKind = lock?.templateSourceKind
+    ?? (templateLocked ? 'user-selected' : (fallbackUsed ? 'fallback' : 'auto-selected'))
   return {
     templateSource: fallbackUsed ? 'html-ppt-beautiful-fallback' : 'beautiful-html-templates',
     templateSlug: candidate.slug,
@@ -291,10 +467,104 @@ function buildTemplateProfile(candidate: CandidateTemplateRecord, options: HtmlP
       `mood: ${candidate.mood.join(', ') || 'professional'}`,
       `density: ${candidate.density}`,
     ]).filter(Boolean),
+    requestedTemplateSlug,
+    appliedTemplateSlug: candidate.slug,
+    templateLocked,
+    templateSourceKind,
     imagePolicy: {
       maxImages: options.maxImages,
       fallback: 'svg-placeholder',
     },
+  }
+}
+
+export function findHtmlPresentationTemplateBySlug(slug: string): TemplateIndexEntry | undefined {
+  const normalized = slug.trim()
+  if (!normalized) return undefined
+  try {
+    return loadBeautifulTemplateIndex().find((entry) => entry.slug === normalized)
+  } catch {
+    return undefined
+  }
+}
+
+export function isKnownHtmlPresentationTemplateSlug(slug: string): boolean {
+  const normalized = slug.trim()
+  if (!normalized) return false
+  if (findHtmlPresentationTemplateBySlug(normalized)) return true
+  return FALLBACK_TEMPLATE_LIBRARY.some((entry) => entry.slug === normalized)
+}
+
+export function buildCandidateTemplatesSidecar(selection: TemplateSelectionResult): Record<string, unknown> {
+  if (selection.templateLocked) {
+    const requestedTemplateSlug = selection.requestedTemplateSlug || selection.selectedTemplateSlug
+    return {
+      locked: true,
+      requestedTemplateSlug,
+      selectedTemplateSlug: selection.selectedTemplateSlug,
+      fallbackUsed: selection.fallbackUsed,
+      candidates: selection.candidateTemplates.map((candidate) => ({
+        ...candidate,
+        slug: candidate.slug,
+        name: candidate.name,
+        source: 'user-selected',
+        selected: candidate.slug === selection.selectedTemplateSlug,
+      })),
+    }
+  }
+  return {
+    locked: false,
+    selectedTemplateSlug: selection.selectedTemplateSlug,
+    fallbackUsed: selection.fallbackUsed,
+    candidates: selection.candidateTemplates,
+  }
+}
+
+function resolveLockedTemplateSelection(
+  preferredSlug: string,
+  prompt: string,
+  inputMarkdown: string,
+  options: HtmlPresentationJobOptions,
+): TemplateSelectionResult {
+  const entry = findHtmlPresentationTemplateBySlug(preferredSlug)
+  if (entry) {
+    const selectedTemplate = buildCandidateRecord(entry, scoreTemplate(entry, prompt, inputMarkdown, preferredSlug))
+    return {
+      selectedTemplateSlug: entry.slug,
+      candidateTemplateSlugs: [entry.slug],
+      fallbackUsed: false,
+      templateLocked: true,
+      requestedTemplateSlug: preferredSlug,
+      selectedTemplate,
+      candidateTemplates: [selectedTemplate],
+      templateProfile: buildTemplateProfile(selectedTemplate, options, false, {
+        requestedTemplateSlug: preferredSlug,
+        templateLocked: true,
+        templateSourceKind: 'user-selected',
+      }),
+      selectionReason: `user-locked template ${entry.slug}`,
+    }
+  }
+
+  const fallbackCandidates = buildFallbackCandidates(options, preferredSlug)
+  const selectedTemplate = fallbackCandidates.find((candidate) => candidate.slug === preferredSlug)
+  if (!selectedTemplate) {
+    throw new Error(`Unknown HTML Slides template: ${preferredSlug}`)
+  }
+  return {
+    selectedTemplateSlug: selectedTemplate.slug,
+    candidateTemplateSlugs: [selectedTemplate.slug],
+    fallbackUsed: true,
+    templateLocked: true,
+    requestedTemplateSlug: preferredSlug,
+    selectedTemplate,
+    candidateTemplates: [selectedTemplate],
+    templateProfile: buildTemplateProfile(selectedTemplate, options, true, {
+      requestedTemplateSlug: preferredSlug,
+      templateLocked: true,
+      templateSourceKind: 'user-selected',
+    }),
+    selectionReason: `user-locked fallback template ${selectedTemplate.slug}`,
   }
 }
 
@@ -304,6 +574,9 @@ export function resolveTemplateSelection(input: {
   options: HtmlPresentationJobOptions
 }): TemplateSelectionResult {
   const preferredSlug = input.options.templateSlug?.trim() || undefined
+  if (preferredSlug) {
+    return resolveLockedTemplateSelection(preferredSlug, input.prompt, input.inputMarkdown, input.options)
+  }
 
   try {
     const entries = loadBeautifulTemplateIndex()
@@ -316,36 +589,33 @@ export function resolveTemplateSelection(input: {
       })
       .slice(0, 3)
 
-    const selectedTemplate = preferredSlug
-      ? (candidates.find((candidate) => candidate.slug === preferredSlug) ?? candidates[0])
-      : candidates[0]
-
+    const selectedTemplate = candidates[0]
     return {
       selectedTemplateSlug: selectedTemplate.slug,
       candidateTemplateSlugs: candidates.map((candidate) => candidate.slug),
       fallbackUsed: false,
+      templateLocked: false,
       selectedTemplate,
       candidateTemplates: candidates,
-      templateProfile: buildTemplateProfile(selectedTemplate, input.options, false),
-      selectionReason: preferredSlug
-        ? `templateSlug override selected ${selectedTemplate.slug}`
-        : `auto-selected ${selectedTemplate.slug} from beautiful-html-templates index`,
+      templateProfile: buildTemplateProfile(selectedTemplate, input.options, false, {
+        templateSourceKind: 'auto-selected',
+      }),
+      selectionReason: `auto-selected ${selectedTemplate.slug} from beautiful-html-templates index`,
     }
   } catch {
     const fallbackCandidates = buildFallbackCandidates(input.options, preferredSlug)
-    const selectedTemplate = preferredSlug
-      ? (fallbackCandidates.find((candidate) => candidate.slug === preferredSlug) ?? fallbackCandidates[0])
-      : fallbackCandidates[0]
+    const selectedTemplate = fallbackCandidates[0]
     return {
       selectedTemplateSlug: selectedTemplate.slug,
       candidateTemplateSlugs: fallbackCandidates.map((candidate) => candidate.slug),
       fallbackUsed: true,
+      templateLocked: false,
       selectedTemplate,
       candidateTemplates: fallbackCandidates,
-      templateProfile: buildTemplateProfile(selectedTemplate, input.options, true),
-      selectionReason: preferredSlug
-        ? `templateSlug override matched fallback template ${selectedTemplate.slug}`
-        : `beautiful-html-templates unavailable, using fallback template ${selectedTemplate.slug}`,
+      templateProfile: buildTemplateProfile(selectedTemplate, input.options, true, {
+        templateSourceKind: 'fallback',
+      }),
+      selectionReason: `beautiful-html-templates unavailable, using fallback template ${selectedTemplate.slug}`,
     }
   }
 }
@@ -353,18 +623,24 @@ export function resolveTemplateSelection(input: {
 export function normalizeHtmlPresentationJobOptions(value: unknown): HtmlPresentationJobOptions {
   const input = (value && typeof value === 'object') ? (value as Record<string, unknown>) : {}
   const qualityMode = input.qualityMode === 'high' ? 'high' : 'fast'
-  const templateSlug = typeof input.templateSlug === 'string' && input.templateSlug.trim()
+  const rawTemplateSlug = typeof input.templateSlug === 'string' && input.templateSlug.trim()
     ? input.templateSlug.trim()
-    : undefined
+    : typeof input.templateId === 'string' && input.templateId.trim()
+      ? input.templateId.trim()
+      : typeof input.template === 'string' && input.template.trim()
+        ? input.template.trim()
+        : undefined
+  const templateSlug = rawTemplateSlug
   const enableImages = typeof input.enableImages === 'boolean' ? input.enableImages : qualityMode === 'high'
+  const hasRawMaxImages = Object.prototype.hasOwnProperty.call(input, 'maxImages')
   const rawMaxImages = typeof input.maxImages === 'number'
     ? input.maxImages
     : typeof input.maxImages === 'string'
       ? Number.parseInt(input.maxImages, 10)
-      : 3
-  const normalizedDefaultMaxImages = qualityMode === 'high' ? 3 : 0
-  const maxImages = Number.isFinite(rawMaxImages)
-    ? Math.max(0, Math.min(6, Math.trunc(rawMaxImages)))
+      : undefined
+  const normalizedDefaultMaxImages = qualityMode === 'high' ? 4 : 0
+  const maxImages = hasRawMaxImages && Number.isFinite(rawMaxImages)
+    ? Math.max(0, Math.min(8, Math.trunc(rawMaxImages as number)))
     : normalizedDefaultMaxImages
   return {
     templateSlug,

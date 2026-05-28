@@ -14,8 +14,8 @@ export const aiosManifest: FeatureManifest = {
   nav: {
     section: 'aios',
     label: 'AIOS 事项中心',
-    webVisible: true,
-    electronVisible: true,
+    webVisible: false,
+    electronVisible: false,
   },
   route: {
     section: 'aios',

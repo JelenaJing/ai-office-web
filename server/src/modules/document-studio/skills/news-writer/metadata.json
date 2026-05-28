@@ -1,0 +1,18 @@
+{
+  "id": "news-writer",
+  "name": "新闻稿生成",
+  "description": "根据活动信息和材料生成正式新闻稿",
+  "category": "document-generation",
+  "runner": "opencode",
+  "entryFile": "SKILL.md",
+  "version": "1.0.0",
+  "scope": ["document"],
+  "supportedDocumentTypes": ["news"],
+  "outputMode": "document_artifact",
+  "timeoutMs": 300000,
+  "materialize": { "mode": "copy", "include": ["SKILL.md", "templates/**"] },
+  "opencode": {
+    "skillName": "news-writer",
+    "permissions": { "skill": { "news-writer": "allow", "*": "deny" } }
+  }
+}

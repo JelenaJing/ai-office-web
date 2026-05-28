@@ -18,10 +18,17 @@ from typing import Any, Dict, List, Optional
 
 from openai import OpenAI
 
+# Ensure server/.env.local + dev/research-test.env are loaded (not only backend/.env).
+try:
+    import app.config  # noqa: F401
+except ImportError:
+    pass
+
 logger = logging.getLogger(__name__)
 
 KNOWN_PROVIDERS = frozenset({"openai", "qwen", "deepseek", "cuhk", "custom"})
 FALLBACK_MODEL = "gpt-4o-mini"
+DEFAULT_MAX_OUTPUT_TOKENS = 8192
 
 _BACKEND_ROOT = Path(__file__).resolve().parent.parent.parent
 _AI_CONFIG_PATH = _BACKEND_ROOT.parent.parent / "build" / "ai-config.json"
@@ -120,6 +127,14 @@ def get_openai_client() -> OpenAI:
 
 def get_model() -> str:
     return resolve_runtime().model
+
+
+def get_max_output_tokens() -> int:
+    """Upper bound for long completions (PDF clean, fulltext merge)."""
+    raw = (os.getenv("DEEPSEEK_MAX_OUTPUT_TOKENS") or "").strip()
+    if raw.isdigit():
+        return max(1, min(int(raw), 16384))
+    return DEFAULT_MAX_OUTPUT_TOKENS
 
 
 def _strip_json_fence(text: str) -> str:

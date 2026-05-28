@@ -216,6 +216,8 @@ export type DocumentDraft = {
     engine: string
     templateId?: string
     knowledgeRefs?: DocumentKnowledgeRef[]
+    taskType?: string
+    tone?: string
   }
 }
 

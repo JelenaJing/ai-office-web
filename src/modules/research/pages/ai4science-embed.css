@@ -1,0 +1,22 @@
+/* ai4science 嵌入科研模块：避免 100vh 撑破布局，与主站同页滚动 */
+.ai4science-embed.research-models-root {
+  min-height: min(78vh, 960px);
+  width: 100%;
+}
+
+.ai4science-embed .appShell {
+  height: auto;
+  min-height: min(78vh, 960px);
+  max-height: none;
+  padding: 12px 0 24px;
+}
+
+.ai4science-embed .layout {
+  min-height: 520px;
+}
+
+@media (max-width: 1100px) {
+  .ai4science-embed .layout {
+    grid-template-columns: 1fr;
+  }
+}

@@ -11,6 +11,7 @@ import {
   artifactDownloadFilename,
   artifactHasExport,
 } from '../../../utils/artifactDisplay'
+import { AssistantMarkdown } from '../../../modules/materials-research/components/assistant/AssistantMarkdown'
 
 // ─── Python env state machine ─────────────────────────────────────────────────
 type PythonEnvState = 'idle' | 'checking' | 'installing' | 'rebuilding' | 'ready' | 'failed'
@@ -22,6 +23,7 @@ const WEB_ENV_BANNER = {
 }
 
 const SPREADSHEET_EXTS = new Set(['xlsx', 'csv', 'xls'])
+const BATTERY_LIFE_MODEL_ID = 'battery_life_prediction_a'
 
 function isSpreadsheetEntry(f: FileEntry): boolean {
   return SPREADSHEET_EXTS.has(f.ext.toLowerCase())
@@ -438,6 +440,23 @@ export default function ExcelAnalysisWorkbench() {
     }
   }, [appendEnvLog, webArtifact])
 
+  const downloadBatteryExport = useCallback(async (exportFilename: string) => {
+    if (!webArtifact) return
+    const exists = webArtifact.exports?.some((e) => e.filename === exportFilename)
+    if (!exists) {
+      setLastError('未找到对应的导出文件，请稍后重试。')
+      return
+    }
+    try {
+      await platformApi.artifacts.download(webArtifact.id, exportFilename)
+      appendEnvLog(`[ok] 已下载 ${exportFilename}`)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      setLastError(`下载失败：${msg}`)
+      appendEnvLog(`[error] ${msg}`)
+    }
+  }, [appendEnvLog, webArtifact])
+
   // ── Run analysis ──────────────────────────────────────────────────────────
   const runAnalysis = useCallback(async () => {
     if (!activeWorkspacePath || !hasDataSource) return
@@ -464,6 +483,14 @@ export default function ExcelAnalysisWorkbench() {
           options: {
             dataModelId: selectedDataModelId.trim() || undefined,
             modelId: selectedDataModelId.trim() || undefined,
+          },
+          onProgress: (u) => {
+            // Stage animation in the banner (Web runtime only).
+            if (u.status === 'running' && u.stage) {
+              workbench.setGenerationStatus('running', `分析阶段：${u.stage}`)
+            } else if (u.status === 'running' && u.message) {
+              workbench.setGenerationStatus('running', u.message)
+            }
           },
         })
         let artifact = result.artifact
@@ -591,6 +618,15 @@ export default function ExcelAnalysisWorkbench() {
 
   const bannerCfg = webMode ? WEB_ENV_BANNER : ENV_BANNER[envState]
 
+  const webArtifactMeta = webArtifact?.metadata as Record<string, unknown> | undefined
+  const webAnalysisModelId = String(webArtifactMeta?.analysisModelId || '')
+  const isBatteryLifePrediction = webMode && webAnalysisModelId === BATTERY_LIFE_MODEL_ID
+  const batteryMarkdownPreview = isBatteryLifePrediction
+    ? String(webArtifactMeta?.markdownPreview || '')
+    : ''
+  const batteryHtmlUrl = isBatteryLifePrediction ? String(webArtifactMeta?.htmlUrl || '') : ''
+  const batteryN80 = isBatteryLifePrediction ? (webArtifactMeta?.n80 as Record<string, unknown> | undefined) : undefined
+
   return (
     <Shell data-testid="excel-analysis-workbench">
       {/* ── Python env status banner ── */}
@@ -700,6 +736,20 @@ export default function ExcelAnalysisWorkbench() {
             >
               不套用模型
             </ModelBtn>
+            {webMode ? (
+              <ModelBtn
+                type="button"
+                id={BATTERY_LIFE_MODEL_ID}
+                $active={selectedDataModelId === BATTERY_LIFE_MODEL_ID}
+                disabled={analysisRunning}
+                onClick={() => {
+                  setSelectedDataModelId(BATTERY_LIFE_MODEL_ID)
+                  window.dispatchEvent(new CustomEvent('open-ai4science-battery'))
+                }}
+              >
+                模型A：电池寿命预测
+              </ModelBtn>
+            ) : null}
             {plotDataModels.map((m) => (
               <ModelBtn
                 key={m.id}
@@ -714,14 +764,30 @@ export default function ExcelAnalysisWorkbench() {
           </ModelToggleRow>
           <HintLine>
             {webMode
-              ? (selectedDataModelId
-                ? 'Web 版已记录模型选择；服务器第一版分析暂不套用本地绘图模型脚本。'
-                : 'Web 版从资源中心选择已上传表格，由服务器生成 Markdown 分析报告。')
+              ? selectedDataModelId
+                ? selectedDataModelId === BATTERY_LIFE_MODEL_ID
+                  ? '已选择：模型A：电池寿命预测（将使用专用模型 Runner，生成 N80 指标、PNG 图表与交互式预测曲线）。'
+                  : 'Web 版已记录模型选择；服务器第一版分析暂不套用本地绘图模型脚本。'
+                : 'Web 版从资源中心选择已上传表格，由服务器生成 Markdown 分析报告。'
               : selectedDataModelId
                 ? `${plotDataModels.find((x) => x.id === selectedDataModelId)?.description || ''} 若下方「分析需求」为空，将直接使用模型随包内置绘图脚本，不再向大模型索要作图代码；填写需求后则按你的描述重新生成 Python 分析脚本（不复用历史脚本）。`
                 : '可选。套用模型时会在分析前预处理表格。'}
           </HintLine>
           <HintLine>支持 Excel（.xlsx / .xls）或 CSV，表头从 A1 开始。</HintLine>
+          {webMode && selectedDataModelId === BATTERY_LIFE_MODEL_ID ? (
+            <>
+              <HintLine>
+                数据格式说明（文件必须符合要求）：<br />
+                Excel：包含「25℃」与「45℃」两个 sheet；第 1 列为 Cycle；其余列为样本容量（E0039、E0040…）。<br />
+                CSV：仅支持四列（temperature、cycle、sample_id、capacity）。
+              </HintLine>
+              <FileActionsRow>
+                <PrimaryBtn type="button" onClick={() => void platformApi.dataAnalysis.downloadTemplate(BATTERY_LIFE_MODEL_ID)} disabled={analysisRunning}>
+                  下载数据模板
+                </PrimaryBtn>
+              </FileActionsRow>
+            </>
+          ) : null}
           {webMode && selectedWebFile ? (
             <FilePathLine>{selectedWebFile.name}</FilePathLine>
           ) : null}
@@ -741,21 +807,84 @@ export default function ExcelAnalysisWorkbench() {
               {webArtifact.title}
             </HintLine>
             {webSummary ? <HintLine>{webSummary}</HintLine> : null}
+            {isBatteryLifePrediction && batteryN80 ? (
+              <HintLine style={{ color: '#0f766e', fontWeight: 800 }}>
+                N80 指标：{JSON.stringify(batteryN80)}
+              </HintLine>
+            ) : null}
             {webImageUrls.length > 0 ? (
               <ChartGrid data-testid="data-analysis-image-results">
                 {webImageUrls.map((url, index) => (
                   <ChartCard key={`${url}-${index}`}>
-                    <ChartTitle>服务器生成图表 {index + 1}</ChartTitle>
+                    <ChartTitle>
+                      {isBatteryLifePrediction
+                        ? /capacity_decay_25C/i.test(url)
+                          ? '25℃ 容量衰减曲线'
+                          : /capacity_decay_45C/i.test(url)
+                            ? '45℃ 容量衰减曲线'
+                            : `电池寿命分析图表 ${index + 1}`
+                        : `服务器生成图表 ${index + 1}`}
+                    </ChartTitle>
                     <ChartImg src={url} alt={`服务器生成图表 ${index + 1}`} />
                   </ChartCard>
                 ))}
               </ChartGrid>
             ) : null}
+
+            {isBatteryLifePrediction ? (
+              <>
+                {batteryMarkdownPreview ? (
+                  <div style={{ marginTop: 12 }}>
+                    <Label>Markdown 报告</Label>
+                    <div style={{ padding: '10px 12px', border: '1px solid rgba(203, 214, 226, 0.95)', borderRadius: 12, background: '#ffffff', maxHeight: 260, overflow: 'auto' }}>
+                      <AssistantMarkdown content={batteryMarkdownPreview} />
+                    </div>
+                  </div>
+                ) : null}
+                {batteryHtmlUrl ? (
+                  <div style={{ marginTop: 12 }}>
+                    <Label>交互式预测曲线</Label>
+                    <iframe
+                      title="battery life prediction viewer"
+                      src={batteryHtmlUrl}
+                      style={{ width: '100%', height: 520, border: '1px solid rgba(203, 214, 226, 0.95)', borderRadius: 12, background: '#ffffff' }}
+                    />
+                  </div>
+                ) : null}
+              </>
+            ) : null}
             <HintLine>
               可在 <strong>资源中心 › 生成记录</strong> 查看（类型：表格分析）。
             </HintLine>
             <FileActionsRow style={{ marginTop: 8 }}>
-              {artifactHasExport(webArtifact) ? (
+              {isBatteryLifePrediction ? (
+                artifactHasExport(webArtifact) ? (
+                  <>
+                    <PrimaryBtn
+                      type="button"
+                      onClick={() => void downloadBatteryExport('report.md')}
+                    >
+                      下载 Markdown 报告
+                    </PrimaryBtn>
+                    <Btn
+                      type="button"
+                      onClick={() => void downloadBatteryExport('files/model_parameters.csv')}
+                      style={{ marginLeft: 8 }}
+                    >
+                      下载 模型参数 CSV
+                    </Btn>
+                    <Btn
+                      type="button"
+                      onClick={() => void downloadBatteryExport('result.json')}
+                      style={{ marginLeft: 8 }}
+                    >
+                      下载 结果 JSON
+                    </Btn>
+                  </>
+                ) : (
+                  <ErrorBox>分析完成但暂无可下载文件</ErrorBox>
+                )
+              ) : artifactHasExport(webArtifact) ? (
                 <PrimaryBtn type="button" onClick={() => void downloadWebReport()}>
                   下载分析报告
                 </PrimaryBtn>

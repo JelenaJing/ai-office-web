@@ -101,7 +101,6 @@ function renderPanelContent(
       return <WebFeatureComingSoon featureKey={featureKey} />
     }
     if (key === 'homework') return <WebFeatureComingSoon title="作业辅助" />
-    if (key === 'ai-class') return <WebFeatureComingSoon title="AI 课堂" />
     if (key === 'ai-forum') return <WebFeatureComingSoon title="AI 论坛" />
     if (key === 'daily-feed') return <WebFeatureComingSoon title="科学资讯" />
   }

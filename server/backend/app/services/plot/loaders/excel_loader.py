@@ -11,6 +11,7 @@ from typing import Optional
 import pandas as pd
 
 from .data_validator import DataValidator
+from .tabular_io import read_excel_from_path
 
 logger = logging.getLogger(__name__)
 
@@ -26,11 +27,10 @@ class ExcelLoader:
         if not path.exists():
             raise FileNotFoundError(f"Excel file not found: {path}")
 
-        df = pd.read_excel(path, sheet_name=sheet_name, **kwargs)
+        df = read_excel_from_path(path, sheet_name=sheet_name, **kwargs)
         ok, msg = self.validator.validate(df)
         if not ok:
             raise ValueError(f"Data validation failed: {msg}")
         df = self.validator.preprocess(df)
         logger.info("Loaded Excel: %s (shape=%s)", path, df.shape)
         return df
-

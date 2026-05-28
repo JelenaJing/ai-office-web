@@ -7,6 +7,7 @@ import { saveDocumentDraftDocxArtifact } from './documentArtifactService'
 import { runBuiltinDocumentEngine } from './documentBuiltinEngine'
 import { buildKnowledgeRefPromptBlock } from './documentKnowledgeRefs'
 import { getDocumentTemplateDefinition } from './documentTemplateCatalog'
+import { buildStructuredWritingPromptBlock } from './documentTaskTypeLabels'
 import type {
   DocumentDraft,
   DocumentKnowledgeRef,
@@ -98,21 +99,25 @@ function buildCreateUserPrompt(input: {
   templateLabel?: string
   documentType: DocumentType
   outline: string[]
+  tone?: string
+  taskType?: string
   knowledgeRefs: DocumentKnowledgeRef[]
 }): string {
+  const structured = buildStructuredWritingPromptBlock({
+    taskType: input.taskType,
+    outline: input.outline,
+    tone: input.tone,
+    language: input.language,
+  })
   return [
     `文稿标题：${input.title}`,
     `文稿类型：${input.documentType}`,
     input.templateLabel ? `模板：${input.templateLabel}` : '',
-    input.language === 'en-US'
-      ? 'language: en-US\nstyle: formal_office_english'
-      : 'language: zh-CN\nstyle: formal_chinese_office',
-    input.outline.length > 0
-      ? `推荐结构：\n${input.outline.map((item, index) => `${index + 1}. ${item}`).join('\n')}`
-      : '',
+    structured,
+    input.language === 'en-US' ? 'style: formal_office_english' : 'style: formal_chinese_office',
     buildKnowledgeRefPromptBlock(input.knowledgeRefs),
     '要求：标题、一级/二级标题、正文、必要表格、依据引用都要完整；不能输出解释性话术。',
-    `用户要求：${input.prompt.trim()}`,
+    `用户写作要求：${input.prompt.trim()}`,
   ].filter(Boolean).join('\n\n')
 }
 
@@ -207,6 +212,8 @@ async function generateDraftViaSkill(input: {
   documentType: DocumentType
   outline: string[]
   knowledgeRefs: DocumentKnowledgeRef[]
+  taskType?: string
+  tone?: string
 }): Promise<DocumentDraft> {
   if (!isLlmConfigured()) {
     return buildDeterministicDraft(input)
@@ -224,6 +231,8 @@ async function generateDraftViaSkill(input: {
           templateLabel: input.templateLabel,
           documentType: input.documentType,
           outline: input.outline,
+          tone: input.tone,
+          taskType: input.taskType,
           knowledgeRefs: input.knowledgeRefs,
         }),
       },
@@ -313,19 +322,34 @@ export async function runMinimaxDocx(input: {
   knowledgeRefs: DocumentKnowledgeRef[]
   documentType: DocumentType
   language?: DocumentLanguage
+  preferredOutline?: string[]
+  tone?: string
+  taskType?: string
 }): Promise<{ record: DocumentRecord; result: DocumentTaskResult }> {
   const language = resolveDocumentLanguage(input.prompt, input.language)
   const template = getDocumentTemplateDefinition(input.templateId)
   const title = input.title?.trim() || template?.defaultTitle || '办公文稿'
+  const outline = input.preferredOutline?.length
+    ? input.preferredOutline
+    : (template?.outline || [])
+  const structured = buildStructuredWritingPromptBlock({
+    taskType: input.taskType,
+    outline,
+    tone: input.tone,
+    language,
+  })
+  const prompt = [structured, input.prompt.trim()].filter(Boolean).join('\n\n')
   const draft = await generateDraftViaSkill({
-    prompt: input.prompt,
+    prompt,
     title,
     language,
     templateId: template?.id,
     templateLabel: template?.label,
     documentType: input.documentType,
-    outline: template?.outline || [],
+    outline,
     knowledgeRefs: input.knowledgeRefs,
+    taskType: input.taskType,
+    tone: input.tone,
   })
   draft.id = `document-${randomUUID()}`
 

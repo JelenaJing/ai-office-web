@@ -1,0 +1,18 @@
+{
+  "id": "general-document-writer",
+  "name": "通用文稿生成",
+  "description": "根据用户需求生成通用文稿初稿",
+  "category": "document-generation",
+  "runner": "opencode",
+  "entryFile": "SKILL.md",
+  "version": "1.0.0",
+  "scope": ["document"],
+  "supportedDocumentTypes": ["general"],
+  "outputMode": "document_artifact",
+  "timeoutMs": 300000,
+  "materialize": { "mode": "copy", "include": ["SKILL.md"] },
+  "opencode": {
+    "skillName": "general-document-writer",
+    "permissions": { "skill": { "general-document-writer": "allow", "*": "deny" } }
+  }
+}

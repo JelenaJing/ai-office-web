@@ -4,6 +4,7 @@ JSON file loader (ported from merged-plot-agent).
 
 from __future__ import annotations
 
+import io
 import logging
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
@@ -11,6 +12,7 @@ from typing import Any, Dict, Optional, Union
 import pandas as pd
 
 from .data_validator import DataValidator
+from .tabular_io import decode_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +28,12 @@ class JSONLoader:
         if not path.exists():
             raise FileNotFoundError(f"JSON file not found: {path}")
 
-        df = pd.read_json(path, encoding=encoding, orient=orient, **kwargs)
+        text = path.read_bytes()
+        if encoding:
+            decoded = text.replace(b"\x00", b"").decode(encoding, errors="replace")
+        else:
+            decoded = decode_bytes(text)
+        df = pd.read_json(io.StringIO(decoded), orient=orient, **kwargs)
         ok, msg = self.validator.validate(df)
         if not ok:
             raise ValueError(f"Data validation failed: {msg}")

@@ -4,6 +4,7 @@
 
 export type PendingResourceOpen =
   | { kind: 'document-artifact'; artifactId: string }
+  | { kind: 'document-studio'; documentId: string }
   | { kind: 'document-file'; fileId: string }
   | { kind: 'html-ppt-artifact'; artifactId: string }
   | { kind: 'ppt-artifact'; artifactId: string; deckId?: string }

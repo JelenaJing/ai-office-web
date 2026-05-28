@@ -11,7 +11,7 @@ installWebElectronAPIShim()
 
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import App from './App'
+import WebApp from './web/WebApp'
 import AppErrorBoundary from './components/AppErrorBoundary'
 import { DocumentProvider } from './contexts/DocumentContext'
 import { DepartmentProvider } from './contexts/DepartmentContext'
@@ -59,7 +59,7 @@ ReactDOM.createRoot(document.getElementById('root') as HTMLElement, {
                     <KnowledgeProvider>
                       <PersonalLibraryProvider>
                         <DocumentWorkspaceKnowledgeProvider>
-                          <App />
+                          <WebApp />
                         </DocumentWorkspaceKnowledgeProvider>
                       </PersonalLibraryProvider>
                     </KnowledgeProvider>

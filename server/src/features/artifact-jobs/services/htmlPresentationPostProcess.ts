@@ -1,9 +1,11 @@
 import fs from 'fs'
+import path from 'path'
 import type {
   CandidateTemplateRecord,
   HtmlPresentationJobOptions,
   TemplateProfileRecord,
 } from './htmlPresentationTemplates'
+import { resolveImageBudget, type ImageBudget } from './htmlPresentationImageBudget'
 
 export interface ContentModelBlock {
   id: string
@@ -60,9 +62,14 @@ export interface HtmlPresentationPostProcessResult {
   fallbackUsed: boolean
   imagePlanningEnabled: boolean
   plannedImageCount: number
+  requiredImageCount: number
+  optionalImageCount: number
+  resolvedMaxImages: number
+  budgetSource: string
   generatedImageCount: number
   placeholderCount: number
   contentModel: ContentModelRecord
+  imageBudget: ImageBudget
 }
 
 interface SlideWorkItem {
@@ -102,8 +109,8 @@ export function createPlaceholderDataUri(title: string, prompt: string): string 
 
 export function createPlaceholderSvgMarkup(title: string, prompt: string): string {
   const safeTitle = truncate(title || 'Image Placeholder', 48)
-  const safePrompt = truncate(prompt || 'Visual planned for this slide', 96)
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540" role="img" aria-label="${escapeAttribute(safeTitle)}"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop offset="0%" stop-color="#eaf1fb"/><stop offset="100%" stop-color="#d6e4f6"/></linearGradient></defs><rect width="960" height="540" rx="28" fill="url(#g)"/><rect x="40" y="40" width="880" height="460" rx="24" fill="none" stroke="#9fb7d8" stroke-dasharray="14 10" stroke-width="3"/><text x="60" y="106" fill="#244367" font-family="Arial, sans-serif" font-size="34" font-weight="700">${escapeHtml(safeTitle)}</text><text x="60" y="156" fill="#55728f" font-family="Arial, sans-serif" font-size="20">${escapeHtml(safePrompt)}</text><g transform="translate(60 220)" fill="none" stroke="#87a6ca" stroke-width="10"><rect width="320" height="190" rx="18"/><path d="M18 164l68-72 58 48 52-68 124 92"/><circle cx="242" cy="54" r="26"/></g><text x="60" y="468" fill="#6d88a3" font-family="Arial, sans-serif" font-size="18">SVG placeholder · phase 2 fallback</text></svg>`
+  void prompt
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540" role="img" aria-label="${escapeAttribute(safeTitle)}"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop offset="0%" stop-color="#eaf1fb"/><stop offset="100%" stop-color="#d6e4f6"/></linearGradient></defs><rect width="960" height="540" rx="28" fill="url(#g)"/><rect x="40" y="40" width="880" height="460" rx="24" fill="none" stroke="#9fb7d8" stroke-dasharray="14 10" stroke-width="3"/><text x="60" y="106" fill="#244367" font-family="Arial, sans-serif" font-size="34" font-weight="700">${escapeHtml(safeTitle)}</text><text x="60" y="156" fill="#55728f" font-family="Arial, sans-serif" font-size="20">Image placeholder</text><g transform="translate(60 220)" fill="none" stroke="#87a6ca" stroke-width="10"><rect width="320" height="190" rx="18"/><path d="M18 164l68-72 58 48 52-68 124 92"/><circle cx="242" cy="54" r="26"/></g><text x="60" y="468" fill="#6d88a3" font-family="Arial, sans-serif" font-size="18">SVG placeholder · phase 2 fallback</text></svg>`
 }
 
 function stripTags(value: string): string {
@@ -181,16 +188,88 @@ function writePlaceholderAsset(outputDir: string, slide: ContentModelSlide, bloc
   return `assets/${filename}`
 }
 
-function renderManagedImageMarkup(input: {
+function guessPlaceholderAssetPath(
+  assetsBaseDir: string | undefined,
+  slide: ContentModelSlide,
+  block: ContentModelBlock,
+): string {
+  if (!assetsBaseDir) return ''
+  const relative = `assets/${slide.id}-${block.id}-placeholder.svg`
+  const absolute = path.join(assetsBaseDir, relative)
+  return fs.existsSync(absolute) ? relative : ''
+}
+
+function resolveImageBlockAssetPath(input: {
+  block: ContentModelBlock
+  slide: ContentModelSlide
+  assetsBaseDir?: string
+}): string {
+  const direct = input.block.assetPath?.trim() ?? ''
+  if (direct) return direct
+  return guessPlaceholderAssetPath(input.assetsBaseDir, input.slide, input.block)
+}
+
+function renderUnfilledVisualSlot(input: {
+  block: ContentModelBlock
+  slide: ContentModelSlide
+  placement: ContentModelSlide['visual']['placement']
+}): string {
+  const placement = normalizeVisualPlacement(input.placement)
+  const label = escapeHtml(truncate(input.slide.title || '配图区域', 48))
+  const prompt = escapeAttribute(input.block.imagePrompt || input.slide.title || 'Visual planned for this slide')
+  return `<div class="aios-visual-slot aios-visual-slot--${placement} aios-visual-slot--unfilled" data-aios-visual-placement="${placement}" data-placeholder-used="true" data-block-id="${input.block.id}" data-block-type="image" data-block-role="visual"><div class="aios-visual-placeholder-shell" role="img" aria-label="${label}"><span class="aios-visual-placeholder-shell__label"></span></div></div>`
+}
+
+export function renderManagedImageMarkup(input: {
   block: ContentModelBlock
   slide: ContentModelSlide
   artifactId?: string
+  assetsBaseDir?: string
 }): string {
   const placement = normalizeVisualPlacement(input.block.placement ?? input.slide.visual?.placement)
-  const resolvedSrc = resolveHtmlPresentationAssetUrl(input.block.assetPath, input.artifactId)
-  const placeholderUsed = input.block.placeholderUsed ?? isPlaceholderAssetPath(input.block.assetPath)
+  const assetPath = resolveImageBlockAssetPath(input)
+  if (!assetPath) {
+    if (input.block.placeholderUsed === true || !input.block.assetPath?.trim()) {
+      return renderUnfilledVisualSlot({ block: input.block, slide: input.slide, placement })
+    }
+    return ''
+  }
+  const resolvedSrc = resolveHtmlPresentationAssetUrl(assetPath, input.artifactId)
+  if (!resolvedSrc.trim()) {
+    return renderUnfilledVisualSlot({ block: input.block, slide: input.slide, placement })
+  }
+  const placeholderUsed = input.block.placeholderUsed ?? isPlaceholderAssetPath(assetPath)
   const fit = placement === 'background' || placement === 'full' ? 'cover' : placement === 'inline' ? 'contain' : 'cover'
-  return `<div class="aios-visual-slot aios-visual-slot--${placement}" data-aios-visual-placement="${placement}" data-placeholder-used="${placeholderUsed ? 'true' : 'false'}"><img src="${escapeAttribute(resolvedSrc)}" alt="${escapeAttribute(input.slide.title || 'Slide visual')}" style="object-fit:${fit};" data-block-id="${input.block.id}" data-block-type="image" data-block-role="visual" data-image-prompt="${escapeAttribute(input.block.imagePrompt)}" data-placeholder-used="${placeholderUsed ? 'true' : 'false'}"></div>`
+  return `<div class="aios-visual-slot aios-visual-slot--${placement}" data-aios-visual-placement="${placement}" data-block-id="${input.block.id}" data-block-type="image" data-block-role="visual" data-placeholder-used="${placeholderUsed ? 'true' : 'false'}"><img src="${escapeAttribute(resolvedSrc)}" alt="${escapeAttribute(input.slide.title || 'Slide visual')}" style="object-fit:${fit};" data-block-id="${input.block.id}" data-block-type="image" data-block-role="visual" data-placeholder-used="${placeholderUsed ? 'true' : 'false'}"></div>`
+}
+
+/** Normalize image blocks in HTML — never leave empty-src img tags. */
+export function sanitizePresentationHtmlImages(input: {
+  html: string
+  contentModel: ContentModelRecord
+  assetsBaseDir?: string
+  artifactId?: string
+}): string {
+  let html = input.html
+  for (const slide of input.contentModel.slides) {
+    for (const block of slide.blocks) {
+      if (block.type !== 'image') continue
+      const markup = renderManagedImageMarkup({
+        block,
+        slide,
+        artifactId: input.artifactId,
+        assetsBaseDir: input.assetsBaseDir,
+      })
+      if (!markup) {
+        html = removeManagedImageBlock(html, block.id)
+        continue
+      }
+      const replaced = replaceManagedImageBlock(html, block.id, markup)
+      html = replaced.replaced ? replaced.html : insertManagedImageBlockIntoSlide(html, slide.id, markup)
+    }
+  }
+  html = html.replace(/<img\b[^>]*\ssrc=(["'])\s*\1[^>]*>/gi, '')
+  return html
 }
 
 function ensureSlideSections(html: string): string {
@@ -226,6 +305,78 @@ function inferLayoutHint(role: ContentModelSlide['role'], hasImage: boolean): st
   if (role === 'image') return 'content-visual-split'
   if (role === 'closing') return 'closing-statement'
   return hasImage ? 'content-visual-split' : 'content-stack'
+}
+
+function expandDenseSingleSlideModels(slides: ContentModelSlide[]): ContentModelSlide[] {
+  if (slides.length !== 1) return slides
+  const source = slides[0]
+  const bodyTexts = source.blocks
+    .filter((block) => block.type === 'text' && !['title', 'subtitle'].includes(block.role))
+    .map((block) => block.text.trim())
+    .filter(Boolean)
+  const bullets = source.bullets.map((item) => item.trim()).filter(Boolean)
+  const points = Array.from(new Set([...bullets, ...bodyTexts]))
+  if (points.length < 10) return slides
+
+  const chunkSize = 5
+  const chunks: string[][] = []
+  for (let index = 0; index < points.length; index += chunkSize) {
+    chunks.push(points.slice(index, index + chunkSize))
+  }
+
+  return chunks.slice(0, 10).map((chunk, index) => {
+    const id = slideId(index)
+    const title = index === 0
+      ? (source.title || '演示文稿')
+      : `${source.title || '要点'} · ${String(index + 1).padStart(2, '0')}`
+    const subtitle = index === 0 ? (source.subtitle || '') : ''
+    const textBlocks: ContentModelBlock[] = []
+    textBlocks.push({
+      id: blockId(index, 0),
+      type: 'text',
+      role: 'title',
+      text: title,
+      assetPath: '',
+      imagePrompt: '',
+    })
+    if (subtitle) {
+      textBlocks.push({
+        id: blockId(index, textBlocks.length),
+        type: 'text',
+        role: 'subtitle',
+        text: subtitle,
+        assetPath: '',
+        imagePrompt: '',
+      })
+    }
+    chunk.forEach((point, itemIndex) => {
+      textBlocks.push({
+        id: blockId(index, textBlocks.length + itemIndex),
+        type: 'text',
+        role: 'body',
+        text: point,
+        assetPath: '',
+        imagePrompt: '',
+      })
+    })
+    return {
+      ...source,
+      id,
+      index,
+      role: index === 0 ? 'cover' : (index === chunks.length - 1 ? 'closing' : 'content'),
+      title,
+      subtitle,
+      bullets: chunk,
+      layoutHint: index === 0 ? 'cover-centered' : 'content-stack',
+      blocks: textBlocks,
+      visual: {
+        type: 'none',
+        prompt: '',
+        assetPath: '',
+        placement: index === 0 ? 'hero' : 'right',
+      },
+    } satisfies ContentModelSlide
+  })
 }
 
 function determineTextRole(tagName: string, text: string, seenTitle: boolean, seenSubtitle: boolean): ContentModelBlock['role'] {
@@ -272,6 +423,18 @@ function replaceManagedImageBlock(html: string, blockIdValue: string, markup: st
   return { replaced: false, html }
 }
 
+function removeManagedImageBlock(html: string, blockIdValue: string): string {
+  const safeBlockId = blockIdValue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const wrapperPattern = new RegExp(
+    `<(?:div|figure|section|picture)\\b[^>]*data-block-id="${safeBlockId}"[^>]*>[\\s\\S]*?<\\/(?:div|figure|section|picture)>`,
+    'gi',
+  )
+  const imgPattern = new RegExp(`<img\\b[^>]*data-block-id="${safeBlockId}"[^>]*\\/?>`, 'gi')
+  return html
+    .replace(wrapperPattern, '')
+    .replace(imgPattern, '')
+}
+
 function insertManagedImageBlock(html: string, markup: string): string {
   const containers = ['slide-content', 'content-shell', 'summary-inner', 'hero-title-group', 'hero-tagline', 'rm-inner']
   for (const className of containers) {
@@ -294,6 +457,18 @@ function insertManagedImageBlock(html: string, markup: string): string {
   return appendBeforeClosingTag(html, 'section', markup)
 }
 
+function insertManagedImageBlockIntoSlide(html: string, slideIdValue: string, markup: string): string {
+  const safeSlideId = slideIdValue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const sectionPattern = new RegExp(
+    `(<section\\b[^>]*data-slide-id="${safeSlideId}"[^>]*>[\\s\\S]*?)(<\\/section>)`,
+    'i',
+  )
+  if (sectionPattern.test(html)) {
+    return html.replace(sectionPattern, `$1${markup}$2`)
+  }
+  return insertManagedImageBlock(html, markup)
+}
+
 function stripImagesForNoImageMode(html: string): string {
   let next = html
   for (let index = 0; index < 4; index += 1) {
@@ -314,8 +489,7 @@ function stripImagesForNoImageMode(html: string): string {
 export function injectSharedStyles(html: string): string {
   const styleBlock = `
 <style id="aios-html-ppt-enhancements">
-  .slide[data-slide-id] { position: relative; overflow: hidden; contain: layout paint; isolation: isolate; }
-  .slide[data-slide-id] > * { position: relative; z-index: 3; }
+  .slide[data-slide-id] { overflow: hidden; contain: layout paint; isolation: isolate; }
   .slide[data-slide-id] [class*="decoration"],
   .slide[data-slide-id] [class*="dots"],
   .slide[data-slide-id] .cover-decoration,
@@ -372,6 +546,8 @@ export function injectSharedStyles(html: string): string {
   .aios-visual-slot img,
   .aios-visual-slot svg { width: 100%; height: 100%; display: block; object-fit: cover; }
   .aios-visual-slot [data-placeholder-used="true"] { background: rgba(255,255,255,0.72); }
+  .aios-visual-slot--unfilled .aios-visual-placeholder-shell { width: 100%; height: 100%; min-height: 120px; border: 2px dashed rgba(148, 163, 184, 0.45); border-radius: 12px; background: rgba(248, 250, 252, 0.92); display: flex; align-items: center; justify-content: center; color: #64748b; font-size: 14px; }
+  .aios-visual-slot--unfilled .aios-visual-placeholder-shell__label { padding: 0 12px; text-align: center; }
   .aios-inline-editor { position: fixed; right: 20px; bottom: 20px; width: min(420px, calc(100vw - 32px)); background: rgba(15, 23, 42, 0.96); color: #fff; border-radius: 16px; box-shadow: 0 22px 60px rgba(15, 23, 42, 0.35); padding: 14px; z-index: 99999; display: none; font-family: system-ui, -apple-system, sans-serif; }
   .aios-inline-editor.open { display: block; }
   .aios-inline-editor__title { font-size: 13px; font-weight: 700; letter-spacing: 0.04em; margin: 0 0 8px; color: rgba(255,255,255,0.78); }
@@ -675,7 +851,35 @@ export function injectEditRuntime(html: string, deckId: string): string {
   return `${html}\n${scriptBlock}`
 }
 
-function serializeCandidateTemplates(selectedTemplateSlug: string, fallbackUsed: boolean, candidates: CandidateTemplateRecord[]): string {
+export function injectHtmlSlidesTemplateMarkers(html: string, templateSlug: string): string {
+  const slug = templateSlug.trim()
+  if (!slug) return html
+  let next = html
+  const metaTag = `<meta name="aios-html-slides-template" content="${slug.replace(/"/g, '')}">`
+  if (!/<meta\b[^>]*name=(["'])aios-html-slides-template\1/i.test(next)) {
+    if (/<head\b[^>]*>/i.test(next)) next = next.replace(/<head\b[^>]*>/i, (match) => `${match}\n  ${metaTag}`)
+    else next = `${metaTag}\n${next}`
+  }
+  if (/<body\b[^>]*>/i.test(next)) {
+    next = next.replace(/<body\b([^>]*)>/i, (full, attrs: string) => {
+      if (/\bdata-template-slug=/i.test(attrs)) {
+        return full.replace(/\bdata-template-slug=(["']).*?\1/i, `data-template-slug="${slug.replace(/"/g, '')}"`)
+      }
+      return `<body${attrs} data-template-slug="${slug.replace(/"/g, '')}">`
+    })
+  } else {
+    next = `<body data-template-slug="${slug.replace(/"/g, '')}">\n${next}\n</body>`
+  }
+  return next
+}
+
+function serializeCandidateTemplates(
+  selectedTemplateSlug: string,
+  fallbackUsed: boolean,
+  candidates: CandidateTemplateRecord[],
+  sidecar?: Record<string, unknown>,
+): string {
+  if (sidecar) return JSON.stringify(sidecar, null, 2)
   return JSON.stringify({
     selectedTemplateSlug,
     fallbackUsed,
@@ -705,6 +909,11 @@ function applyImagePlanning(
   plannedSlideIds: Set<string>
   placeholderBySlideId: Map<string, { block: ContentModelBlock; placement: ContentModelSlide['visual']['placement'] }>
   plannedImageCount: number
+  requiredImageCount: number
+  optionalImageCount: number
+  resolvedMaxImages: number
+  budgetSource: string
+  imageBudget: ImageBudget
   generatedImageCount: number
   placeholderCount: number
 } {
@@ -713,10 +922,38 @@ function applyImagePlanning(
       plannedSlideIds: new Set(),
       placeholderBySlideId: new Map(),
       plannedImageCount: 0,
+      requiredImageCount: 0,
+      optionalImageCount: 0,
+      resolvedMaxImages: 0,
+      budgetSource: 'fast-disabled',
+      imageBudget: {
+        maxImages: 0,
+        requiredImageCount: 0,
+        optionalImageCount: 0,
+        source: 'fast-disabled',
+      },
       generatedImageCount: 0,
       placeholderCount: 0,
     }
   }
+
+  const draftModel: ContentModelRecord = {
+    deckId: 'planning',
+    title: '',
+    subtitle: '',
+    templateSlug: templateProfile.templateSlug,
+    theme: templateProfile.colorScheme,
+    slides,
+    assets: [],
+    createdAt: '',
+    updatedAt: '',
+  }
+  const imageBudget = resolveImageBudget({
+    qualityMode: options.qualityMode,
+    enableImages: options.enableImages,
+    userMaxImages: options.maxImages > 0 && options.maxImages !== 4 ? options.maxImages : undefined,
+    contentModel: draftModel,
+  })
 
   const eligibleSlides = slides
     .map((slide) => {
@@ -730,7 +967,7 @@ function applyImagePlanning(
     })
     .filter((item) => item.priority > -20)
     .sort((left, right) => right.priority - left.priority)
-    .slice(0, options.maxImages)
+    .slice(0, imageBudget.maxImages)
 
   const plannedSlideIds = new Set<string>()
   const placeholderBySlideId = new Map<string, { block: ContentModelBlock; placement: ContentModelSlide['visual']['placement'] }>()
@@ -796,6 +1033,11 @@ function applyImagePlanning(
     plannedSlideIds,
     placeholderBySlideId,
     plannedImageCount: eligibleSlides.length,
+    requiredImageCount: imageBudget.requiredImageCount,
+    optionalImageCount: imageBudget.optionalImageCount,
+    resolvedMaxImages: imageBudget.maxImages,
+    budgetSource: imageBudget.source,
+    imageBudget,
     generatedImageCount,
     placeholderCount,
   }
@@ -811,7 +1053,10 @@ export function postProcessHtmlPresentationOutput(input: {
   selectedTemplateSlug: string
   fallbackUsed: boolean
   options: HtmlPresentationJobOptions
+  candidateTemplatesSidecar?: Record<string, unknown>
   assertNotCanceled?: () => void
+  /** High template-driven: parse content-model only, do not rewrite slide DOM. */
+  preserveSourceHtml?: boolean
 }): HtmlPresentationPostProcessResult {
   input.assertNotCanceled?.()
   ensureOutputAssetsDir(input.outputDir)
@@ -821,16 +1066,20 @@ export function postProcessHtmlPresentationOutput(input: {
   const now = new Date().toISOString()
 
   input.assertNotCanceled?.()
+  const preserveSourceHtml = input.preserveSourceHtml === true
   let html = ensureSlideSections(fs.readFileSync(input.htmlPath, 'utf-8'))
   const noImageMode = !input.options.enableImages || input.options.maxImages <= 0
   if (noImageMode) html = stripImagesForNoImageMode(html)
-  const slidePattern = /<section\b[^>]*class=(["'])[^"']*\bslide\b[^"']*\1[^>]*>[\s\S]*?<\/section>/gi
+  const slidePattern = /<(section|div)\b[^>]*class=(["'])[^"']*\bslide\b[^"']*\2[^>]*>[\s\S]*?<\/\1>/gi
   const slideMatches = Array.from(html.matchAll(slidePattern))
 
   const slides: SlideWorkItem[] = slideMatches.map((match, index, allMatches) => {
     const original = match[0]
-    const openingTagMatch = original.match(/^<section\b([^>]*)>/i)
-    const inner = original.replace(/^<section\b[^>]*>/i, '').replace(/<\/section>\s*$/i, '')
+    const tagName = (match[1] || 'section').toLowerCase()
+    const openingTagMatch = original.match(new RegExp(`^<${tagName}\\b([^>]*)>`, 'i'))
+    const inner = original
+      .replace(new RegExp(`^<${tagName}\\b[^>]*>`, 'i'), '')
+      .replace(new RegExp(`</${tagName}>\\s*$`, 'i'), '')
     const currentSlideId = slideId(index)
     const cleanedSlideAttrs = stripManagedDataAttrs(openingTagMatch?.[1] ?? '')
     const updatedOpenTag = openingTagMatch
@@ -844,6 +1093,64 @@ export function postProcessHtmlPresentationOutput(input: {
     const bullets: string[] = []
     let slideInner = noImageMode ? stripImagesForNoImageMode(inner) : inner
 
+    const parseSlideInnerForBlocks = (sourceInner: string) => {
+      sourceInner.replace(/<(h[1-6]|p|li|figcaption|blockquote|small)\b([^>]*)>([\s\S]*?)<\/\1>/gi, (full, tagName: string, _attrs: string, body: string) => {
+        const text = stripTags(body)
+        if (!text) return full
+        const role = determineTextRole(tagName, text, seenTitle, seenSubtitle)
+        if (role === 'title') seenTitle = true
+        if (role === 'subtitle') seenSubtitle = true
+        const currentBlockId = blockId(index, blockIndex)
+        blockIndex += 1
+        blocks.push({
+          id: currentBlockId,
+          type: 'text',
+          role,
+          text,
+          assetPath: '',
+          imagePrompt: '',
+        })
+        if (tagName.toLowerCase() === 'li') bullets.push(text)
+        return full
+      })
+      if (!noImageMode) {
+        sourceInner.replace(/<(div|figure)\b([^>]*?(?:data-block-type=(["'])image\3|placeholder-svg|image-placeholder|media-placeholder|visual-placeholder)[^>]*)>/gi, () => {
+          const currentBlockId = blockId(index, blockIndex)
+          blockIndex += 1
+          blocks.push({
+            id: currentBlockId,
+            type: 'image',
+            role: 'visual',
+            text: '',
+            assetPath: '',
+            imagePrompt: '',
+            placement: 'right',
+            placeholderUsed: true,
+          })
+          return ''
+        })
+        sourceInner.replace(/<img\b([^>]*?)\/?>/gi, (full) => {
+          const currentBlockId = blockId(index, blockIndex)
+          blockIndex += 1
+          const src = findImageSrc(full)
+          blocks.push({
+            id: currentBlockId,
+            type: 'image',
+            role: 'visual',
+            text: '',
+            assetPath: src,
+            imagePrompt: '',
+            placement: 'right',
+            placeholderUsed: isPlaceholderAssetPath(src),
+          })
+          return full
+        })
+      }
+    }
+
+    if (preserveSourceHtml) {
+      parseSlideInnerForBlocks(slideInner)
+    } else {
     slideInner = slideInner.replace(/<(h[1-6]|p|li|figcaption|blockquote|small)\b([^>]*)>([\s\S]*?)<\/\1>/gi, (full, tagName: string, attrs: string, body: string) => {
       const text = stripTags(body)
       if (!text) return full
@@ -865,7 +1172,7 @@ export function postProcessHtmlPresentationOutput(input: {
       return `<${tagName}${cleanedAttrs} data-block-id="${currentBlockId}" data-block-type="text" data-block-role="${role}">${body}</${tagName}>`
     })
 
-    if (!noImageMode) {
+    if (!noImageMode && !preserveSourceHtml) {
       slideInner = slideInner.replace(/<(div|figure)\b([^>]*?(?:data-block-type=(["'])image\3|placeholder-svg|image-placeholder|media-placeholder|visual-placeholder)[^>]*)>/gi, (full, tagName: string, attrs: string) => {
         const currentBlockId = blockId(index, blockIndex)
         blockIndex += 1
@@ -901,6 +1208,7 @@ export function postProcessHtmlPresentationOutput(input: {
         return `<img${cleanedAttrs} data-block-id="${currentBlockId}" data-block-type="image" data-block-role="visual" data-image-prompt="">`
       })
     }
+    }
 
     const titleBlock = blocks.find((block) => block.role === 'title')
     const subtitleBlock = blocks.find((block) => block.role === 'subtitle')
@@ -929,13 +1237,17 @@ export function postProcessHtmlPresentationOutput(input: {
       start: match.index ?? 0,
       end: (match.index ?? 0) + original.length,
       original,
-      updated: `${updatedOpenTag}${slideInner}</section>`,
+      updated: preserveSourceHtml
+        ? original
+        : `${updatedOpenTag}${slideInner}</section>`,
       model,
     }
   })
 
+  const modelSlides = expandDenseSingleSlideModels(slides.map((item) => item.model))
+
   const planning = applyImagePlanning(
-    slides.map((item) => item.model),
+    modelSlides,
     input.templateProfile,
     input.options,
     input.outputDir,
@@ -947,14 +1259,20 @@ export function postProcessHtmlPresentationOutput(input: {
   slides.forEach((item) => {
     const imageBlock = item.model.blocks.find((block) => block.type === 'image')
     const visualPlacement = normalizeVisualPlacement(item.model.visual?.placement ?? imageBlock?.placement)
-    item.updated = item.updated.replace(
-      /^<section\b([^>]*)>/i,
-      (_full, attrs: string) => `<section${attrs} data-aios-has-visual="${imageBlock ? 'true' : 'false'}" data-aios-visual-placement="${visualPlacement}">`,
-    )
+    if (!preserveSourceHtml) {
+      item.updated = item.updated.replace(
+        /^<section\b([^>]*)>/i,
+        (_full, attrs: string) => `<section${attrs} data-aios-has-visual="${imageBlock ? 'true' : 'false'}" data-aios-visual-placement="${visualPlacement}">`,
+      )
+    }
     if (!imageBlock) return
     imageBlock.placement = visualPlacement
     imageBlock.placeholderUsed = imageBlock.placeholderUsed ?? isPlaceholderAssetPath(imageBlock.assetPath)
-    const managedMarkup = renderManagedImageMarkup({ block: imageBlock, slide: item.model })
+    const managedMarkup = renderManagedImageMarkup({
+      block: imageBlock,
+      slide: item.model,
+      assetsBaseDir: input.outputDir,
+    })
     const replaced = replaceManagedImageBlock(item.updated, imageBlock.id, managedMarkup)
     item.updated = replaced.replaced ? replaced.html : insertManagedImageBlock(item.updated, managedMarkup)
   })
@@ -964,18 +1282,21 @@ export function postProcessHtmlPresentationOutput(input: {
   })
 
   let rebuiltHtml = ''
-  let cursor = 0
-  for (const item of slides) {
-    rebuiltHtml += html.slice(cursor, item.start)
-    rebuiltHtml += item.updated
-    cursor = item.end
+  if (preserveSourceHtml) {
+    rebuiltHtml = html
+  } else {
+    let cursor = 0
+    for (const item of slides) {
+      rebuiltHtml += html.slice(cursor, item.start)
+      rebuiltHtml += item.updated
+      cursor = item.end
+    }
+    rebuiltHtml += html.slice(cursor)
   }
-  rebuiltHtml += html.slice(cursor)
   input.assertNotCanceled?.()
   if (noImageMode) rebuiltHtml = stripImagesForNoImageMode(rebuiltHtml)
   rebuiltHtml = injectSharedStyles(rebuiltHtml)
   rebuiltHtml = injectEditRuntime(rebuiltHtml, input.jobId)
-  fs.writeFileSync(input.htmlPath, rebuiltHtml, 'utf-8')
 
   const contentModel: ContentModelRecord = {
     deckId: input.jobId,
@@ -983,12 +1304,12 @@ export function postProcessHtmlPresentationOutput(input: {
     subtitle: slides[0]?.model.subtitle || '',
     templateSlug: input.selectedTemplateSlug,
     theme: input.templateProfile.colorScheme,
-    slides: slides.map((item) => item.model),
-    assets: slides.flatMap((item) => item.model.blocks)
+    slides: modelSlides,
+    assets: modelSlides.flatMap((slide) => slide.blocks)
       .filter((block) => block.type === 'image' && block.assetPath)
       .map((block) => ({
         blockId: block.id,
-        slideId: slides.find((slide) => slide.model.blocks.some((candidate) => candidate.id === block.id))?.model.id ?? '',
+        slideId: modelSlides.find((slide) => slide.blocks.some((candidate) => candidate.id === block.id))?.id ?? '',
         assetPath: block.assetPath,
         imagePrompt: block.imagePrompt,
         placeholderUsed: block.placeholderUsed,
@@ -996,6 +1317,14 @@ export function postProcessHtmlPresentationOutput(input: {
     createdAt: now,
     updatedAt: now,
   }
+
+  rebuiltHtml = sanitizePresentationHtmlImages({
+    html: rebuiltHtml,
+    contentModel,
+    assetsBaseDir: input.outputDir,
+  })
+  rebuiltHtml = injectHtmlSlidesTemplateMarkers(rebuiltHtml, input.selectedTemplateSlug)
+  fs.writeFileSync(input.htmlPath, rebuiltHtml, 'utf-8')
 
   const layoutHints = Array.from(new Set(contentModel.slides.map((slide) => slide.layoutHint)))
   const templateProfile: TemplateProfileRecord = {
@@ -1008,7 +1337,12 @@ export function postProcessHtmlPresentationOutput(input: {
   fs.writeFileSync(templateProfilePath, JSON.stringify(templateProfile, null, 2), 'utf-8')
   fs.writeFileSync(
     candidateTemplatesPath,
-    serializeCandidateTemplates(input.selectedTemplateSlug, input.fallbackUsed, input.candidateTemplates),
+    serializeCandidateTemplates(
+      input.selectedTemplateSlug,
+      input.fallbackUsed,
+      input.candidateTemplates,
+      input.candidateTemplatesSidecar,
+    ),
     'utf-8',
   )
 
@@ -1021,13 +1355,21 @@ export function postProcessHtmlPresentationOutput(input: {
     fallbackUsed: input.fallbackUsed,
     imagePlanningEnabled: input.options.enableImages && input.options.maxImages > 0,
     plannedImageCount: planning.plannedImageCount,
+    requiredImageCount: planning.requiredImageCount,
+    optionalImageCount: planning.optionalImageCount,
+    resolvedMaxImages: planning.resolvedMaxImages,
+    budgetSource: planning.budgetSource,
     generatedImageCount: planning.generatedImageCount,
     placeholderCount: planning.placeholderCount,
     contentModel,
+    imageBudget: planning.imageBudget,
   }
 }
 
-function renderBlocksForTemplate(slide: ContentModelSlide): string {
+function renderBlocksForTemplate(
+  slide: ContentModelSlide,
+  options?: { artifactId?: string; assetsBaseDir?: string },
+): string {
   const textBlocks = slide.blocks.filter((block) => block.type === 'text')
   const imageBlock = slide.blocks.find((block) => block.type === 'image')
   const bullets = slide.bullets.length > 0
@@ -1042,7 +1384,7 @@ function renderBlocksForTemplate(slide: ContentModelSlide): string {
       ${textBlocks.find((block) => block.role === 'title') ? `<h1 data-block-id="${textBlocks.find((block) => block.role === 'title')?.id}" data-block-type="text" data-block-role="title">${escapeHtml(textBlocks.find((block) => block.role === 'title')?.text ?? '')}</h1>` : ''}
       ${textBlocks.find((block) => block.role === 'subtitle') ? `<p class="subtitle" data-block-id="${textBlocks.find((block) => block.role === 'subtitle')?.id}" data-block-type="text" data-block-role="subtitle">${escapeHtml(textBlocks.find((block) => block.role === 'subtitle')?.text ?? '')}</p>` : ''}
       ${bullets || paragraphs}
-      ${imageBlock ? renderManagedImageMarkup({ block: imageBlock, slide }) : ''}
+      ${imageBlock ? renderManagedImageMarkup({ block: imageBlock, slide, artifactId: options?.artifactId, assetsBaseDir: options?.assetsBaseDir }) : ''}
     </div>
   `
 }
@@ -1055,14 +1397,7 @@ export function rebuildHtmlPresentationFromContentModel(input: {
   const slidesHtml = input.contentModel.slides
     .map((slide) => {
       const imageBlock = slide.blocks.find((block) => block.type === 'image')
-      const rendered = renderBlocksForTemplate({
-        ...slide,
-        blocks: slide.blocks.map((block) => (
-          block.type === 'image'
-            ? { ...block, assetPath: resolveHtmlPresentationAssetUrl(block.assetPath, input.artifactId) }
-            : block
-        )),
-      })
+      const rendered = renderBlocksForTemplate(slide, { artifactId: input.artifactId })
       return `<section class="slide" data-slide-id="${slide.id}" data-aios-has-visual="${imageBlock ? 'true' : 'false'}" data-aios-visual-placement="${normalizeVisualPlacement(slide.visual?.placement ?? imageBlock?.placement)}">${rendered}</section>`
     })
     .join('\n')

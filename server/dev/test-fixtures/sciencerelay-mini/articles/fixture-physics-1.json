@@ -1,0 +1,11 @@
+{
+  "id": "fixture-physics-1",
+  "title": "Fixture: 钙钛矿界面钝化进展",
+  "topic": "物理",
+  "publishedDate": "2025-11-01",
+  "doi": "10.1000/fixture.physics.1",
+  "citation": "Test et al., Fixture Journal, 2025",
+  "journal": "Fixture Journal",
+  "subjects": ["perovskite", "interface", "passivation"],
+  "oneLineSummary": "用于测试栈冒烟：界面钝化与缺陷态密度。"
+}

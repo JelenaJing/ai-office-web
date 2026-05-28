@@ -10,6 +10,8 @@ import {
 } from './services/paperRemakeClient'
 import { mapRawIdeasToCards } from './services/researchIdeaMapper'
 import { mapPlotV1ToGenerate, mapRecommendV1 } from './services/plotResponseMapper'
+import { rankResearchFeed } from './services/feedRanker'
+import type { ResearchIdeaCard } from './types'
 
 const router = Router()
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } })
@@ -17,7 +19,17 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 
 const RESEARCH_PARTIAL_MISSING = [
   'Async idea jobs are not implemented; long fulltext runs are synchronous',
   'Workspace file persistence for plots is optional (project_id on FastAPI)',
+  'Feed rank uses rule-based scorer only (Phoenix retrieval/ranker not wired)',
 ]
+
+/** PDF 清洗 + 多段 Idea + 合并，常超过默认 90s BFF 超时 */
+const IDEA_FULLTEXT_TIMEOUT_MS = Number(process.env.RESEARCH_IDEA_FULLTEXT_TIMEOUT_MS ?? 600_000)
+
+function sendJsonIfOpen(res: import('express').Response, status: number, body: unknown): boolean {
+  if (res.headersSent) return false
+  res.status(status).json(body)
+  return true
+}
 
 router.get('/parity', async (_req, res) => {
   let fastApiHealthy = false
@@ -37,7 +49,9 @@ router.get('/parity', async (_req, res) => {
         ideaGenerateFulltext: 'POST /api/research/ideas/generate/fulltext',
         plotRecommend: 'POST /api/research/plots/recommend',
         plotGenerate: 'POST /api/research/plots/generate',
+        plotTemplates: 'GET /api/research/plots/templates',
         plotTemplatePreview: 'POST /api/research/plots/templates/preview',
+        feedRank: 'POST /api/research/feed/rank',
       },
       fastApiV1: {
         idea: 'POST /api/v1/remake/idea',
@@ -53,6 +67,61 @@ router.get('/parity', async (_req, res) => {
         plotRecommend: 'POST /api/v1/data/plot/recommend/v2',
         plotTemplatePreview: 'POST /api/v1/data/plot/templates/preview/v2',
       },
+    },
+    partialMissing: RESEARCH_PARTIAL_MISSING,
+  })
+})
+
+router.post('/feed/rank', async (req, res) => {
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+
+  const rawIdeas = req.body?.ideas ?? req.body?.candidates
+  if (!Array.isArray(rawIdeas) || rawIdeas.length === 0) {
+    res.status(400).json({ success: false, error: 'ideas 数组不能为空' })
+    return
+  }
+
+  const field =
+    typeof req.body?.field === 'string'
+      ? req.body.field
+      : typeof req.body?.selectedField === 'string'
+        ? req.body.selectedField
+        : undefined
+  const servedIdeaIds = Array.isArray(req.body?.servedIdeaIds)
+    ? req.body.servedIdeaIds.map(String)
+    : Array.isArray(req.body?.served_idea_ids)
+      ? req.body.served_idea_ids.map(String)
+      : []
+  const subscriptionQueries = Array.isArray(req.body?.subscriptionQueries)
+    ? req.body.subscriptionQueries.map(String)
+    : Array.isArray(req.body?.subscriptions)
+      ? req.body.subscriptions
+          .filter((s: unknown) => s && typeof s === 'object' && (s as { enabled?: boolean }).enabled !== false)
+          .map((s: { query?: string }) => String((s as { query?: string }).query ?? ''))
+          .filter(Boolean)
+      : []
+  const topK =
+    typeof req.body?.topK === 'number' && req.body.topK > 0
+      ? Math.min(req.body.topK, 100)
+      : undefined
+
+  const ideas = rawIdeas as ResearchIdeaCard[]
+  const ranked = rankResearchFeed(ideas, {
+    field,
+    servedIdeaIds,
+    subscriptionQueries,
+    topK,
+  })
+
+  res.json({
+    success: true,
+    ideas: ranked,
+    ranking: {
+      algorithm: 'rule-based-v1',
+      inspiredBy: 'x-algorithm candidate-pipeline (Phase A)',
+      candidateCount: ideas.length,
+      returnedCount: ranked.length,
     },
     partialMissing: RESEARCH_PARTIAL_MISSING,
   })
@@ -86,18 +155,22 @@ router.post('/ideas/generate', async (req, res) => {
         ideas?: unknown[]
         error?: string
         data?: { chunks?: number }
-      }>('/api/v1/remake/idea/fulltext/v2', {
-        project_id: projectId,
-        full_text: req.body?.fullText ?? req.body?.full_text ?? null,
-        target_chars: req.body?.target_chars ?? 6000,
-        overlap_chars: req.body?.overlap_chars ?? 300,
-        field,
-      })
+      }>(
+        '/api/v1/remake/idea/fulltext/v2',
+        {
+          project_id: projectId,
+          full_text: req.body?.fullText ?? req.body?.full_text ?? null,
+          target_chars: req.body?.target_chars ?? 6000,
+          overlap_chars: req.body?.overlap_chars ?? 300,
+          field,
+        },
+        { timeoutMs: IDEA_FULLTEXT_TIMEOUT_MS },
+      )
       if (!v2.success) {
-        res.status(502).json({ success: false, error: v2.error ?? 'Idea fulltext failed' })
+        sendJsonIfOpen(res, 502, { success: false, error: v2.error ?? 'Idea fulltext failed' })
         return
       }
-      res.json({
+      sendJsonIfOpen(res, 200, {
         success: true,
         ideas: v2.ideas ?? [],
         data: v2.data,
@@ -174,26 +247,35 @@ router.post('/ideas/generate/fulltext', async (req, res) => {
       ideas?: unknown[]
       error?: string
       data?: { chunks?: number }
-    }>('/api/v1/remake/idea/fulltext/v2', {
-      project_id: projectId,
-      full_text: req.body?.fullText ?? req.body?.full_text ?? null,
-      target_chars: req.body?.target_chars ?? 6000,
-      overlap_chars: req.body?.overlap_chars ?? 300,
-      field,
-    })
+    }>(
+      '/api/v1/remake/idea/fulltext/v2',
+      {
+        project_id: projectId,
+        full_text: req.body?.fullText ?? req.body?.full_text ?? null,
+        target_chars: req.body?.target_chars ?? 6000,
+        overlap_chars: req.body?.overlap_chars ?? 300,
+        field,
+      },
+      { timeoutMs: IDEA_FULLTEXT_TIMEOUT_MS },
+    )
     if (!v2.success) {
-      res.status(502).json({ success: false, error: v2.error ?? 'Idea fulltext failed' })
+      sendJsonIfOpen(res, 502, { success: false, error: v2.error ?? 'Idea fulltext failed' })
       return
     }
-    res.json({
+    sendJsonIfOpen(res, 200, {
       success: true,
       ideas: v2.ideas ?? [],
       data: v2.data,
       partialMissing: RESEARCH_PARTIAL_MISSING,
     })
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    res.status(502).json({ success: false, error: message })
+    const message =
+      error instanceof PaperRemakeClientError
+        ? error.message
+        : error instanceof Error
+          ? error.message
+          : String(error)
+    sendJsonIfOpen(res, 502, { success: false, error: message })
   }
 })
 
@@ -274,6 +356,26 @@ router.post('/plots/generate', upload.single('file'), async (req, res) => {
 
     const mapped = mapPlotV1ToGenerate(raw)
     res.json({ ...mapped, partialMissing: RESEARCH_PARTIAL_MISSING })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    res.status(502).json({ success: false, error: message })
+  }
+})
+
+router.get('/plots/templates', async (req, res) => {
+  const userId = await requireAccountUser(req, res)
+  if (!userId) return
+
+  try {
+    const base = getPaperRemakeBaseUrl()
+    const url = `${base.replace(/\/$/, '')}/api/v1/data/plot/templates/v2`
+    const upstream = await fetch(url, { method: 'GET' })
+    const raw = (await upstream.json()) as Record<string, unknown>
+    if (!upstream.ok || raw.success === false) {
+      res.status(502).json({ success: false, error: String(raw.error ?? 'list templates failed') })
+      return
+    }
+    res.json({ success: true, templates: raw.templates ?? [], count: raw.count, partialMissing: RESEARCH_PARTIAL_MISSING })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     res.status(502).json({ success: false, error: message })

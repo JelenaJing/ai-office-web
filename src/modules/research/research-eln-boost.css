@@ -1,0 +1,31 @@
+/* 实验记录本：在科研入口下整体加大两号 */
+.research-eln-root {
+  font-size: 1.125rem;
+}
+
+.research-eln-root .text-xs {
+  font-size: 1rem;
+  line-height: 1.5rem;
+}
+
+.research-eln-root .text-sm {
+  font-size: 1.125rem;
+  line-height: 1.75rem;
+}
+
+.research-eln-root .text-lg {
+  font-size: 1.5rem;
+  line-height: 2rem;
+}
+
+.research-eln-root .text-2xl {
+  font-size: 1.875rem;
+  line-height: 2.25rem;
+}
+
+.research-eln-root input,
+.research-eln-root textarea,
+.research-eln-root select,
+.research-eln-root button {
+  font-size: inherit;
+}

@@ -1,6 +1,6 @@
 export type KnowledgeSourceType = 'knowledge_base' | 'file' | 'policy' | 'literature' | 'manual_note'
 export type KnowledgeTrustLevel = 'verified' | 'partial' | 'unverified' | 'unknown'
-export type KnowledgeProvider = 'remote' | 'workspace'
+export type KnowledgeProvider = 'remote' | 'workspace' | 'remote-qa'
 
 export interface KnowledgeSearchInput {
   userId?: string

@@ -1,0 +1,22 @@
+{
+  "id": "humanizer",
+  "name": "AI降重",
+  "description": "减少重复表达、优化句式、降低模板化痕迹，保留原意",
+  "category": "document-transform",
+  "runner": "opencode",
+  "entryFile": "SKILL.md",
+  "version": "1.0.0",
+  "scope": ["selection", "block", "document"],
+  "supportedDocumentTypes": ["general", "news", "report", "notice", "minutes", "paper"],
+  "outputMode": "patch",
+  "timeoutMs": 180000,
+  "materialize": { "mode": "copy", "include": ["SKILL.md"] },
+  "opencode": {
+    "skillName": "humanizer",
+    "permissions": { "skill": { "humanizer": "allow", "*": "deny" } }
+  },
+  "source": {
+    "type": "github",
+    "url": "https://github.com/blader/humanizer"
+  }
+}

@@ -1,4 +1,6 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react'
+import { BrowserRouter, useInRouterContext, useLocation, useNavigate } from 'react-router-dom'
+import ResearchWorkspaceRouter from './modules/research/ResearchWorkspaceRouter'
 import styled from 'styled-components'
 import { useDepartment } from './contexts/DepartmentContext'
 import { KnowledgeChipBar } from './components/knowledge/KnowledgeChipBar'
@@ -27,7 +29,6 @@ import WorkspaceGate from './pages/WorkspaceGate'
 import PrimaryNav, { type PrimarySection } from './components/nav/PrimaryNav'
 import HomeDashboard from './pages/HomeDashboard'
 import WorkWorkspace from './pages/WorkWorkspace'
-import ResearchPage from './pages/ResearchPage'
 import StudyWorkspace from './pages/StudyWorkspace'
 import LifeWorkspace from './pages/LifeWorkspace'
 import ResourceWorkspace from './pages/ResourceWorkspace'
@@ -35,45 +36,26 @@ import SettingsView from './pages/SettingsView'
 import AccountView from './pages/AccountView'
 import SkillManagementView from './pages/SkillManagementView'
 import CalendarWorkspace from './pages/CalendarWorkspace'
-import AIOSHome from './features/aios/components/AIOSHome'
 import HtmlPptPage from './web/pages/HtmlPptPage'
+import DocumentStudioPage from './features/document-studio/pages/DocumentStudioPage'
+import Ai4scienceBatteryPage from './features/ai4science-battery/pages/Ai4scienceBatteryPage'
+import { applyDocumentStudioUrl } from './features/document-studio/services/documentStudioSession'
 import WebFeatureComingSoon from './components/WebFeatureComingSoon'
 import { isWebShim } from './platform/detect'
 import { isWebFeatureEnabled } from './platform/featureGate'
 import { DISABLE_FORCE_PASSWORD_CHANGE } from './config'
 import { DEFAULT_APP_ROUTE } from './config/productFeatures'
+import {
+  WEB_SECTION_ROUTE_MAP,
+  defaultPrimarySection,
+  normalizePrimarySection,
+  resolvePrimarySectionFromLocation,
+} from './app/productRoutes'
 import { bootstrapHandoffEntry, clearHandoffQueryFromLocation, readHandoffIdFromLocation } from './services/handoffBootstrap'
 import { peekPendingDocumentHandoff } from './services/pendingDocumentHandoff'
 import { setPendingResourceOpen } from './services/pendingResourceOpen'
 import { resolveArtifactOpenKind } from './services/openResourceIntent'
 import type { Artifact, FileEntry } from './platform/types'
-
-const WEB_SECTION_ROUTE_MAP: Partial<Record<PrimarySection, string>> = {
-  home: '/home',
-  aios: '/aios',
-  work: '/work',
-  research: '/research',
-  study: '/study',
-  life: '/life',
-  resource: '/resource',
-  chat: '/chat',
-  settings: '/settings',
-  account: '/account',
-  'skill-center': '/skills',
-  calendar: '/calendar',
-  'html-ppt': '/ppt',
-}
-
-function resolvePrimarySectionFromLocation(): PrimarySection {
-  const defaultSection = DEFAULT_APP_ROUTE.replace(/^\//, '') as PrimarySection
-  if (typeof window === 'undefined' || !isWebShim()) return defaultSection
-
-  const normalizedPath = window.location.pathname.replace(/\/+$/, '') || DEFAULT_APP_ROUTE
-  const matchedEntry = Object.entries(WEB_SECTION_ROUTE_MAP).find(([, path]) => path === normalizedPath)
-  return (matchedEntry?.[0] as PrimarySection | undefined) ?? defaultSection
-}
-
-const DEFAULT_PRIMARY_SECTION = resolvePrimarySectionFromLocation()
 
 const IS_DEV = Boolean((import.meta as unknown as { env: Record<string, unknown> }).env?.DEV)
 const SkillDevPanel = IS_DEV
@@ -563,13 +545,20 @@ function WriterWorkspaceRuntime({
   const { activeWorkspaceName } = useWorkspace()
   const internalSession = useInternalSession()
   const internalUsername = internalSession?.user?.username ?? null
-  const [primarySection, setPrimarySection] = useState<PrimarySection>(DEFAULT_PRIMARY_SECTION)
-  const [returnToScene, setReturnToScene] = useState<PrimarySection>(DEFAULT_PRIMARY_SECTION)
-  const [pendingAiosMatterId, setPendingAiosMatterId] = useState<string | null>(null)
-
+  const location = useLocation()
+  const navigate = useNavigate()
+  const isResearchPath =
+    location.pathname === '/research' || location.pathname.startsWith('/research/')
+  const [primarySection, setPrimarySection] = useState<PrimarySection>(() => resolvePrimarySectionFromLocation())
+  const [returnToScene, setReturnToScene] = useState<PrimarySection>(() => resolvePrimarySectionFromLocation())
   const navigateTo = useCallback((section: PrimarySection) => {
-    setPrimarySection(section)
-  }, [])
+    const target = normalizePrimarySection(section)
+    setPrimarySection(target)
+    if (isWebShim()) {
+      const route = WEB_SECTION_ROUTE_MAP[target]
+      if (route) navigate(route)
+    }
+  }, [navigate])
 
   const goToWorkspace = useCallback(() => {
     setReturnToScene(primarySection)
@@ -607,6 +596,21 @@ function WriterWorkspaceRuntime({
       goToWorkspace()
       return
     }
+    if (openKind === 'document-studio') {
+      const documentId =
+        typeof meta?.studioDocumentId === 'string'
+          ? meta.studioDocumentId
+          : typeof artifact.documentId === 'string'
+            ? artifact.documentId
+            : ''
+      if (documentId) {
+        applyDocumentStudioUrl({ doc: documentId })
+        setPendingResourceOpen({ kind: 'document-studio', documentId })
+        setReturnToScene(primarySection)
+        setPrimarySection('document-studio')
+        return
+      }
+    }
     setPendingResourceOpen({ kind: 'document-artifact', artifactId: artifact.id })
     enterFreeMode()
     goToWorkspace()
@@ -618,6 +622,17 @@ function WriterWorkspaceRuntime({
     setReturnToScene(primarySection)
     setPrimarySection('workspace')
   }, [enterFreeMode, primarySection])
+
+  useEffect(() => {
+    if (!isWebShim()) return
+    const handler = () => {
+      applyDocumentStudioUrl()
+      setReturnToScene(primarySection)
+      setPrimarySection('document-studio')
+    }
+    window.addEventListener('ai-office-open-document-studio', handler)
+    return () => window.removeEventListener('ai-office-open-document-studio', handler)
+  }, [primarySection])
 
   useEffect(() => {
     const handler = () => {
@@ -786,25 +801,17 @@ function WriterWorkspaceRuntime({
 
   useEffect(() => {
     if (!isWebShim()) return
-
-    const handlePopState = () => {
-      setPrimarySection(resolvePrimarySectionFromLocation())
-    }
-
-    window.addEventListener('popstate', handlePopState)
-    return () => window.removeEventListener('popstate', handlePopState)
+    const sectionFromUrl = resolvePrimarySectionFromLocation()
+    setPrimarySection(sectionFromUrl)
+    setReturnToScene(sectionFromUrl)
   }, [])
 
-  // Navigate to AIOS section and optionally open a specific matter.
   useEffect(() => {
-    const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ matterId?: string }>).detail
-      navigateTo('aios')
-      if (detail?.matterId) setPendingAiosMatterId(detail.matterId)
-    }
-    window.addEventListener('open-aios-matter', handler)
-    return () => window.removeEventListener('open-aios-matter', handler)
-  }, [navigateTo])
+    if (!isWebShim()) return
+    const sectionFromUrl = resolvePrimarySectionFromLocation()
+    setPrimarySection(sectionFromUrl)
+    setReturnToScene(sectionFromUrl)
+  }, [location.pathname])
 
   useEffect(() => {
     const handler = (event: Event) => {
@@ -842,6 +849,15 @@ function WriterWorkspaceRuntime({
     return () => window.removeEventListener('open-sidebar-tab', handler)
   }, [navigateTo])
 
+  useEffect(() => {
+    const handler = () => {
+      setReturnToScene('work')
+      navigateTo('ai4science-battery')
+    }
+    window.addEventListener('open-ai4science-battery', handler)
+    return () => window.removeEventListener('open-ai4science-battery', handler)
+  }, [navigateTo])
+
   const latestOutputEntry = outputEntries[outputEntries.length - 1] || null
   const currentOutputMessage = generationStatus.message || statusMessage || runtimeStatus || '当前没有新的输出'
   const currentStepLabel = latestAiStep !== null ? `步骤 ${latestAiStep}` : generationStatus.phase === 'running' ? '进行中' : '未开始'
@@ -850,7 +866,12 @@ function WriterWorkspaceRuntime({
     if (!isWebShim()) return
     const route = WEB_SECTION_ROUTE_MAP[primarySection]
     if (!route) return
-    if (window.location.pathname === route) return
+    const pathname = window.location.pathname.replace(/\/+$/, '') || DEFAULT_APP_ROUTE
+    // 科研模块有独立子路由，勿把 /research/... 压回 /research
+    if (primarySection === 'research' && (pathname === '/research' || pathname.startsWith('/research/'))) {
+      return
+    }
+    if (pathname === route) return
     window.history.replaceState(null, '', `${route}${window.location.search}${window.location.hash}`)
   }, [primarySection])
 
@@ -875,14 +896,19 @@ function WriterWorkspaceRuntime({
               <HomeDashboard onNavigate={navigateTo} />
             </ScenarioArea>
           )}
-          {primarySection === 'aios' && (
-            <ScenarioArea>
-              <AIOSHome initialMatterId={pendingAiosMatterId} />
-            </ScenarioArea>
-          )}
           {primarySection === 'html-ppt' && (
             <ScenarioArea>
               <HtmlPptPage onBack={() => navigateTo('work')} />
+            </ScenarioArea>
+          )}
+          {primarySection === 'document-studio' && (
+            <ScenarioArea>
+              <DocumentStudioPage onBack={() => navigateTo('work')} />
+            </ScenarioArea>
+          )}
+          {primarySection === 'ai4science-battery' && (
+            <ScenarioArea>
+              <Ai4scienceBatteryPage />
             </ScenarioArea>
           )}
           {primarySection === 'work' && (
@@ -890,9 +916,9 @@ function WriterWorkspaceRuntime({
               <WorkWorkspace onGoToWorkspace={goToWorkspace} onNavigate={navigateTo} />
             </ScenarioArea>
           )}
-          {primarySection === 'research' && (
+          {isResearchPath && (
             <ScenarioArea>
-              <ResearchPage />
+              <ResearchWorkspaceRouter />
             </ScenarioArea>
           )}
           {primarySection === 'calendar' && (
@@ -925,7 +951,7 @@ function WriterWorkspaceRuntime({
           )}
           {primarySection === 'chat' && (
             <ScenarioArea>
-              <ChatWindow inline onClose={() => navigateTo(DEFAULT_PRIMARY_SECTION)} />
+              <ChatWindow inline onClose={() => navigateTo(defaultPrimarySection())} />
             </ScenarioArea>
           )}
           {primarySection === 'contacts' && (
@@ -954,7 +980,11 @@ function WriterWorkspaceRuntime({
               {mode === 'free' ? (
                 <WorkspaceActionBtn
                   type="button"
-                  onClick={() => window.dispatchEvent(new CustomEvent('workspace-new-document'))}
+                  onClick={() => {
+                    applyDocumentStudioUrl()
+                    setReturnToScene(primarySection)
+                    setPrimarySection('document-studio')
+                  }}
                 >
                   新建文稿
                 </WorkspaceActionBtn>
@@ -1262,6 +1292,7 @@ const StartupSplash = styled.div`
 `
 
 export default function App() {
+  const inRouter = useInRouterContext()
   const { state, logout, loginWithToken } = useInternalAccount()
   const initialHandoffId = useMemo(() => readHandoffIdFromLocation(), [])
   const [handoffBooting, setHandoffBooting] = useState(Boolean(initialHandoffId))
@@ -1323,5 +1354,9 @@ export default function App() {
     }
   }
 
-  return <WriterWorkspaceApp onLogout={logout} />
+  const shell = <WriterWorkspaceApp onLogout={logout} />
+  if (!inRouter) {
+    return <BrowserRouter>{shell}</BrowserRouter>
+  }
+  return shell
 }

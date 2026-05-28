@@ -1,0 +1,207 @@
+/* 材料科研 OS：大字 + 高对比 + 可滚动 */
+.research-os-root {
+  --donut-caption: 16px;
+  --donut-label: 18px;
+  --donut-body: 20px;
+  --donut-h2: 24px;
+  --donut-h1: 32px;
+  --donut-display: 56px;
+  --donut-hero: 80px;
+  --donut-blue: #2563eb;
+  --donut-blue-hover: #1d4ed8;
+  --donut-green: #059669;
+  --donut-panel: #ffffff;
+  --donut-panel-muted: #f1f5f9;
+  --donut-border: #cbd5e1;
+  --donut-text: #0f172a;
+  --donut-text-muted: #475569;
+  --donut-dark-bg: #0f172a;
+  --donut-dark-panel: #1e293b;
+  font-size: var(--donut-body);
+  line-height: 1.5;
+  color: var(--donut-text);
+}
+
+.research-os-root .donut-scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+.research-os-root .donut-text-caption {
+  font-size: var(--donut-caption);
+  color: var(--donut-text-muted);
+}
+
+.research-os-root .donut-text-label {
+  font-size: var(--donut-label);
+  font-weight: 600;
+  color: var(--donut-text);
+}
+
+.research-os-root .donut-text-body {
+  font-size: var(--donut-body);
+  color: var(--donut-text);
+}
+
+.research-os-root .donut-text-h2 {
+  font-size: var(--donut-h2);
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--donut-text);
+}
+
+.research-os-root .donut-text-h1 {
+  font-size: var(--donut-h1);
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--donut-text);
+}
+
+.research-os-root .donut-text-display {
+  font-size: var(--donut-display);
+  font-weight: 700;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  color: var(--donut-text);
+}
+
+.research-os-root .donut-text-hero {
+  font-size: var(--donut-hero);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+.research-os-root button,
+.research-os-root input,
+.research-os-root select,
+.research-os-root textarea {
+  font-size: var(--donut-label);
+  min-height: 44px;
+  color: var(--donut-text);
+}
+
+.research-os-root .donut-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 0 20px;
+  border-radius: 10px;
+  font-size: var(--donut-label);
+  font-weight: 700;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+}
+
+.research-os-root .donut-btn:active {
+  transform: scale(0.98);
+}
+
+.research-os-root .donut-btn-primary {
+  background: var(--donut-blue);
+  color: #ffffff;
+  border-color: #1e40af;
+}
+
+.research-os-root .donut-btn-primary:hover {
+  background: var(--donut-blue-hover);
+}
+
+.research-os-root .donut-btn-secondary {
+  background: #ecfdf5;
+  color: #047857;
+  border-color: #6ee7b7;
+}
+
+.research-os-root .donut-btn-ghost {
+  background: #ffffff;
+  border-color: var(--donut-border);
+  color: var(--donut-text);
+}
+
+.research-os-root .donut-btn-ghost:hover {
+  background: var(--donut-panel-muted);
+}
+
+.research-os-root .donut-btn-dark {
+  background: #334155;
+  color: #f8fafc;
+  border-color: #475569;
+}
+
+.research-os-root .donut-btn-dark:hover {
+  background: #475569;
+}
+
+.research-os-root .donut-panel {
+  background: var(--donut-panel);
+  border: 1px solid var(--donut-border);
+  border-radius: 12px;
+}
+
+.research-os-root .donut-panel-dark {
+  background: var(--donut-dark-panel);
+  border: 1px solid #475569;
+  color: #f1f5f9;
+}
+
+.research-os-root .donut-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: var(--donut-caption);
+  font-weight: 700;
+}
+
+.research-os-root .donut-pill-ok {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.research-os-root .donut-pill-analog {
+  background: #ccfbf1;
+  color: #0f766e;
+}
+
+.research-os-root .donut-pill-digital {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.research-os-root .donut-pill-pwm {
+  background: #fce7f3;
+  color: #9d174d;
+}
+
+@keyframes donut-layer-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.research-os-root .donut-animate-in {
+  animation: donut-layer-in 0.45s ease-out;
+}
+
+@keyframes donut-pulse-ring {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.45);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(37, 99, 235, 0);
+  }
+}
+
+.research-os-root .donut-selected-ring {
+  animation: donut-pulse-ring 2s ease-in-out infinite;
+}

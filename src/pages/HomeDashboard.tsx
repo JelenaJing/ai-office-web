@@ -1,130 +1,30 @@
-import styled from 'styled-components'
 import React from 'react'
 import { Briefcase, BookOpen, Heart, RefreshCw, Brain } from 'lucide-react'
+import styled from 'styled-components'
 import { useWorkspace } from '../contexts/WorkspaceContext'
 import type { PrimarySection } from '../components/nav/PrimaryNav'
 import { PRODUCT_FEATURES } from '../config/productFeatures'
+import {
+  ScenarioEntryCard,
+  ScenarioEntryGrid,
+  ScenarioEntryHeader,
+  ScenarioEntryMain,
+  ScenarioEntryPage,
+  ScenarioEntrySubtitle,
+  ScenarioEntryTitle,
+  type EntryCardTheme,
+} from '../components/scene/ScenarioEntryCards'
 
 interface HomeDashboardProps {
   onNavigate: (section: PrimarySection) => void
 }
-
-const Page = styled.div`
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow-y: auto;
-  background: #f4f7fc;
-  padding: 48px 64px;
-`
-
-const Header = styled.div`
-  margin-bottom: 44px;
-  text-align: center;
-`
-
-const Title = styled.h1`
-  margin: 0 0 10px;
-  font-size: 36px;
-  font-weight: 800;
-  color: #1a2f47;
-`
-
-const Subtitle = styled.p`
-  margin: 0;
-  font-size: 16px;
-  color: #6b7f94;
-`
-
-const ScenarioGrid = styled.div`
-  display: grid;
-  grid-template-columns: repeat(4, minmax(280px, 1fr));
-  gap: 32px;
-  width: 100%;
-
-  @media (max-width: 1320px) {
-    grid-template-columns: repeat(2, minmax(320px, 1fr));
-  }
-
-  @media (max-width: 1000px) {
-    grid-template-columns: repeat(2, 1fr);
-  }
-
-  @media (max-width: 680px) {
-    grid-template-columns: 1fr;
-  }
-`
-
-const ScenarioCard = styled.button<{ $accent: string; $accentBg: string }>`
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  padding: 36px 32px 28px;
-  min-height: clamp(260px, 30vh, 360px);
-  border: 1.5px solid ${p => p.$accentBg};
-  border-radius: 18px;
-  background: #ffffff;
-  cursor: pointer;
-  text-align: left;
-  transition: box-shadow 0.15s, transform 0.15s, border-color 0.15s;
-
-  &:hover {
-    border-color: ${p => p.$accent};
-    box-shadow: 0 8px 36px rgba(0,0,0,0.11);
-    transform: translateY(-4px);
-  }
-`
-
-const CardIconWrap = styled.div<{ $bg: string }>`
-  width: 64px;
-  height: 64px;
-  border-radius: 16px;
-  background: ${p => p.$bg};
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 20px;
-  flex-shrink: 0;
-`
-
-const CardTitle = styled.div`
-  font-size: 20px;
-  font-weight: 800;
-  color: #1a2f47;
-  margin-bottom: 10px;
-`
-
-const CardDesc = styled.div`
-  font-size: 14px;
-  color: #6b7f94;
-  line-height: 1.6;
-  margin-bottom: 20px;
-  flex: 1;
-`
-
-const ChipRow = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-`
-
-const Chip = styled.span<{ $accent: string; $accentBg: string }>`
-  display: inline-block;
-  padding: 5px 14px;
-  border-radius: 999px;
-  background: ${p => p.$accentBg};
-  color: ${p => p.$accent};
-  font-size: var(--font-size-xs);
-  font-weight: 600;
-`
 
 const WorkspaceBar = styled.div`
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 10px;
-  margin-top: 36px;
+  margin-top: 32px;
   padding: 14px 24px;
   background: #ffffff;
   border: 1px solid #dde6f0;
@@ -168,59 +68,44 @@ const SwitchBtn = styled.button`
 interface HomeCardDef {
   featureKey: keyof Pick<typeof PRODUCT_FEATURES, 'work' | 'research' | 'learning' | 'life'>
   section: PrimarySection
-  accent: string
-  accentBg: string
-  iconBg: string
+  theme: EntryCardTheme
   icon: React.ReactElement
   title: string
   desc: string
-  chips: string[]
 }
 
 const HOME_CARD_DEFS: HomeCardDef[] = [
   {
     featureKey: 'work',
     section: 'work',
-    accent: '#1f6fd6',
-    accentBg: '#e6f0fc',
-    iconBg: '#deeeff',
+    theme: { accent: '#1f6fd6', accentBg: '#e6f0fc', iconBg: '#deeeff' },
     icon: <Briefcase size={30} color="#1f6fd6" />,
     title: '行政',
     desc: '文稿、PPT、邮件、日程与行政协同工作台',
-    chips: ['文稿', 'PPT', '邮件', '日程'],
   },
   {
     featureKey: 'research',
     section: 'research',
-    accent: '#6b46c1',
-    accentBg: '#efe8ff',
-    iconBg: '#e8ddff',
+    theme: { accent: '#6b46c1', accentBg: '#efe8ff', iconBg: '#e8ddff' },
     icon: <Brain size={30} color="#6b46c1" />,
     title: '科研',
     desc: '从学科订阅到实验规划、数据分析与写作的科研工作台',
-    chips: ['订阅', 'Idea Feed', '实验规划', '写作'],
   },
   {
     featureKey: 'learning',
     section: 'study',
-    accent: '#1a7a4a',
-    accentBg: '#e4f5ec',
-    iconBg: '#d5f0e2',
+    theme: { accent: '#1a7a4a', accentBg: '#e4f5ec', iconBg: '#d5f0e2' },
     icon: <BookOpen size={30} color="#1a7a4a" />,
     title: '学习',
     desc: '作业解析、课程学习与科学研究',
-    chips: ['作业解析', 'AI课堂', '论文写作', '数据图表'],
   },
   {
     featureKey: 'life',
     section: 'life',
-    accent: '#c05c15',
-    accentBg: '#fdf0e6',
-    iconBg: '#fce5cf',
+    theme: { accent: '#c05c15', accentBg: '#fdf0e6', iconBg: '#fce5cf' },
     icon: <Heart size={30} color="#c05c15" />,
     title: '生活',
     desc: 'AI 论坛、轻量写作、图片创作与科学资讯',
-    chips: ['AI论坛', '轻量写作', '图片创作', '科学资讯'],
   },
 ]
 
@@ -230,46 +115,41 @@ export default function HomeDashboard({ onNavigate }: HomeDashboardProps) {
   const visibleCards = HOME_CARD_DEFS.filter(card => PRODUCT_FEATURES[card.featureKey])
 
   return (
-    <Page>
-      <Header>
-        <Title>CUHK-Shenzhen（AI）</Title>
-        <Subtitle>CUHK-Shenzhen (AI) 是一个覆盖香港中文大学（深圳）行政、科研及教学等主要业务的 AI 平台。</Subtitle>
-      </Header>
+    <ScenarioEntryPage>
+      <ScenarioEntryHeader>
+        <ScenarioEntryTitle>CUHK-Shenzhen（AI）</ScenarioEntryTitle>
+        <ScenarioEntrySubtitle>
+          CUHK-Shenzhen (AI) 是一个覆盖香港中文大学（深圳）行政、科研及教学等主要业务的 AI 平台。
+        </ScenarioEntrySubtitle>
+      </ScenarioEntryHeader>
 
-      <ScenarioGrid>
-        {visibleCards.map(card => (
-          <ScenarioCard
-            key={card.featureKey}
-            $accent={card.accent}
-            $accentBg={card.accentBg}
-            onClick={() => onNavigate(card.section)}
-          >
-            <CardIconWrap $bg={card.iconBg}>
-              {card.icon}
-            </CardIconWrap>
-            <CardTitle>{card.title}</CardTitle>
-            <CardDesc>{card.desc}</CardDesc>
-            <ChipRow>
-              {card.chips.map(c => (
-                <Chip key={c} $accent={card.accent} $accentBg={card.accentBg}>{c}</Chip>
-              ))}
-            </ChipRow>
-          </ScenarioCard>
-        ))}
-      </ScenarioGrid>
+      <ScenarioEntryMain>
+        <ScenarioEntryGrid>
+          {visibleCards.map(card => (
+            <ScenarioEntryCard
+              key={card.featureKey}
+              theme={card.theme}
+              icon={card.icon}
+              title={card.title}
+              description={card.desc}
+              onClick={() => onNavigate(card.section)}
+            />
+          ))}
+        </ScenarioEntryGrid>
 
-      {activeWorkspaceName && (
-        <WorkspaceBar>
-          <WorkspaceLabel>当前工作区：</WorkspaceLabel>
-          <WorkspaceName title={activeWorkspacePath ?? undefined}>
-            {activeWorkspaceName}
-          </WorkspaceName>
-          <SwitchBtn onClick={closeWorkspace}>
-            <RefreshCw size={11} />
-            切换工作区
-          </SwitchBtn>
-        </WorkspaceBar>
-      )}
-    </Page>
+        {activeWorkspaceName && (
+          <WorkspaceBar>
+            <WorkspaceLabel>当前工作区：</WorkspaceLabel>
+            <WorkspaceName title={activeWorkspacePath ?? undefined}>
+              {activeWorkspaceName}
+            </WorkspaceName>
+            <SwitchBtn onClick={closeWorkspace}>
+              <RefreshCw size={11} />
+              切换工作区
+            </SwitchBtn>
+          </WorkspaceBar>
+        )}
+      </ScenarioEntryMain>
+    </ScenarioEntryPage>
   )
 }

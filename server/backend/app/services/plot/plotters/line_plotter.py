@@ -85,7 +85,7 @@ class LinePlotter(BasePlotter):
         ylabel: Optional[str] = None,
         hue: Optional[str] = None,
         style: Optional[str] = None,
-        markers: bool = True,
+        markers: bool = False,
         multiple_series: Optional[List[Dict[str, Any]]] = None,
         stack_spectra: bool = False,
         legend_loc: str = "upper right",
@@ -132,7 +132,8 @@ class LinePlotter(BasePlotter):
                         x_plot,
                         y_plot,
                         marker="o",
-                        markersize=4,
+                        markersize=2.5,
+                        markevery=max(1, len(x_plot) // 40),
                         linestyle="-",
                         label=str(series_label),
                         color=colors[idx],
@@ -190,7 +191,8 @@ class LinePlotter(BasePlotter):
                             xvals,
                             yvals,
                             marker="o",
-                            markersize=4,
+                            markersize=2.5,
+                            markevery=max(1, len(xvals) // 40),
                             linestyle="-",
                             label=lbl,
                             color=colors[idx],
@@ -208,6 +210,7 @@ class LinePlotter(BasePlotter):
                             clip_on=True,
                         )
             else:
+                n_pts = len(df)
                 sns.lineplot(
                     data=df,
                     x=x,
@@ -215,6 +218,9 @@ class LinePlotter(BasePlotter):
                     hue=hue,
                     style=style,
                     marker="o" if markers else None,
+                    markersize=2.5 if markers else None,
+                    markevery=max(1, n_pts // 40) if markers else None,
+                    linewidth=2,
                     ax=ax,
                     **kwargs,
                 )

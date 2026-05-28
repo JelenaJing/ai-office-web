@@ -5,6 +5,7 @@ import { buildDocumentOutline, getNearbySections, normalizeDocumentDraft } from 
 import { saveDocumentDraftDocxArtifact } from './documentArtifactService'
 import { buildKnowledgeRefPromptBlock } from './documentKnowledgeRefs'
 import { getDocumentTemplateDefinition } from './documentTemplateCatalog'
+import { buildStructuredWritingPromptBlock } from './documentTaskTypeLabels'
 import type {
   DocumentKnowledgeRef,
   DocumentLanguage,
@@ -18,21 +19,26 @@ function buildBuiltinPrompt(input: {
   language: DocumentLanguage
   templateLabel?: string
   outline: string[]
+  tone?: string
+  taskType?: string
   knowledgeRefs: DocumentKnowledgeRef[]
 }): string {
-  const languageBlock = input.language === 'en-US'
-    ? 'language: en-US\nstyle: formal_office_english'
-    : 'language: zh-CN\nstyle: formal_chinese_office'
-  const outlineBlock = input.outline.length > 0
-    ? `推荐结构：\n${input.outline.map((item, index) => `${index + 1}. ${item}`).join('\n')}`
-    : ''
+  const structured = buildStructuredWritingPromptBlock({
+    taskType: input.taskType,
+    outline: input.outline,
+    tone: input.tone,
+    language: input.language,
+  })
+  const styleBlock = input.language === 'en-US'
+    ? 'style: formal_office_english'
+    : 'style: formal_chinese_office'
   return [
-    languageBlock,
+    structured,
+    styleBlock,
     input.templateLabel ? `模板：${input.templateLabel}` : '',
-    outlineBlock,
     buildKnowledgeRefPromptBlock(input.knowledgeRefs),
     '必须使用正式办公文稿风格；若没有充分依据，直接写“需要人工确认依据”。',
-    input.prompt.trim(),
+    `用户写作要求：${input.prompt.trim()}`,
   ].filter(Boolean).join('\n\n')
 }
 
@@ -45,8 +51,14 @@ export async function runBuiltinDocumentEngine(input: {
   templateId?: string
   documentType: DocumentType
   knowledgeRefs: DocumentKnowledgeRef[]
+  preferredOutline?: string[]
+  tone?: string
+  taskType?: string
 }): Promise<{ record: DocumentRecord; result: DocumentTaskResult }> {
   const template = getDocumentTemplateDefinition(input.templateId)
+  const outline = input.preferredOutline?.length
+    ? input.preferredOutline
+    : (template?.outline || [])
   const draftTitle = input.title.trim() || template?.defaultTitle || '办公文稿'
   const doc = await generateDocumentContentDetailed({
     title: draftTitle,
@@ -54,7 +66,9 @@ export async function runBuiltinDocumentEngine(input: {
       prompt: input.prompt,
       language: input.language,
       templateLabel: template?.label,
-      outline: template?.outline || [],
+      outline,
+      tone: input.tone,
+      taskType: input.taskType,
       knowledgeRefs: input.knowledgeRefs,
     }),
   })
@@ -73,7 +87,7 @@ export async function runBuiltinDocumentEngine(input: {
     engine: 'builtin',
     templateId: template?.id,
     knowledgeRefs: input.knowledgeRefs,
-    preferredOutline: template?.outline,
+    preferredOutline: outline,
   })
   draft.id = `document-${randomUUID()}`
 

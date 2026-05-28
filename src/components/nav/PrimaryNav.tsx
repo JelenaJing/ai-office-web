@@ -2,9 +2,10 @@ import styled from 'styled-components'
 import React from 'react'
 import { Briefcase, BookOpen, Heart, FolderOpen, Settings, User, Home, MessageCircle, Puzzle, ClipboardList, Brain } from 'lucide-react'
 import { PRODUCT_FEATURES } from '../../config/productFeatures'
+import { isPrimaryNavItemActive } from '../../app/productRoutes'
 
 // 'workspace' is kept for internal use (tool launch state), but is not a nav item
-export type PrimarySection = 'home' | 'work' | 'research' | 'study' | 'life' | 'resource' | 'chat' | 'contacts' | 'workspace' | 'settings' | 'account' | 'skill-center' | 'calendar' | 'aios' | 'html-ppt'
+export type PrimarySection = 'home' | 'work' | 'research' | 'study' | 'life' | 'resource' | 'chat' | 'contacts' | 'workspace' | 'settings' | 'account' | 'skill-center' | 'calendar' | 'aios' | 'html-ppt' | 'document-studio' | 'ai4science-battery'
 
 interface PrimaryNavProps {
   section: PrimarySection
@@ -103,24 +104,12 @@ const NavLabel = styled.span`
   letter-spacing: 0.01em;
 `
 
-const AppTitle = styled.div`
-  padding: 14px 0 10px;
-  text-align: center;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: rgba(180, 200, 225, 0.5);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  flex-shrink: 0;
-`
-
 export default function PrimaryNav({ section, onNavigate, username }: PrimaryNavProps) {
   return (
     <NavShell>
-      <AppTitle>AI·OFFICE</AppTitle>
       <NavTop>
         {ENABLED_TOP_NAV_ITEMS.map(({ section: s, label, title, icon: Icon }) => (
-          <NavItem key={s} $active={section === s} onClick={() => onNavigate(s)} title={title}>
+          <NavItem key={s} $active={isPrimaryNavItemActive(s, section)} onClick={() => onNavigate(s)} title={title}>
             <Icon size={22} />
             <NavLabel>{label}</NavLabel>
           </NavItem>
